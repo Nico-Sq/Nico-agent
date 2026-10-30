@@ -166,3 +166,30 @@ class InterviewApiTests(unittest.TestCase):
         messages = self.client.get(f"/api/chat/sessions/{chat_id}").json()["messages"]
         self.assertEqual([item["role"] for item in messages], ["user", "user", "assistant"])
         self.assertEqual([item["content"] for item in messages[:2]], ["先讨论岗位", "补充：重点是后端开发"])
+
+    def test_interview_answer_correction_keeps_history_and_latest_feedback(self):
+        interview_id = self.client.post("/api/interview/sessions", json={"goal": "开发"}).json()["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        first = self.client.post(f"/api/interview/sessions/{interview_id}/answers/claim", json={
+            "text": "最初回答", "question_number": 1,
+        }).json()
+        corrected = self.client.post(f"/api/interview/sessions/{interview_id}/answers/claim", json={
+            "text": "更正后的回答", "question_number": 1,
+        }).json()
+        old = self.client.post(f"/api/interview/sessions/{interview_id}/answers/run", json={
+            "version": first["version"],
+        }).json()
+        self.assertTrue(old["interrupted"])
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/answers/run", json={
+            "version": corrected["version"],
+        }).status_code, 200)
+        stale = self.client.post(f"/api/interview/sessions/{interview_id}/answers/claim", json={
+            "text": "迟到的第 1 题答案", "question_number": 1,
+        })
+        self.assertEqual(stale.status_code, 409)
+        report = self.client.get(f"/api/interview/sessions/{interview_id}/report").json()
+        self.assertEqual(report["items"][0]["answer"], "更正后的回答")
+        self.assertEqual(report["items"][0]["evidence"], ["更正后的回答"])
+        messages = self.client.get(f"/api/interview/sessions/{interview_id}").json()["messages"]
+        self.assertIn("最初回答", [item["content"] for item in messages])
+        self.assertIn("更正后的回答", [item["content"] for item in messages])

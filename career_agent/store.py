@@ -367,7 +367,8 @@ class Store:
                 (session_id, kind, json.dumps(detail, ensure_ascii=False), now()),
             )
 
-    def claim_run(self, session_id: str, kind: str, expected: str, user_text: str | None = None) -> dict | None:
+    def claim_run(self, session_id: str, kind: str, expected: str, user_text: str | None = None,
+                  expected_question: int | None = None) -> dict | None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if kind == "chat" and user_text is not None:
@@ -375,6 +376,16 @@ class Store:
                     "UPDATE sessions SET status = 'running', version = version + 1 "
                     "WHERE id = ? AND kind = 'chat' AND status IN ('active', 'running')",
                     (session_id,),
+                ).rowcount
+            elif kind == "interview" and user_text is not None and expected_question is not None:
+                changed = db.execute(
+                    """UPDATE sessions SET status = 'running', version = version + 1
+                    WHERE id = ? AND kind = 'interview' AND question_count = ?
+                      AND (status = 'awaiting_answer' OR
+                           (status = 'running' AND EXISTS (
+                               SELECT 1 FROM interview_items
+                               WHERE session_id = ? AND number = ? AND answer IS NOT NULL)))""",
+                    (session_id, expected_question, session_id, expected_question),
                 ).rowcount
             else:
                 changed = db.execute(

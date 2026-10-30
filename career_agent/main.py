@@ -53,6 +53,10 @@ class ChatRunInput(BaseModel):
     version: int = Field(ge=1)
 
 
+class InterviewAnswerInput(TextInput):
+    question_number: int = Field(ge=1)
+
+
 class PracticeInput(BaseModel):
     question_number: int = Field(ge=1)
 
@@ -243,6 +247,24 @@ async def answer_interview(session_id: str, body: TextInput):
     session = store.claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能提交回答")
+    return await complete_run(session)
+
+
+@app.post("/api/interview/sessions/{session_id}/answers/claim")
+def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
+    require_session(session_id, "interview")
+    session = store.claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text),
+                              expected_question=body.question_number)
+    if session is None:
+        raise HTTPException(409, "当前题目已变化，无法提交回答")
+    return session
+
+
+@app.post("/api/interview/sessions/{session_id}/answers/run")
+async def run_interview_answer(session_id: str, body: ChatRunInput):
+    session = require_session(session_id, "interview")
+    if session["status"] != "running" or session["version"] != body.version:
+        return {"interrupted": True, "session": session}
     return await complete_run(session)
 
 

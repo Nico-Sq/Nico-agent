@@ -1,4 +1,4 @@
-const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0 };
+const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0 };
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
@@ -54,10 +54,14 @@ function renderMessages(kind, messages) {
 }
 
 function renderInterviewState(session) {
+  state.interviewQuestion = session?.question_count || 0;
   $("copy-interview-id").hidden = !session;
+  $("pause-running").hidden = !session || session.status !== "running" || session.question_count > 0;
   $("preparation").hidden = Boolean(session);
   $("interview-setup").hidden = Boolean(session);
-  $("answer-form").hidden = !session || session.status !== "awaiting_answer";
+  $("answer-form").hidden = !session || !(session.status === "awaiting_answer" ||
+    (session.status === "running" && session.question_count > 0));
+  $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
   $("resume-actions").hidden = !session || session.status !== "paused";
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]}` : "创建一场面试";
@@ -206,7 +210,11 @@ function startPractice(sourceId, questionNumber) {
     });
     state.ids.interview = session.id;
     localStorage.setItem("interviewSession", session.id);
-    try { await runRequest("interview", session.id, `/interview/sessions/${session.id}/start`); }
+    try {
+      const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
+      await selectSession(session.id);
+      await run;
+    }
     finally { if (state.kind === "interview" && state.ids.interview === session.id) await selectSession(session.id); }
   });
 }
@@ -353,29 +361,56 @@ $("interview-setup").onsubmit = (event) => {
     const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, material_ids, claim_ids }) });
     state.ids.interview = session.id;
     localStorage.setItem("interviewSession", session.id);
-    try { await api(`/interview/sessions/${session.id}/start`, { method: "POST" }); }
+    try {
+      const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
+      await selectSession(session.id);
+      await run;
+    }
     finally { if (state.kind === "interview" && state.ids.interview === session.id) await selectSession(session.id); }
   });
 };
-$("answer-form").onsubmit = (event) => {
+$("answer-form").onsubmit = async (event) => {
   event.preventDefault();
-  action("interview", async () => {
-    const text = $("answer-text").value.trim();
-    if (!text) return;
-    $("answer-text").value = "";
-    const id = state.ids.interview;
-    try { await runRequest("interview", id, `/interview/sessions/${id}/answers`, { text }); }
-    finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
-  });
+  const text = $("answer-text").value.trim();
+  if (!text || state.busy.interview) return;
+  const id = state.ids.interview;
+  const question_number = state.interviewQuestion;
+  setBusy("interview", true);
+  let claimed;
+  try {
+    claimed = await api(`/interview/sessions/${id}/answers/claim`, {
+      method: "POST", body: JSON.stringify({ text, question_number }),
+    });
+  } catch (error) { notice(error.message); return; }
+  finally { setBusy("interview", false); }
+  $("answer-text").value = "";
+  if (state.pending.interview?.id === id) state.pending.interview.controller.abort();
+  const seq = ++state.interviewSeq;
+  let errorMessage = "";
+  try {
+    const run = runRequest("interview", id, `/interview/sessions/${id}/answers/run`, { version: claimed.version });
+    if (state.kind === "interview" && state.ids.interview === id) await selectSession(id);
+    notice("正在评估本题；需要更正时可再次提交回答。");
+    await run;
+  } catch (error) {
+    if (error.name !== "AbortError") errorMessage = error.message;
+  } finally {
+    if (seq === state.interviewSeq && state.kind === "interview" && state.ids.interview === id) {
+      await selectSession(id);
+      if (errorMessage) notice(errorMessage);
+    }
+  }
 };
-$("pause-button").onclick = async () => {
+async function pauseInterview() {
   try {
     await api(`/interview/sessions/${state.ids.interview}/pause`, { method: "POST" });
     if (state.pending.interview?.id === state.ids.interview) state.pending.interview.controller.abort();
     await selectSession(state.ids.interview);
   }
   catch (error) { notice(error.message); }
-};
+}
+$("pause-button").onclick = pauseInterview;
+$("pause-running").onclick = pauseInterview;
 $("resume-button").onclick = () => action("interview", async () => {
   const id = state.ids.interview;
   try { await runRequest("interview", id, `/interview/sessions/${id}/resume`); }
