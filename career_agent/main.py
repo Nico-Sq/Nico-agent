@@ -1,4 +1,7 @@
+import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
@@ -9,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .auth import AuthStore, LoginRateLimited
+from .auto_backup import backup_all
 from .extract import MAX_FILE_BYTES, extract_text
 from .provider import ModelError, Provider
 from .runtime import AgentRuntime
@@ -22,7 +26,32 @@ auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
 store = Store(DATA_DIR / "career_agent.sqlite3")
 provider = Provider()
 runtime = AgentRuntime(store, provider)
-app = FastAPI(title="双线求职 Agent")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async def backup_once():
+        try:
+            await asyncio.to_thread(backup_all, DATA_DIR)
+        except Exception:
+            logging.exception("本地业务数据自动备份失败")
+
+    async def backup_loop():
+        while True:
+            await asyncio.sleep(3600)
+            await backup_once()
+
+    await backup_once()
+    task = asyncio.create_task(backup_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="双线求职 Agent", lifespan=lifespan)
 request_store: ContextVar[Store | None] = ContextVar("request_store", default=None)
 request_runtime: ContextVar[AgentRuntime | None] = ContextVar("request_runtime", default=None)
 
@@ -311,7 +340,7 @@ def export_session(kind: str, session_id: str):
                           f"原反馈：{source['feedback'] or '无'}", ""])
         for item in report["items"]:
             lines.extend([f"## 第 {item['number']} 题", "", item["question"], "",
-                          "### 回答", "", item["answer"] or "未回答", "",
+                          "### 回答", "", "已跳过" if item["skipped"] else item["answer"] or "未回答", "",
                           "### 反馈", "", item["feedback"] or "尚无反馈", ""])
             if item["evidence"]:
                 lines.extend(["回答依据：" + "；".join(item["evidence"]), ""])
@@ -320,7 +349,7 @@ def export_session(kind: str, session_id: str):
         lines.extend(["## 完整对话", ""])
         for message in active_store().messages(session_id, kind):
             lines.extend([f"### {'用户' if message['role'] == 'user' else '面试官'}", "",
-                          message["content"], ""])
+                          "已跳过本题" if message["content"] == "[SKIPPED_QUESTION]" else message["content"], ""])
     return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
@@ -440,6 +469,15 @@ async def run_interview_answer(session_id: str, body: ChatRunInput):
     session = require_session(session_id, "interview")
     if session["status"] != "running" or session["version"] != body.version:
         return {"interrupted": True, "session": session}
+    return await complete_run(session)
+
+
+@app.post("/api/interview/sessions/{session_id}/skip")
+async def skip_interview_question(session_id: str, body: PracticeInput):
+    require_session(session_id, "interview")
+    session = active_store().skip_interview_question(session_id, body.question_number)
+    if session is None:
+        raise HTTPException(409, "当前题目已变化，无法跳过")
     return await complete_run(session)
 
 

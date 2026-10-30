@@ -75,6 +75,7 @@ class Store:
                     question TEXT NOT NULL,
                     answer TEXT,
                     feedback TEXT,
+                    skipped INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (session_id, number)
                 );
                 CREATE TABLE IF NOT EXISTS interview_evidence (
@@ -103,6 +104,9 @@ class Store:
                 db.execute("ALTER TABLE sessions ADD COLUMN run_started INTEGER NOT NULL DEFAULT 0")
             if "chat_memory" not in session_columns:
                 db.execute("ALTER TABLE sessions ADD COLUMN chat_memory TEXT NOT NULL DEFAULT ''")
+            item_columns = {row["name"] for row in db.execute("PRAGMA table_info(interview_items)")}
+            if "skipped" not in item_columns:
+                db.execute("ALTER TABLE interview_items ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connect(self):
@@ -290,7 +294,7 @@ class Store:
             return None
         with self.connect() as db:
             rows = db.execute(
-                "SELECT number, question, answer, feedback FROM interview_items "
+                "SELECT number, question, answer, feedback, skipped FROM interview_items "
                 "WHERE session_id = ? ORDER BY number", (session_id,)
             ).fetchall()
             evidence = db.execute(
@@ -458,6 +462,30 @@ class Store:
         session = dict(row)
         session.pop("run_started")
         return session
+
+    def skip_interview_question(self, session_id: str, question_number: int) -> dict | None:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE sessions SET status = 'running', version = version + 1, run_started = 0 "
+                "WHERE id = ? AND kind = 'interview' AND status = 'awaiting_answer' AND question_count = ?",
+                (session_id, question_number),
+            ).rowcount
+            if not changed:
+                return None
+            db.execute(
+                "UPDATE interview_items SET skipped = 1 WHERE session_id = ? AND number = ?",
+                (session_id, question_number),
+            )
+            db.execute(
+                "INSERT INTO messages(session_id, role, content, created_at) VALUES (?, 'user', '[SKIPPED_QUESTION]', ?)",
+                (session_id, now()),
+            )
+            db.execute(
+                "INSERT INTO events(session_id, kind, detail, created_at) VALUES (?, 'skip', ?, ?)",
+                (session_id, json.dumps({"question_number": question_number}), now()),
+            )
+        return self.get(session_id, "interview")
 
     def begin_run(self, session_id: str, version: int) -> bool:
         """原子认领一次模型运行，阻止同一版本的重复请求再次计费。"""

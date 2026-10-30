@@ -97,6 +97,10 @@ class CoreTests(unittest.TestCase):
                 CREATE TABLE claims (
                     id TEXT PRIMARY KEY, material_id TEXT, text TEXT, status TEXT, created_at TEXT
                 );
+                CREATE TABLE interview_items (
+                    session_id TEXT, number INTEGER, question TEXT, answer TEXT, feedback TEXT,
+                    PRIMARY KEY (session_id, number)
+                );
                 INSERT INTO sessions VALUES ('legacy-chat', 'chat', 'active', '', 0, 0, '2026-01-01');
                 INSERT INTO materials VALUES ('legacy-material', 'project', '旧材料', '原始内容', '2026-01-01');
                 INSERT INTO claims VALUES ('legacy-claim', 'legacy-material', '原始经历', 'confirmed', '2026-01-01');
@@ -106,6 +110,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "")
         upgraded.set_chat_memory("legacy-chat", "迁移后备注")
         self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "迁移后备注")
+        with closing(sqlite3.connect(legacy_path)) as db:
+            self.assertIn("skipped", [row[1] for row in db.execute("PRAGMA table_info(interview_items)")])
         self.assertEqual(upgraded.list_materials()[0]["content"], "原始内容")
         self.assertEqual(upgraded.list_claims()[0]["text"], "原始经历")
         self.assertTrue(upgraded.revoke_material("legacy-material"))
@@ -123,6 +129,24 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("CHAT_MEMORY_SECRET", context)
         self.assertNotIn("私密聊天回复", context)
         self.assertIn("后端工程师", context)
+
+    def test_skipped_question_rejects_invented_feedback(self):
+        class InventingProvider:
+            async def complete(self, messages, tools):
+                return {"content": json.dumps({
+                    "feedback": "这题回答很好", "question": "", "finished": True,
+                    "evidence": ["跳过本题"], "summary": "演示总结",
+                }, ensure_ascii=False)}
+
+        interview = self.store.create("interview", "后端工程师", max_questions=1)
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        skipped = self.store.skip_interview_question(interview["id"], 1)
+        with self.assertRaisesRegex(ValueError, "跳过的题目"):
+            run_demo(AgentRuntime(self.store, InventingProvider()).run(skipped))
+        report = self.store.interview_report(interview["id"])
+        self.assertEqual(report["status"], "paused")
+        self.assertIsNone(report["items"][0]["feedback"])
 
     def test_chat_memory_survives_context_window(self):
         chat = self.store.create("chat")

@@ -54,7 +54,7 @@ function renderMessages(kind, messages) {
     const role = document.createElement("span");
     role.className = "role";
     role.textContent = message.role === "user" ? "你" : kind === "chat" ? "聊天助手" : "面试官";
-    item.append(role, document.createTextNode(message.content));
+    item.append(role, document.createTextNode(message.content === "[SKIPPED_QUESTION]" ? "已跳过本题" : message.content));
     if (kind === "chat" && message.role === "assistant") {
       const save = document.createElement("button");
       save.type = "button";
@@ -87,6 +87,7 @@ function renderInterviewState(session) {
   $("answer-form").hidden = !session || !(session.status === "awaiting_answer" ||
     (session.status === "running" && session.question_count > 0));
   $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
+  $("skip-question").hidden = !session || session.status !== "awaiting_answer";
   $("resume-actions").hidden = !session || session.status !== "paused";
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成", cancelled: "已结束" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
@@ -221,7 +222,7 @@ function renderReport(report) {
   for (const item of report.items) {
     const row = document.createElement("div");
     row.className = "report-item";
-    for (const [label, value] of [[`第 ${item.number} 题`, item.question], ["你的回答", item.answer], ["反馈", item.feedback]]) {
+    for (const [label, value] of [[`第 ${item.number} 题`, item.question], ["你的回答", item.skipped ? "已跳过" : item.answer], ["反馈", item.feedback]]) {
       const paragraph = document.createElement("p");
       paragraph.textContent = `${label}：${value || "无"}`;
       row.append(paragraph);
@@ -543,6 +544,15 @@ async function pauseInterview() {
 }
 $("pause-button").onclick = pauseInterview;
 $("pause-running").onclick = pauseInterview;
+$("skip-question").onclick = () => action("interview", async () => {
+  const id = state.ids.interview;
+  const question_number = state.interviewQuestion;
+  try {
+    const run = runRequest("interview", id, `/interview/sessions/${id}/skip`, { question_number });
+    await selectSession(id);
+    await run;
+  } finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
+});
 $("cancel-interview").onclick = async () => {
   const id = state.ids.interview;
   if (!id || !window.confirm("结束本轮面试？已保存的回答和反馈会保留。")) return;

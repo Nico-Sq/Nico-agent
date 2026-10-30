@@ -284,6 +284,56 @@ class InterviewApiTests(unittest.TestCase):
         }).json()
         self.assertEqual(practice["max_questions"], 1)
 
+    def test_interview_skip_records_unanswered_question_and_continues(self):
+        interview_id = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "max_questions": 2,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/skip", json={
+            "question_number": 2,
+        }).status_code, 409)
+        skipped = self.client.post(f"/api/interview/sessions/{interview_id}/skip", json={
+            "question_number": 1,
+        })
+        self.assertEqual(skipped.status_code, 200, skipped.text)
+        self.assertEqual(skipped.json()["session"]["question_count"], 2)
+        self.assertEqual(skipped.json()["session"]["status"], "awaiting_answer")
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/skip", json={
+            "question_number": 1,
+        }).status_code, 409)
+        self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+            "text": "我负责缓存策略，并记录了命中率。",
+        })
+        report = self.client.get(f"/api/interview/sessions/{interview_id}/report").json()
+        self.assertEqual(report["status"], "finished")
+        self.assertEqual(len(report["items"]), 2)
+        self.assertEqual(report["items"][0]["skipped"], 1)
+        self.assertIsNone(report["items"][0]["answer"])
+        self.assertIsNone(report["items"][0]["feedback"])
+        self.assertEqual(report["items"][0]["evidence"], [])
+        self.assertEqual(report["items"][1]["skipped"], 0)
+        self.assertTrue(report["items"][1]["feedback"])
+        view = self.client.get(f"/api/interview/sessions/{interview_id}").json()
+        self.assertTrue(any(event["kind"] == "skip" for event in view["events"]))
+        self.assertIn("已跳过", self.client.get(
+            f"/api/interview/sessions/{interview_id}/export.md"
+        ).text)
+
+    def test_skipping_last_question_finishes_without_invented_feedback(self):
+        interview_id = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "max_questions": 1,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        result = self.client.post(f"/api/interview/sessions/{interview_id}/skip", json={
+            "question_number": 1,
+        })
+        self.assertEqual(result.status_code, 200, result.text)
+        report = self.client.get(f"/api/interview/sessions/{interview_id}/report").json()
+        self.assertEqual(report["status"], "finished")
+        self.assertIn("跳过第 1 题", report["summary"])
+        self.assertEqual(report["items"][0]["evidence"], [])
+        self.assertIsNone(report["items"][0]["feedback"])
+
     def test_cancel_interview_keeps_partial_report_and_invalidates_run(self):
         interview_id = self.client.post("/api/interview/sessions", json={"goal": "开发"}).json()["id"]
         self.client.post(f"/api/interview/sessions/{interview_id}/start")

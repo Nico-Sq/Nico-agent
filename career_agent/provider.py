@@ -79,6 +79,13 @@ class Provider:
         if "INTERVIEW_MODE" in system:
             count = int(system.split("QUESTION_COUNT=")[1].splitlines()[0])
             max_questions = int(system.split("MAX_QUESTIONS=")[1].splitlines()[0])
+            skipped = "CURRENT_QUESTION_SKIPPED=true" in system
+            progress = next(
+                (json.loads(message["content"].split("\n", 1)[1]) for message in messages
+                 if message["role"] == "user" and message["content"].startswith("[INTERVIEW_PROGRESS]\n")),
+                [],
+            )
+            skipped_numbers = [str(item["number"]) for item in progress if item["skipped"]]
             if count == 0:
                 practice = next(
                     (json.loads(message["content"].split("\n", 1)[1]) for message in messages
@@ -103,20 +110,22 @@ class Provider:
             elif count < max_questions:
                 answer = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "")
                 result = {
-                    "feedback": "演示反馈：请补充你的具体行动、可核实的结果和反思。",
+                    "feedback": "" if skipped else "演示反馈：请补充你的具体行动、可核实的结果和反思。",
                     "question": QUESTIONS[count % len(QUESTIONS)],
                     "finished": False,
-                    "evidence": [answer[:80]],
+                    "evidence": [] if skipped else [answer[:80]],
                     "summary": "",
                 }
             else:
                 answer = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "")
                 result = {
-                    "feedback": "演示反馈：请补充你的具体行动、可核实的结果和反思。",
+                    "feedback": "" if skipped else "演示反馈：请补充你的具体行动、可核实的结果和反思。",
                     "question": "",
                     "finished": True,
-                    "evidence": [answer[:80]],
-                    "summary": f"演示总结：你已完成 {max_questions} 题。正式评价需要配置真实模型。",
+                    "evidence": [] if skipped else [answer[:80]],
+                    "summary": (f"演示总结：你已完成 {max_questions} 题。"
+                                + ("跳过第 " + "、".join(skipped_numbers) + " 题。" if skipped_numbers else "")
+                                + "正式评价需要配置真实模型。"),
                 }
             return {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)}
         if messages[-1]["role"] == "tool":
