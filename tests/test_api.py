@@ -31,6 +31,31 @@ class InterviewApiTests(unittest.TestCase):
         main.store, main.runtime = self.original_store, self.original_runtime
         self.temp.cleanup()
 
+    def test_chat_memory_is_editable_and_invalidates_old_run(self):
+        chat_id = self.client.post("/api/chat/sessions").json()["id"]
+        pending = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
+            "text": "旧问题",
+        }).json()
+        saved = self.client.put(f"/api/chat/sessions/{chat_id}/memory", json={
+            "text": "  优先讨论后端岗位  ",
+        })
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["text"], "优先讨论后端岗位")
+        view = self.client.get(f"/api/chat/sessions/{chat_id}").json()
+        self.assertEqual(view["session"]["chat_memory"], "优先讨论后端岗位")
+        self.assertEqual(view["session"]["status"], "active")
+        self.assertTrue(self.client.post(f"/api/chat/sessions/{chat_id}/messages/run", json={
+            "version": pending["version"],
+        }).json()["interrupted"])
+        self.assertIn("优先讨论后端岗位", self.client.get(
+            f"/api/chat/sessions/{chat_id}/export.md"
+        ).text)
+        self.assertEqual(self.client.put(f"/api/chat/sessions/{chat_id}/memory", json={
+            "text": "甲" * 2001,
+        }).status_code, 422)
+        self.client.put(f"/api/chat/sessions/{chat_id}/memory", json={"text": ""})
+        self.assertEqual(self.client.get(f"/api/chat/sessions/{chat_id}").json()["session"]["chat_memory"], "")
+
     def test_backup_contains_committed_business_data(self):
         material = self.client.post("/api/materials", json={
             "kind": "resume", "title": "我的简历", "content": "备份中的经历",

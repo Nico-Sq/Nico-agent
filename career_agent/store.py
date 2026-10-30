@@ -26,6 +26,7 @@ class Store:
                     max_questions INTEGER NOT NULL DEFAULT 3,
                     version INTEGER NOT NULL DEFAULT 0,
                     run_started INTEGER NOT NULL DEFAULT 0,
+                    chat_memory TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -100,6 +101,8 @@ class Store:
                 db.execute("ALTER TABLE sessions ADD COLUMN max_questions INTEGER NOT NULL DEFAULT 3")
             if "run_started" not in session_columns:
                 db.execute("ALTER TABLE sessions ADD COLUMN run_started INTEGER NOT NULL DEFAULT 0")
+            if "chat_memory" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN chat_memory TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connect(self):
@@ -465,6 +468,15 @@ class Store:
                 (session_id, version),
             ).rowcount
         return bool(changed)
+
+    def set_chat_memory(self, session_id: str, text: str) -> dict | None:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE sessions SET chat_memory = ?, status = 'active', "
+                "version = version + 1, run_started = 0 WHERE id = ? AND kind = 'chat'",
+                (text, session_id),
+            ).rowcount
+        return self.get(session_id, "chat") if changed else None
 
     def run_current(self, session_id: str, version: int) -> bool:
         with self.connect() as db:

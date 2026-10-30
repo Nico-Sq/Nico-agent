@@ -15,7 +15,7 @@ MAX_TOOL_CALLS = 8
 MAX_RUN_SECONDS = 120
 MAX_RUN_TOKENS = 16_000
 # 修改运行时的系统提示拼接规则时同步递增此版本。
-PROMPT_POLICY_VERSION = "2"
+PROMPT_POLICY_VERSION = "3"
 
 
 class RunSuperseded(Exception):
@@ -31,6 +31,8 @@ class AgentRuntime:
         kind = session["kind"]
         skill = (SKILL_ROOT / f"{kind}.md").read_text(encoding="utf-8")
         system = skill
+        if kind == "chat" and session["chat_memory"]:
+            system += "\nCHAT_MEMORY 是当前聊天中用户保存的备注；经历事实仍以用户确认的材料为准。"
         if kind == "interview":
             practice = self.store.practice_source(session["id"])
             max_questions = session["max_questions"]
@@ -49,6 +51,8 @@ class AgentRuntime:
             if practice:
                 system += "这是复练会话。根据原题的薄弱点换一种问法，不让用户复述标准答案。"
         context = [{"role": "system", "content": system}]
+        if kind == "chat" and session["chat_memory"]:
+            context.append({"role": "user", "content": "[CHAT_MEMORY]\n" + session["chat_memory"]})
         if kind == "interview":
             context.append({"role": "user", "content": "[INTERVIEW_GOAL]\n" + json.dumps(
                 {"goal": session["goal"]}, ensure_ascii=False

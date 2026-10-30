@@ -288,6 +288,8 @@ async function selectSession(id) {
   if (state.kind === "chat") {
     $("chat-export").hidden = !view;
     if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
+    $("chat-memory-form").hidden = !view;
+    $("chat-memory").value = view?.session.chat_memory || "";
   }
   renderMessages(state.kind, view?.messages || []);
   if (state.kind === "interview") {
@@ -339,6 +341,17 @@ $("discuss-report").onclick = async () => {
   $("chat-text").focus();
 };
 $("new-session").onclick = () => selectSession(null);
+$("chat-memory-form").onsubmit = (event) => {
+  event.preventDefault();
+  const id = state.ids.chat;
+  if (!id) return;
+  action("chat", async () => {
+    await api(`/chat/sessions/${id}/memory`, {
+      method: "PUT", body: JSON.stringify({ text: $("chat-memory").value }),
+    });
+    notice("当前聊天的备注已保存。");
+  });
+};
 $("delete-session").onclick = async () => {
   const kind = state.kind;
   const id = state.ids[kind];

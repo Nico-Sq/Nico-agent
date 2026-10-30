@@ -103,6 +103,9 @@ class CoreTests(unittest.TestCase):
             """)
         upgraded = Store(legacy_path)
         self.assertEqual(upgraded.get("legacy-chat", "chat")["max_questions"], 3)
+        self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "")
+        upgraded.set_chat_memory("legacy-chat", "迁移后备注")
+        self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "迁移后备注")
         self.assertEqual(upgraded.list_materials()[0]["content"], "原始内容")
         self.assertEqual(upgraded.list_claims()[0]["text"], "原始经历")
         self.assertTrue(upgraded.revoke_material("legacy-material"))
@@ -110,14 +113,28 @@ class CoreTests(unittest.TestCase):
 
     def test_interview_context_excludes_chat_history(self):
         chat = self.store.create("chat")
+        self.store.set_chat_memory(chat["id"], "CHAT_MEMORY_SECRET")
         chat_run = self.store.claim_run(chat["id"], "chat", "active", "CHAT_SECRET_123")
         self.store.finish_run(chat["id"], chat_run["version"], "私密聊天回复", "active", 0)
         interview = self.store.create("interview", "后端工程师")
         interview_run = self.store.claim_run(interview["id"], "interview", "new")
         context = json.dumps(self.runtime.build_context(interview_run), ensure_ascii=False)
         self.assertNotIn("CHAT_SECRET_123", context)
+        self.assertNotIn("CHAT_MEMORY_SECRET", context)
         self.assertNotIn("私密聊天回复", context)
         self.assertIn("后端工程师", context)
+
+    def test_chat_memory_survives_context_window(self):
+        chat = self.store.create("chat")
+        self.store.set_chat_memory(chat["id"], "重点准备后端岗位")
+        for number in range(9):
+            running = self.store.claim_run(chat["id"], "chat", "active", f"旧消息-{number}")
+            self.store.finish_run(chat["id"], running["version"], "收到", "active", 0)
+        latest = self.store.claim_run(chat["id"], "chat", "active", "继续讨论")
+        context = json.dumps(self.runtime.build_context(latest), ensure_ascii=False)
+        self.assertIn("[CHAT_MEMORY]", context)
+        self.assertIn("重点准备后端岗位", context)
+        self.assertNotIn("旧消息-0", context)
 
     def test_ten_question_summary_context_keeps_early_evidence(self):
         interview = self.store.create("interview", "后端工程师", max_questions=10)

@@ -89,6 +89,10 @@ class ChatRunInput(BaseModel):
     version: int = Field(ge=1)
 
 
+class ChatMemoryInput(BaseModel):
+    text: str = Field(max_length=2000)
+
+
 class InterviewAnswerInput(TextInput):
     question_number: int = Field(ge=1)
 
@@ -292,6 +296,8 @@ def export_session(kind: str, session_id: str):
     session = require_session(session_id, kind)
     lines = ["# 聊天记录" if kind == "chat" else "# 模拟面试记录", ""]
     if kind == "chat":
+        if session["chat_memory"]:
+            lines.extend(["## 固定备注", "", session["chat_memory"], ""])
         for message in active_store().messages(session_id, kind):
             lines.extend([f"## {'用户' if message['role'] == 'user' else '聊天助手'}", "",
                           message["content"], ""])
@@ -322,6 +328,13 @@ def export_session(kind: str, session_id: str):
 @app.post("/api/chat/sessions")
 def create_chat():
     return active_store().create("chat")
+
+
+@app.put("/api/chat/sessions/{session_id}/memory")
+def update_chat_memory(session_id: str, body: ChatMemoryInput):
+    if active_store().set_chat_memory(session_id, body.text.strip()) is None:
+        raise HTTPException(404, "聊天会话不存在")
+    return {"text": body.text.strip()}
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
