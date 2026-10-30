@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import httpx
 
@@ -20,7 +21,7 @@ class Provider:
 
     async def complete(self, messages: list[dict], tools: list[dict]) -> dict:
         if self.mode == "demo":
-            return self._demo(messages)
+            return self._demo(messages, tools)
         if self.mode != "openai_compatible" or not self.model:
             raise ValueError("请设置 MODEL_PROVIDER=openai_compatible 和 MODEL_NAME")
         headers = {"Content-Type": "application/json"}
@@ -36,7 +37,7 @@ class Provider:
             response.raise_for_status()
         return response.json()["choices"][0]["message"]
 
-    def _demo(self, messages: list[dict]) -> dict:
+    def _demo(self, messages: list[dict], tools: list[dict]) -> dict:
         system = messages[0]["content"]
         if "INTERVIEW_MODE" in system:
             count = int(system.split("QUESTION_COUNT=")[1].splitlines()[0])
@@ -74,7 +75,35 @@ class Provider:
                     "finished": True,
                 }
             return {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)}
+        if messages[-1]["role"] == "tool":
+            result = json.loads(messages[-1]["content"])
+            name = messages[-2]["tool_calls"][0]["function"]["name"]
+            if "error" in result:
+                content = f"演示模式无法读取所选资源：{result['error']}。请检查 ID 和授权范围。"
+            elif name == "read_confirmed_claims":
+                claims = result["claims"]
+                content = "已确认的经历：\n" + "\n".join(f"- {item['text']}" for item in claims) if claims else "目前没有已确认的经历。"
+            elif name == "read_material":
+                content = f"已读取“{result['title']}”。演示模式只展示原文片段：\n{result['content'][:300]}"
+            else:
+                lines = [f"第 {item['number']} 题：{item['feedback']}" for item in result["feedback"]]
+                content = f"面试总结：{result['summary']}\n" + "\n".join(lines) + "\n可在面试报告中选择一题复练。"
+            return {"role": "assistant", "content": content}
         latest = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        available = {tool["function"]["name"] for tool in tools}
+        selected_id = re.search(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])", latest, re.I)
+        name, arguments = None, {}
+        if selected_id and any(word in latest for word in ("面试", "反馈", "复盘")) and "read_interview_feedback" in available:
+            name, arguments = "read_interview_feedback", {"interview_session_id": selected_id.group()}
+        elif selected_id and "read_material" in available:
+            name, arguments = "read_material", {"material_id": selected_id.group()}
+        elif any(word in latest for word in ("已确认", "确认的经历", "我的经历")) and "read_confirmed_claims" in available:
+            name = "read_confirmed_claims"
+        if name:
+            return {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "demo-tool-1", "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }]}
         return {
             "role": "assistant",
             "content": f"演示模式已收到：{latest}\n\n配置真实模型后，我可以讨论岗位、整理你确认的经历，并解释指定的面试反馈。",

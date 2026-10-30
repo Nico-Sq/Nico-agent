@@ -159,6 +159,21 @@ class CoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.create_claim("我满足全部要求", jd["id"])
 
+    def test_chat_material_requires_current_message_id(self):
+        material = self.store.create_material("project", "项目", "PRIVATE_MATERIAL")
+        call = {"id": "1", "function": {"name": "read_material", "arguments": json.dumps({"material_id": material["id"]})}}
+        interview = self.store.create("interview", "开发岗位")
+        denied = json.loads(self.runtime._execute_tool_sync(interview, call)["content"])
+        self.assertEqual(denied["error"], "tool_not_allowed")
+        chat = self.store.create("chat")
+        first = self.store.claim_run(chat["id"], "chat", "active", "请分析我的项目")
+        denied = json.loads(self.runtime._execute_tool_sync(first, call)["content"])
+        self.assertEqual(denied["error"], "resource_not_authorized")
+        self.store.finish_run(chat["id"], first["version"], "好的", "active", 0)
+        selected = self.store.claim_run(chat["id"], "chat", "active", f"请分析材料 {material['id']}")
+        allowed = json.loads(self.runtime._execute_tool_sync(selected, call)["content"])
+        self.assertEqual(allowed["content"], "PRIVATE_MATERIAL")
+
     def test_demo_question_uses_explicitly_selected_claim(self):
         claim = self.store.create_claim("优化接口响应时间")
         self.store.confirm_claim(claim["id"])

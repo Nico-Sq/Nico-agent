@@ -9,6 +9,10 @@ async function api(path, options = {}) {
 }
 
 function notice(message = "") { $("notice").textContent = message; }
+async function copyId(id) {
+  try { await navigator.clipboard.writeText(id); notice("ID 已复制"); }
+  catch { notice(`ID：${id}`); }
+}
 function setBusy(kind, value) {
   state.busy[kind] = value;
   document.querySelectorAll(`#${kind === "chat" ? "chat-panel" : "interview-panel"} button[type=submit]`).forEach((button) => { button.disabled = value; });
@@ -29,12 +33,28 @@ function renderMessages(kind, messages) {
     role.className = "role";
     role.textContent = message.role === "user" ? "你" : kind === "chat" ? "聊天助手" : "面试官";
     item.append(role, document.createTextNode(message.content));
+    if (kind === "chat" && message.role === "assistant") {
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "save-claim secondary";
+      save.textContent = "存为经历草稿";
+      save.onclick = async () => {
+        const draft = window.prompt("编辑经历草稿；保存后仍需在面试准备区确认真实", message.content.slice(0, 500));
+        if (!draft?.trim()) return;
+        try {
+          await api("/claims", { method: "POST", body: JSON.stringify({ text: draft.trim() }) });
+          notice("经历草稿已保存，请到面试准备区确认真实。");
+        } catch (error) { notice(error.message); }
+      };
+      item.append(save);
+    }
     box.append(item);
   }
   box.scrollTop = box.scrollHeight;
 }
 
 function renderInterviewState(session) {
+  $("copy-interview-id").hidden = !session;
   $("preparation").hidden = Boolean(session);
   $("interview-setup").hidden = Boolean(session);
   $("answer-form").hidden = !session || session.status !== "awaiting_answer";
@@ -63,6 +83,10 @@ async function loadPreparation() {
     const text = document.createElement("span");
     text.textContent = `${kinds[material.kind]} · ${material.title}`;
     row.append(checkbox, text);
+    const copy = document.createElement("button");
+    copy.type = "button"; copy.className = "secondary"; copy.textContent = "复制 ID";
+    copy.onclick = () => copyId(material.id);
+    row.append(copy);
     materialBox.append(row);
     if (material.kind !== "job_description") source.append(new Option(material.title, material.id));
   }
@@ -196,6 +220,7 @@ async function runRequest(kind, id, path, body) {
 
 $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
+$("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
 $("new-session").onclick = () => selectSession(null);
 $("material-form").onsubmit = (event) => {
   event.preventDefault();

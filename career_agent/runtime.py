@@ -59,6 +59,16 @@ class AgentRuntime:
                 "parameters": {"type": "object", "properties": {
                     "interview_session_id": {"type": "string"}
                 }, "required": ["interview_session_id"]},
+            }}, {"type": "function", "function": {
+                "name": "read_confirmed_claims",
+                "description": "读取用户已确认的经历主张，用于整理求职表达。",
+                "parameters": {"type": "object", "properties": {}},
+            }}, {"type": "function", "function": {
+                "name": "read_material",
+                "description": "读取当前用户消息明确指定 ID 的一份简历、岗位描述或项目材料。",
+                "parameters": {"type": "object", "properties": {
+                    "material_id": {"type": "string"}
+                }, "required": ["material_id"]},
             }}]
         return [{"type": "function", "function": {
             "name": "read_interview_goal",
@@ -85,6 +95,15 @@ class AgentRuntime:
                     result = {"goal": session["goal"]}
                 elif name == "read_interview_materials":
                     result = self.store.interview_resources(session["id"], include_content=True)
+                elif name == "read_confirmed_claims":
+                    result = {"claims": self.store.confirmed_claims()}
+                elif name == "read_material":
+                    target = args["material_id"]
+                    latest = self.store.messages(session["id"], "chat", limit=1)
+                    if not latest or latest[-1]["role"] != "user" or target not in latest[-1]["content"]:
+                        result = {"error": "resource_not_authorized"}
+                    else:
+                        result = self.store.get_material(target) or {"error": "material_not_found"}
                 elif name == "read_interview_feedback":
                     target = args["interview_session_id"]
                     latest = self.store.messages(session["id"], "chat", limit=1)

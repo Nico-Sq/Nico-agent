@@ -166,6 +166,13 @@ class Store:
             rows = db.execute("SELECT * FROM claims ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
 
+    def confirmed_claims(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id, text, material_id FROM claims WHERE status = 'confirmed' ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def confirm_claim(self, claim_id: str) -> dict | None:
         with self.connect() as db:
             changed = db.execute(

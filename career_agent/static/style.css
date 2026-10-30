@@ -32,11 +32,14 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 .workspace > div:not(.notice) { display: flex; flex-direction: column; flex: 1; }
 .panel-head { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid #edf0ea; }
 .panel-head p { margin: 4px 0; font-size: 13px; color: #738078; text-align: right; }
+.panel-meta { text-align: right; }
+.panel-meta button { font-size: 12px; padding: 7px 10px; margin-top: 7px; }
 .messages { display: flex; flex-direction: column; gap: 15px; min-height: 280px; max-height: 430px; overflow-y: auto; padding: 22px 3px; flex: 1; }
 .message { max-width: 82%; padding: 13px 16px; border-radius: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.assistant { align-self: flex-start; background: #f1f5ee; }
 .message.user { align-self: flex-end; color: white; background: #2c6752; }
 .message .role { display: block; font-size: 11px; opacity: .65; margin-bottom: 3px; }
+.message .save-claim { display: block; margin-top: 10px; padding: 6px 9px; font-size: 11px; }
 .composer, .setup { display: grid; gap: 10px; border-top: 1px solid #edf0ea; padding-top: 18px; }
 .setup { border: 0; padding: 26px 0; }
 label { font-size: 13px; font-weight: 650; }
@@ -53,7 +56,7 @@ textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }
 .resource-row { display: flex; align-items: start; gap: 10px; padding: 9px 11px; border-radius: 9px; background: #f4f7f3; font-size: 13px; overflow-wrap: anywhere; }
 .resource-row input { margin-top: 3px; accent-color: #245c4a; }
 .resource-row span { flex: 1; }
-.resource-row button { padding: 5px 8px; font-size: 12px; }
+.resource-row button { padding: 5px 8px; font-size: 12px; flex-shrink: 0; }
 .selected-resources { margin: 14px 0 0; color: #647267; font-size: 13px; }
 .interview-report { border-top: 1px solid #edf0ea; padding-top: 18px; }
 .interview-report h3 { margin: 0 0 10px; font-size: 17px; }

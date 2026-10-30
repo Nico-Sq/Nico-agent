@@ -67,3 +67,40 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(len(self.client.get(
             f"/api/interview/sessions/{practice_id}"
         ).json()["resources"]["materials"]), 1)
+
+    def test_chat_uses_confirmed_claims_and_explicit_resources(self):
+        claim = self.client.post("/api/claims", json={"text": "我优化了查询性能"}).json()
+        material = self.client.post("/api/materials", json={
+            "kind": "project", "title": "查询项目", "content": "使用索引减少了扫描行数。",
+        }).json()
+        chat = self.client.post("/api/chat/sessions").json()
+        chat_id = chat["id"]
+        first_response = self.client.post(f"/api/chat/sessions/{chat_id}/messages", json={
+            "text": "请整理我的已确认经历",
+        })
+        self.assertEqual(first_response.status_code, 200, first_response.text)
+        first = first_response.json()
+        self.assertIn("没有已确认", first["message"])
+        self.client.post(f"/api/claims/{claim['id']}/confirm")
+        confirmed = self.client.post(f"/api/chat/sessions/{chat_id}/messages", json={
+            "text": "请整理我的已确认经历",
+        }).json()
+        self.assertIn("我优化了查询性能", confirmed["message"])
+        named_material = self.client.post(f"/api/chat/sessions/{chat_id}/messages", json={
+            "text": f"请解释材料 {material['id']}",
+        }).json()
+        self.assertIn("使用索引减少了扫描行数", named_material["message"])
+        interview = self.client.post("/api/interview/sessions", json={"goal": "后端开发"}).json()
+        interview_id = interview["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        for _ in range(3):
+            self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+                "text": "PRIVATE_INTERVIEW_ANSWER",
+            })
+        discussed = self.client.post(f"/api/chat/sessions/{chat_id}/messages", json={
+            "text": f"请解释面试 {interview_id} 的反馈",
+        }).json()
+        self.assertIn("面试总结", discussed["message"])
+        self.assertNotIn("PRIVATE_INTERVIEW_ANSWER", discussed["message"])
+        interview_view = self.client.get(f"/api/interview/sessions/{interview_id}").json()
+        self.assertNotIn("请整理我的已确认经历", str(interview_view["messages"]))
