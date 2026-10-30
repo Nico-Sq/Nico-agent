@@ -195,6 +195,9 @@ class InterviewApiTests(unittest.TestCase):
         messages = self.client.get(f"/api/interview/sessions/{interview_id}").json()["messages"]
         self.assertIn("最初回答", [item["content"] for item in messages])
         self.assertIn("更正后的回答", [item["content"] for item in messages])
+        exported = self.client.get(f"/api/interview/sessions/{interview_id}/export.md").text
+        self.assertIn("最初回答", exported)
+        self.assertIn("更正后的回答", exported)
 
     def test_interview_respects_selected_question_count(self):
         self.assertEqual(self.client.post("/api/interview/sessions", json={
@@ -245,3 +248,23 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
             "text": "继续作答",
         }).status_code, 409)
+
+    def test_session_exports_keep_chat_and_interview_records_separate(self):
+        chat_id = self.client.post("/api/chat/sessions").json()["id"]
+        self.client.post(f"/api/chat/sessions/{chat_id}/messages", json={"text": "CHAT_PRIVATE"})
+        interview_id = self.client.post("/api/interview/sessions", json={
+            "goal": "开发岗位", "max_questions": 1,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+            "text": "INTERVIEW_PRIVATE",
+        })
+        chat_export = self.client.get(f"/api/chat/sessions/{chat_id}/export.md")
+        interview_export = self.client.get(f"/api/interview/sessions/{interview_id}/export.md")
+        self.assertEqual(chat_export.status_code, 200)
+        self.assertIn("attachment", chat_export.headers["content-disposition"])
+        self.assertIn("CHAT_PRIVATE", chat_export.text)
+        self.assertNotIn("INTERVIEW_PRIVATE", chat_export.text)
+        self.assertIn("INTERVIEW_PRIVATE", interview_export.text)
+        self.assertIn("全场总结", interview_export.text)
+        self.assertNotIn("CHAT_PRIVATE", interview_export.text)

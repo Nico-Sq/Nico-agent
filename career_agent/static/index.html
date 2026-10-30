@@ -24,7 +24,7 @@
       </aside>
       <section class="workspace">
         <div id="chat-panel">
-          <div class="panel-head"><div><span class="eyebrow">ASSISTANT</span><h2>和助手聊聊</h2></div><p>讨论岗位、经历和面试反馈</p></div>
+          <div class="panel-head"><div><span class="eyebrow">ASSISTANT</span><h2>和助手聊聊</h2></div><div class="panel-meta"><p>讨论岗位、经历和面试反馈</p><a id="chat-export" class="button-link" hidden>导出聊天</a></div></div>
           <p class="selected-resources">讨论指定材料或面试反馈时，可从面试页复制对应 ID 并写在消息中。</p>
           <div id="chat-messages" class="messages" aria-live="polite"></div>
           <form id="chat-form" class="composer">
@@ -34,7 +34,7 @@
           </form>
         </div>
         <div id="interview-panel" hidden>
-          <div class="panel-head"><div><span class="eyebrow">INTERVIEW</span><h2>逐题模拟面试</h2></div><div class="panel-meta"><p id="interview-status">创建一场面试</p><button id="pause-running" type="button" class="secondary" hidden>暂停生成</button><button id="cancel-interview" type="button" class="secondary" hidden>结束本轮</button><button id="copy-interview-id" type="button" class="secondary" hidden>复制面试 ID</button></div></div>
+          <div class="panel-head"><div><span class="eyebrow">INTERVIEW</span><h2>逐题模拟面试</h2></div><div class="panel-meta"><p id="interview-status">创建一场面试</p><button id="pause-running" type="button" class="secondary" hidden>暂停生成</button><button id="cancel-interview" type="button" class="secondary" hidden>结束本轮</button><button id="copy-interview-id" type="button" class="secondary" hidden>复制面试 ID</button><a id="interview-export" class="button-link" hidden>导出面试</a></div></div>
           <section id="preparation" class="preparation">
             <h3>准备本场材料</h3>
             <p>材料和确认的经历只在你选择它们的面试中使用。</p>

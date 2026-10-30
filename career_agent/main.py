@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -166,6 +166,40 @@ def get_session(kind: str, session_id: str):
         result["resources"] = store.interview_resources(session_id)
         result["practice_source"] = store.practice_source(session_id)
     return result
+
+
+@app.get("/api/{kind}/sessions/{session_id}/export.md")
+def export_session(kind: str, session_id: str):
+    if kind not in ("chat", "interview"):
+        raise HTTPException(404)
+    session = require_session(session_id, kind)
+    lines = ["# 聊天记录" if kind == "chat" else "# 模拟面试记录", ""]
+    if kind == "chat":
+        for message in store.messages(session_id, kind):
+            lines.extend([f"## {'用户' if message['role'] == 'user' else '聊天助手'}", "",
+                          message["content"], ""])
+    else:
+        report = store.interview_report(session_id)
+        lines.extend([f"岗位目标：{session['goal']}", f"状态：{session['status']}", ""])
+        if report["practice_source"]:
+            source = report["practice_source"]
+            lines.extend(["## 复练来源", "", f"原题：{source['question']}", "",
+                          f"原回答：{source['answer'] or '无'}", "",
+                          f"原反馈：{source['feedback'] or '无'}", ""])
+        for item in report["items"]:
+            lines.extend([f"## 第 {item['number']} 题", "", item["question"], "",
+                          "### 回答", "", item["answer"] or "未回答", "",
+                          "### 反馈", "", item["feedback"] or "尚无反馈", ""])
+            if item["evidence"]:
+                lines.extend(["回答依据：" + "；".join(item["evidence"]), ""])
+        if report["summary"]:
+            lines.extend(["## 全场总结", "", report["summary"], ""])
+        lines.extend(["## 完整对话", ""])
+        for message in store.messages(session_id, kind):
+            lines.extend([f"### {'用户' if message['role'] == 'user' else '面试官'}", "",
+                          message["content"], ""])
+    return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
 
 @app.post("/api/chat/sessions")

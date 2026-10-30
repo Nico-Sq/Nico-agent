@@ -56,6 +56,8 @@ function renderMessages(kind, messages) {
 function renderInterviewState(session) {
   state.interviewQuestion = session?.question_count || 0;
   $("copy-interview-id").hidden = !session;
+  $("interview-export").hidden = !session;
+  if (session) $("interview-export").href = `/api/interview/sessions/${session.id}/export.md`;
   $("pause-running").hidden = !session || session.status !== "running" || session.question_count > 0;
   $("cancel-interview").hidden = !session || ["finished", "cancelled"].includes(session.status);
   $("preparation").hidden = Boolean(session);
@@ -259,6 +261,10 @@ async function selectSession(id) {
   if (id) localStorage.setItem(`${state.kind}Session`, id);
   else localStorage.removeItem(`${state.kind}Session`);
   const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
+  if (state.kind === "chat") {
+    $("chat-export").hidden = !view;
+    if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
+  }
   renderMessages(state.kind, view?.messages || []);
   if (state.kind === "interview") {
     renderInterviewState(view?.session);
