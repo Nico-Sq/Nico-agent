@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from .auth import AuthStore
 from .extract import MAX_FILE_BYTES, extract_text
-from .provider import Provider
+from .provider import ModelError, Provider
 from .runtime import AgentRuntime
 from .store import Store
 
@@ -116,11 +116,15 @@ def require_session(session_id: str, kind: str) -> dict:
     return session
 
 
-async def complete_run(session: dict) -> dict:
+async def complete_run(session: dict) -> dict | JSONResponse:
     try:
         return await active_runtime().run(session)
-    except Exception as exc:
-        raise HTTPException(502, f"模型运行失败：{exc}") from exc
+    except ModelError as exc:
+        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
+    except ValueError:
+        return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
+    except Exception:
+        return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
 
 
 @app.get("/api/config")

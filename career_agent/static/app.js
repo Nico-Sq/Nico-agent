@@ -555,6 +555,7 @@ async function bootstrap() {
   try {
     const config = await api("/config");
     $("provider").textContent = config.provider === "demo" ? "演示模式" : `模型：${config.model}`;
+    $("provider-data-notice").hidden = config.provider === "demo";
     $("logout").hidden = !config.auth_required;
     if (config.auth_required) {
       try {

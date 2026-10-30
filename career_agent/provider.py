@@ -1,8 +1,19 @@
+import asyncio
 import json
 import os
 import re
 
 import httpx
+
+
+MAX_OUTPUT_TOKENS = 2048
+
+
+class ModelError(Exception):
+    def __init__(self, code: str, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
 
 
 QUESTIONS = (
@@ -23,19 +34,45 @@ class Provider:
         if self.mode == "demo":
             return self._demo(messages, tools)
         if self.mode != "openai_compatible" or not self.model:
-            raise ValueError("请设置 MODEL_PROVIDER=openai_compatible 和 MODEL_NAME")
+            raise ModelError("model_config_invalid", "请设置 MODEL_PROVIDER=openai_compatible 和 MODEL_NAME")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        payload = {"model": self.model, "messages": messages}
+        payload = {"model": self.model, "messages": messages, "max_tokens": MAX_OUTPUT_TOKENS}
         if tools:
             payload["tools"] = tools
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload
-            )
-            response.raise_for_status()
-        return response.json()["choices"][0]["message"]
+            for attempt in range(2):
+                try:
+                    response = await client.post(
+                        f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload
+                    )
+                    response.raise_for_status()
+                    break
+                except httpx.TimeoutException as exc:
+                    raise ModelError("model_timeout", "模型请求超时", 504) from exc
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    if attempt == 0 and status in (429, 503):
+                        await asyncio.sleep(1)
+                        continue
+                    if status in (401, 403):
+                        raise ModelError("model_auth_failed", "模型服务认证失败，请检查配置") from exc
+                    if status in (400, 404, 422):
+                        raise ModelError("model_request_rejected", "模型接口或参数不兼容，请检查配置") from exc
+                    if status in (429, 503):
+                        raise ModelError("model_busy", "模型服务繁忙，请稍后重试", 503) from exc
+                    raise ModelError("model_unavailable", "模型服务暂时不可用") from exc
+                except httpx.RequestError as exc:
+                    raise ModelError("model_unavailable", "无法连接模型服务") from exc
+        try:
+            data = response.json()
+            message = data["choices"][0]["message"]
+            if not isinstance(message, dict):
+                raise TypeError("模型消息不是对象")
+            return {**message, "usage": data.get("usage")}
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise ModelError("model_invalid_response", "模型服务返回了无效响应") from exc
 
     def _demo(self, messages: list[dict], tools: list[dict]) -> dict:
         system = messages[0]["content"]

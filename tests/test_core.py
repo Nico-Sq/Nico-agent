@@ -5,19 +5,18 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
-from career_agent.provider import Provider
+import httpx
+
+from career_agent.provider import ModelError, Provider
 from career_agent.runtime import MAX_CONTEXT_CHARS, AgentRuntime
 from career_agent.store import Store
 
 
 def run_demo(coroutine):
-    """Run a demo coroutine, which has no external I/O or event-loop dependency."""
-    try:
-        coroutine.send(None)
-    except StopIteration as result:
-        return result.value
-    raise AssertionError("演示模式意外等待了外部 I/O")
+    """在真实事件循环中运行演示调用。"""
+    return asyncio.run(coroutine)
 
 
 class CoreTests(unittest.TestCase):
@@ -39,6 +38,50 @@ class CoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_compatible_provider_sends_output_limit_and_keeps_usage(self):
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, headers, json):
+                self.payload = json
+                return httpx.Response(200, json={
+                    "choices": [{"message": {"content": "回复"}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                }, request=httpx.Request("POST", url))
+
+        client = Client()
+        provider = Provider()
+        provider.mode = "openai_compatible"
+        provider.model = "test-model"
+        with patch("career_agent.provider.httpx.AsyncClient", return_value=client):
+            reply = asyncio.run(provider.complete([{"role": "user", "content": "问题"}], []))
+        self.assertEqual(client.payload["max_tokens"], 2048)
+        self.assertEqual(reply["usage"]["total_tokens"], 6)
+
+    def test_provider_error_does_not_expose_upstream_response(self):
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, headers, json):
+                return httpx.Response(400, text="PRIVATE_UPSTREAM_BODY", request=httpx.Request("POST", url))
+
+        provider = Provider()
+        provider.mode = "openai_compatible"
+        provider.model = "test-model"
+        with patch("career_agent.provider.httpx.AsyncClient", return_value=Client()):
+            with self.assertRaises(ModelError) as caught:
+                asyncio.run(provider.complete([{"role": "user", "content": "问题"}], []))
+        self.assertEqual(caught.exception.code, "model_request_rejected")
+        self.assertNotIn("PRIVATE_UPSTREAM_BODY", str(caught.exception))
 
     def test_existing_database_gains_new_columns_without_losing_rows(self):
         legacy_path = Path(self.temp.name) / "legacy.sqlite3"
@@ -76,6 +119,22 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("私密聊天回复", context)
         self.assertIn("后端工程师", context)
 
+    def test_ten_question_summary_context_keeps_early_evidence(self):
+        interview = self.store.create("interview", "后端工程师", max_questions=10)
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        for number in range(1, 10):
+            answer = self.store.claim_run(
+                interview["id"], "interview", "awaiting_answer", f"第 {number} 题的独有回答"
+            )
+            run_demo(self.runtime.run(answer))
+        final = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "最后一题回答")
+        messages = self.runtime.build_context(final)
+        context = json.dumps(messages, ensure_ascii=False)
+        self.assertIn("[INTERVIEW_PROGRESS]", context)
+        self.assertIn("第 1 题的独有回答", context)
+        self.assertLessEqual(sum(len(item["content"]) for item in messages), MAX_CONTEXT_CHARS)
+
     def test_model_context_is_bounded_without_truncating_transcript(self):
         chat = self.store.create("chat")
         for number in range(7):
@@ -100,6 +159,52 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(detail["status"], "completed")
         self.assertGreater(detail["context_chars"], 0)
         self.assertNotIn("PRIVATE_CHAT_TEXT", events[0]["detail"])
+
+    def test_model_usage_and_prompt_version_are_recorded(self):
+        class MeteredProvider:
+            async def complete(self, messages, tools):
+                return {"content": "回复", "usage": {
+                    "prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15,
+                }}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "测试用量")
+        run_demo(AgentRuntime(self.store, MeteredProvider()).run(running))
+        event = next(item for item in self.store.events(chat["id"], "chat") if item["kind"] == "model_run")
+        detail = json.loads(event["detail"])
+        self.assertEqual(detail["usage"]["total_tokens"], 15)
+        self.assertEqual(detail["usage_coverage"], "exact")
+        self.assertTrue(detail["prompt_version"])
+
+    def test_duplicate_run_does_not_call_model_twice(self):
+        class SlowProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.calls = 0
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                self.started.set()
+                await self.release.wait()
+                return {"content": "只生成一次"}
+
+        async def scenario():
+            provider = SlowProvider()
+            runtime = AgentRuntime(self.store, provider)
+            chat = self.store.create("chat")
+            running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+            first = asyncio.create_task(runtime.run(running))
+            await provider.started.wait()
+            duplicate = await AgentRuntime(self.store, provider).run(running)
+            provider.release.set()
+            completed = await first
+            return provider.calls, duplicate, completed
+
+        calls, duplicate, completed = asyncio.run(scenario())
+        self.assertEqual(calls, 1)
+        self.assertTrue(duplicate["in_progress"])
+        self.assertEqual(completed["message"], "只生成一次")
 
     def test_tool_call_limit_rejects_oversized_batch(self):
         class ExcessProvider:
@@ -160,6 +265,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(content["goal"], "开发岗位")
         self.assertEqual(len(content["feedback"]), 3)
         self.assertNotIn("SECRET_ANSWER", allowed["content"])
+
+    def test_invalid_tool_arguments_do_not_read_material(self):
+        material = self.store.create_material("project", "项目", "PRIVATE_MATERIAL")
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", f"请读取 {material['id']}")
+        for arguments in ("[]", json.dumps({"material_id": material["id"], "extra": "x"}),
+                          json.dumps({"material_id": 123})):
+            call = {"id": "1", "function": {"name": "read_material", "arguments": arguments}}
+            result = json.loads(self.runtime._execute_tool_sync(running, call)["content"])
+            self.assertEqual(result["error"], "invalid_arguments")
 
     def test_cancelled_report_can_be_discussed_without_answer_text(self):
         interview = self.store.create("interview", "开发岗位")
@@ -365,6 +480,17 @@ class CoreTests(unittest.TestCase):
         selected = self.store.claim_run(chat["id"], "chat", "active", f"请分析材料 {material['id']}")
         allowed = json.loads(self.runtime._execute_tool_sync(selected, call)["content"])
         self.assertEqual(allowed["content"], "PRIVATE_MATERIAL")
+
+    def test_old_chat_run_cannot_borrow_new_message_authorization(self):
+        material = self.store.create_material("project", "项目", "PRIVATE_MATERIAL")
+        chat = self.store.create("chat")
+        old = self.store.claim_run(chat["id"], "chat", "active", "旧问题")
+        self.store.claim_run(chat["id"], "chat", "active", f"请读取材料 {material['id']}")
+        call = {"id": "1", "function": {"name": "read_material", "arguments": json.dumps({
+            "material_id": material["id"],
+        })}}
+        result = json.loads(self.runtime._execute_tool_sync(old, call)["content"])
+        self.assertEqual(result["error"], "resource_not_authorized")
 
     def test_demo_question_uses_explicitly_selected_claim(self):
         claim = self.store.create_claim("优化接口响应时间")

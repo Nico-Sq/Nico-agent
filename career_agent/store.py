@@ -25,6 +25,7 @@ class Store:
                     question_count INTEGER NOT NULL DEFAULT 0,
                     max_questions INTEGER NOT NULL DEFAULT 3,
                     version INTEGER NOT NULL DEFAULT 0,
+                    run_started INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -89,6 +90,7 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS messages_session_id ON messages(session_id, id);
             """)
+            db.execute("BEGIN IMMEDIATE")
             for table in ("materials", "claims"):
                 columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
                 if "revoked_at" not in columns:
@@ -96,6 +98,8 @@ class Store:
             session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)")}
             if "max_questions" not in session_columns:
                 db.execute("ALTER TABLE sessions ADD COLUMN max_questions INTEGER NOT NULL DEFAULT 3")
+            if "run_started" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN run_started INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connect(self):
@@ -346,14 +350,20 @@ class Store:
             row = db.execute(
                 "SELECT * FROM sessions WHERE id = ? AND kind = ?", (session_id, kind)
             ).fetchone()
-        return dict(row) if row else None
+        session = dict(row) if row else None
+        if session:
+            session.pop("run_started")
+        return session
 
     def list_sessions(self, kind: str) -> list[dict]:
         with self.connect() as db:
             rows = db.execute(
                 "SELECT * FROM sessions WHERE kind = ? ORDER BY created_at DESC", (kind,)
             ).fetchall()
-        return [dict(row) for row in rows]
+        sessions = [dict(row) for row in rows]
+        for session in sessions:
+            session.pop("run_started")
+        return sessions
 
     def delete_session(self, session_id: str, kind: str) -> bool:
         with self.connect() as db:
@@ -406,13 +416,13 @@ class Store:
             db.execute("BEGIN IMMEDIATE")
             if kind == "chat" and user_text is not None:
                 changed = db.execute(
-                    "UPDATE sessions SET status = 'running', version = version + 1 "
+                    "UPDATE sessions SET status = 'running', version = version + 1, run_started = 0 "
                     "WHERE id = ? AND kind = 'chat' AND status IN ('active', 'running')",
                     (session_id,),
                 ).rowcount
             elif kind == "interview" and user_text is not None and expected_question is not None:
                 changed = db.execute(
-                    """UPDATE sessions SET status = 'running', version = version + 1
+                    """UPDATE sessions SET status = 'running', version = version + 1, run_started = 0
                     WHERE id = ? AND kind = 'interview' AND question_count = ?
                       AND (status = 'awaiting_answer' OR
                            (status = 'running' AND EXISTS (
@@ -422,7 +432,7 @@ class Store:
                 ).rowcount
             else:
                 changed = db.execute(
-                    "UPDATE sessions SET status = 'running', version = version + 1 "
+                    "UPDATE sessions SET status = 'running', version = version + 1, run_started = 0 "
                     "WHERE id = ? AND kind = ? AND status = ?",
                     (session_id, kind, expected),
                 ).rowcount
@@ -442,7 +452,40 @@ class Store:
                     if changed_answer != 1:
                         raise ValueError("当前题目记录缺失")
             row = db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        return dict(row)
+        session = dict(row)
+        session.pop("run_started")
+        return session
+
+    def begin_run(self, session_id: str, version: int) -> bool:
+        """原子认领一次模型运行，阻止同一版本的重复请求再次计费。"""
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE sessions SET run_started = 1 "
+                "WHERE id = ? AND version = ? AND status = 'running' AND run_started = 0",
+                (session_id, version),
+            ).rowcount
+        return bool(changed)
+
+    def run_current(self, session_id: str, version: int) -> bool:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT 1 FROM sessions WHERE id = ? AND version = ? "
+                "AND status = 'running' AND run_started = 1",
+                (session_id, version),
+            ).fetchone()
+        return row is not None
+
+    def chat_authorizes(self, session_id: str, version: int, target: str) -> bool:
+        """授权只依据该版本的当前用户输入，不借用后续消息。"""
+        with self.connect() as db:
+            row = db.execute(
+                """SELECT m.content FROM messages m JOIN sessions s ON s.id = m.session_id
+                   WHERE s.id = ? AND s.kind = 'chat' AND s.version = ?
+                     AND s.status = 'running' AND m.role = 'user'
+                   ORDER BY m.id DESC LIMIT 1""",
+                (session_id, version),
+            ).fetchone()
+        return row is not None and target in row["content"]
 
     def finish_run(
         self, session_id: str, version: int, content: str, status: str, question_count: int,
@@ -455,7 +498,7 @@ class Store:
                 (session_id, version),
             ).fetchone()
             changed = db.execute(
-                "UPDATE sessions SET status = ?, question_count = ? "
+                "UPDATE sessions SET status = ?, question_count = ?, run_started = 0 "
                 "WHERE id = ? AND status = 'running' AND version = ?",
                 (status, question_count, session_id, version),
             ).rowcount
@@ -485,7 +528,8 @@ class Store:
         status = "active" if kind == "chat" else "paused"
         with self.connect() as db:
             changed = db.execute(
-                "UPDATE sessions SET status = ? WHERE id = ? AND status = 'running' AND version = ?",
+                "UPDATE sessions SET status = ?, run_started = 0 "
+                "WHERE id = ? AND status = 'running' AND version = ?",
                 (status, session_id, version),
             ).rowcount
             if changed:
@@ -498,7 +542,7 @@ class Store:
         new_status = "active" if kind == "chat" else "paused"
         with self.connect() as db:
             changed = db.execute(
-                "UPDATE sessions SET status = ?, version = version + 1 "
+                "UPDATE sessions SET status = ?, version = version + 1, run_started = 0 "
                 "WHERE id = ? AND kind = ? AND status IN ('running', 'awaiting_answer')",
                 (new_status, session_id, kind),
             ).rowcount
@@ -512,7 +556,7 @@ class Store:
     def cancel_interview(self, session_id: str) -> dict | None:
         with self.connect() as db:
             changed = db.execute(
-                "UPDATE sessions SET status = 'cancelled', version = version + 1 "
+                "UPDATE sessions SET status = 'cancelled', version = version + 1, run_started = 0 "
                 "WHERE id = ? AND kind = 'interview' "
                 "AND status IN ('new', 'running', 'awaiting_answer', 'paused')",
                 (session_id,),
@@ -540,7 +584,7 @@ class Store:
             needs_run = last is None or last["role"] == "user"
             status = "running" if needs_run else "awaiting_answer"
             db.execute(
-                "UPDATE sessions SET status = ?, version = version + 1 WHERE id = ?",
+                "UPDATE sessions SET status = ?, version = version + 1, run_started = 0 WHERE id = ?",
                 (status, session_id),
             )
         return self.get(session_id, "interview"), needs_run
