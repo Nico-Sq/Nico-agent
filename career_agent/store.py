@@ -1,9 +1,10 @@
 import json
 import sqlite3
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 def now() -> str:
@@ -109,6 +110,13 @@ class Store:
             raise
         finally:
             db.close()
+
+    def backup(self) -> bytes:
+        with TemporaryDirectory() as directory:
+            target_path = Path(directory) / "backup.sqlite3"
+            with self.connect() as source, closing(sqlite3.connect(target_path)) as target:
+                source.backup(target)
+            return target_path.read_bytes()
 
     def create(
         self, kind: str, goal: str = "", material_ids: tuple[str, ...] = (), claim_ids: tuple[str, ...] = (),

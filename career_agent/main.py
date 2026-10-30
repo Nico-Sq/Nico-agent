@@ -128,6 +128,12 @@ def config():
     return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED}
 
 
+@app.get("/api/data/backup")
+def backup_data():
+    return Response(active_store().backup(), media_type="application/vnd.sqlite3",
+                    headers={"Content-Disposition": 'attachment; filename="nico-agent-backup.sqlite3"'})
+
+
 def set_login_cookie(response: Response, request: Request, user_id: str):
     response.set_cookie("nico_session", auth_store.issue_token(user_id), max_age=7 * 24 * 3600,
                         httponly=True, secure=request.url.scheme == "https", samesite="strict", path="/")

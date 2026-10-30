@@ -1,5 +1,7 @@
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 
@@ -28,6 +30,22 @@ class InterviewApiTests(unittest.TestCase):
         self.client.close()
         main.store, main.runtime = self.original_store, self.original_runtime
         self.temp.cleanup()
+
+    def test_backup_contains_committed_business_data(self):
+        material = self.client.post("/api/materials", json={
+            "kind": "resume", "title": "我的简历", "content": "备份中的经历",
+        }).json()
+        chat = self.client.post("/api/chat/sessions").json()
+        self.client.post(f"/api/chat/sessions/{chat['id']}/messages", json={"text": "保存这条消息"})
+        backup = self.client.get("/api/data/backup")
+        self.assertEqual(backup.status_code, 200)
+        self.assertIn("attachment", backup.headers["content-disposition"])
+        backup_path = Path(self.temp.name) / "export.sqlite3"
+        backup_path.write_bytes(backup.content)
+        with closing(sqlite3.connect(backup_path)) as db:
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(db.execute("SELECT content FROM materials WHERE id = ?", (material["id"],)).fetchone()[0], "备份中的经历")
+            self.assertEqual(db.execute("SELECT content FROM messages WHERE session_id = ? AND role = 'user'", (chat["id"],)).fetchone()[0], "保存这条消息")
 
     def test_material_to_report_to_practice(self):
         material = self.client.post("/api/materials", json={

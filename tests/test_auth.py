@@ -1,6 +1,8 @@
 import asyncio
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 import httpx
@@ -31,6 +33,7 @@ class AuthApiTests(unittest.TestCase):
 
     def test_login_and_account_data_isolation(self):
         self.assertEqual(self.alice.get("/api/materials").status_code, 401)
+        self.assertEqual(self.alice.get("/api/data/backup").status_code, 401)
         self.assertTrue(self.alice.get("/api/config").json()["auth_required"])
         alice = self.alice.post("/api/auth/register", json={
             "username": "Alice", "password": "correct-password",
@@ -51,6 +54,11 @@ class AuthApiTests(unittest.TestCase):
             "goal": "Alice 的面试", "material_ids": [material["id"]],
         }).json()
         self.assertEqual(self.bob.get("/api/materials").json(), [])
+        bob_backup = Path(self.temp.name) / "bob-backup.sqlite3"
+        bob_backup.write_bytes(self.bob.get("/api/data/backup").content)
+        with closing(sqlite3.connect(bob_backup)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM materials").fetchone()[0], 0)
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name = 'users'").fetchone())
         self.assertEqual(self.bob.get(f"/api/interview/sessions/{interview['id']}").status_code, 404)
         self.assertEqual(self.bob.post("/api/interview/sessions", json={
             "goal": "窃取材料", "material_ids": [material["id"]],
