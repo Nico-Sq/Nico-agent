@@ -303,7 +303,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             source = db.execute(
-                "SELECT goal FROM sessions WHERE id = ? AND kind = 'interview' AND status = 'finished'",
+                "SELECT goal FROM sessions WHERE id = ? AND kind = 'interview' AND status IN ('finished', 'cancelled')",
                 (source_session_id,),
             ).fetchone()
             item = db.execute(
@@ -482,6 +482,21 @@ class Store:
                     (session_id, now()),
                 )
         return self.get(session_id, kind) if changed else None
+
+    def cancel_interview(self, session_id: str) -> dict | None:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE sessions SET status = 'cancelled', version = version + 1 "
+                "WHERE id = ? AND kind = 'interview' "
+                "AND status IN ('new', 'running', 'awaiting_answer', 'paused')",
+                (session_id,),
+            ).rowcount
+            if changed:
+                db.execute(
+                    "INSERT INTO events(session_id, kind, detail, created_at) VALUES (?, 'cancel', '{}', ?)",
+                    (session_id, now()),
+                )
+        return self.get(session_id, "interview") if changed else None
 
     def resume(self, session_id: str) -> tuple[dict, bool] | None:
         with self.connect() as db:

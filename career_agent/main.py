@@ -279,6 +279,15 @@ def pause_interview(session_id: str):
     return result
 
 
+@app.post("/api/interview/sessions/{session_id}/cancel")
+def cancel_interview(session_id: str):
+    require_session(session_id, "interview")
+    result = store.cancel_interview(session_id)
+    if result is None:
+        raise HTTPException(409, "当前不能结束面试")
+    return result
+
+
 @app.post("/api/interview/sessions/{session_id}/resume")
 async def resume_interview(session_id: str):
     require_session(session_id, "interview")

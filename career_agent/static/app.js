@@ -57,13 +57,14 @@ function renderInterviewState(session) {
   state.interviewQuestion = session?.question_count || 0;
   $("copy-interview-id").hidden = !session;
   $("pause-running").hidden = !session || session.status !== "running" || session.question_count > 0;
+  $("cancel-interview").hidden = !session || ["finished", "cancelled"].includes(session.status);
   $("preparation").hidden = Boolean(session);
   $("interview-setup").hidden = Boolean(session);
   $("answer-form").hidden = !session || !(session.status === "awaiting_answer" ||
     (session.status === "running" && session.question_count > 0));
   $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
   $("resume-actions").hidden = !session || session.status !== "paused";
-  const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成" };
+  const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成", cancelled: "已结束" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
 }
 
@@ -203,11 +204,13 @@ function renderReport(report) {
     const evidence = document.createElement("p");
     evidence.textContent = `回答依据：${item.evidence?.map((quote) => `“${quote}”`).join("、") || "无"}`;
     row.append(evidence);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "复练这题";
-    button.onclick = () => startPractice(report.session_id, item.number);
-    row.append(button);
+    if (item.feedback) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "复练这题";
+      button.onclick = () => startPractice(report.session_id, item.number);
+      row.append(button);
+    }
     box.append(row);
   }
 }
@@ -260,7 +263,7 @@ async function selectSession(id) {
   if (state.kind === "interview") {
     renderInterviewState(view?.session);
     renderSelectedResources(view?.resources);
-    renderReport(view?.session.status === "finished" ? await api(`/interview/sessions/${id}/report`) : null);
+    renderReport(["finished", "cancelled"].includes(view?.session.status) ? await api(`/interview/sessions/${id}/report`) : null);
     if (!view) await loadPreparation();
   }
   await loadSessions();
@@ -461,6 +464,15 @@ async function pauseInterview() {
 }
 $("pause-button").onclick = pauseInterview;
 $("pause-running").onclick = pauseInterview;
+$("cancel-interview").onclick = async () => {
+  const id = state.ids.interview;
+  if (!id || !window.confirm("结束本轮面试？已保存的回答和反馈会保留。")) return;
+  try {
+    await api(`/interview/sessions/${id}/cancel`, { method: "POST" });
+    if (state.pending.interview?.id === id) state.pending.interview.controller.abort();
+    await selectSession(id);
+  } catch (error) { notice(error.message); }
+};
 $("resume-button").onclick = () => action("interview", async () => {
   const id = state.ids.interview;
   try { await runRequest("interview", id, `/interview/sessions/${id}/resume`); }

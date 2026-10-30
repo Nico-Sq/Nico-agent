@@ -216,3 +216,32 @@ class InterviewApiTests(unittest.TestCase):
             "question_number": 1,
         }).json()
         self.assertEqual(practice["max_questions"], 1)
+
+    def test_cancel_interview_keeps_partial_report_and_invalidates_run(self):
+        interview_id = self.client.post("/api/interview/sessions", json={"goal": "开发"}).json()["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={"text": "第一题回答"})
+        pending = self.client.post(f"/api/interview/sessions/{interview_id}/answers/claim", json={
+            "text": "第二题回答", "question_number": 2,
+        }).json()
+        cancelled = self.client.post(f"/api/interview/sessions/{interview_id}/cancel").json()
+        self.assertEqual(cancelled["status"], "cancelled")
+        stale = self.client.post(f"/api/interview/sessions/{interview_id}/answers/run", json={
+            "version": pending["version"],
+        }).json()
+        self.assertTrue(stale["interrupted"])
+        report = self.client.get(f"/api/interview/sessions/{interview_id}/report").json()
+        self.assertEqual(report["items"][0]["answer"], "第一题回答")
+        self.assertIsNotNone(report["items"][0]["feedback"])
+        self.assertEqual(report["items"][1]["answer"], "第二题回答")
+        self.assertIsNone(report["items"][1]["feedback"])
+        self.assertIsNone(report["summary"])
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/practice", json={
+            "question_number": 1,
+        }).status_code, 200)
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/practice", json={
+            "question_number": 2,
+        }).status_code, 409)
+        self.assertEqual(self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+            "text": "继续作答",
+        }).status_code, 409)
