@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .auth import AuthStore
+from .auth import AuthStore, LoginRateLimited
 from .extract import MAX_FILE_BYTES, extract_text
 from .provider import ModelError, Provider
 from .runtime import AgentRuntime
@@ -158,7 +158,10 @@ def register(body: Credentials, request: Request, response: Response):
 def login(body: Credentials, request: Request, response: Response):
     if not AUTH_REQUIRED:
         raise HTTPException(404)
-    user_id = auth_store.login(body.username, body.password)
+    try:
+        user_id = auth_store.login(body.username, body.password)
+    except LoginRateLimited as exc:
+        raise HTTPException(429, "登录尝试过多，请 15 分钟后重试") from exc
     if user_id is None:
         raise HTTPException(401, "用户名或密码错误")
     set_login_cookie(response, request, user_id)

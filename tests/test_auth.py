@@ -1,9 +1,11 @@
 import asyncio
 import sqlite3
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 from fastapi.testclient import TestClient
@@ -78,6 +80,27 @@ class AuthApiTests(unittest.TestCase):
             "username": "alice", "password": "correct-password",
         }).status_code, 200)
         self.assertEqual(self.alice.get("/api/materials").json()[0]["id"], material["id"])
+
+    def test_login_is_limited_after_repeated_failures(self):
+        self.alice.post("/api/auth/register", json={
+            "username": "alice", "password": "correct-password",
+        })
+        now = int(time.time())
+        with patch("career_agent.auth.time.time", return_value=now):
+            for _ in range(5):
+                response = self.bob.post("/api/auth/login", json={
+                    "username": "alice", "password": "wrong-password",
+                })
+                self.assertEqual(response.status_code, 401)
+            blocked = self.bob.post("/api/auth/login", json={
+                "username": "alice", "password": "correct-password",
+            })
+            self.assertEqual(blocked.status_code, 429)
+        with patch("career_agent.auth.time.time", return_value=now + 901):
+            accepted = self.bob.post("/api/auth/login", json={
+                "username": "alice", "password": "correct-password",
+            })
+        self.assertEqual(accepted.status_code, 200)
 
     def test_parallel_accounts_keep_request_context_separate(self):
         for client, username in ((self.alice, "alice"), (self.bob, "bob")):

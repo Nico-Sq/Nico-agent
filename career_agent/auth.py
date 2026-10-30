@@ -8,6 +8,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+class LoginRateLimited(Exception):
+    pass
+
+
 class AuthStore:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +28,11 @@ class AuthStore:
                     token_hash TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL REFERENCES users(id),
                     expires_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    username TEXT PRIMARY KEY,
+                    failures INTEGER NOT NULL,
+                    first_failed_at INTEGER NOT NULL
                 );
             """)
 
@@ -49,20 +58,44 @@ class AuthStore:
                     "INSERT INTO users(id, username, salt, password_hash) VALUES (?, ?, ?, ?)",
                     (user_id, username.lower(), salt, password_hash),
                 )
+                db.execute("DELETE FROM login_attempts WHERE username = ?", (username.lower(),))
         except sqlite3.IntegrityError:
             return None
         return user_id
 
     def login(self, username: str, password: str) -> str | None:
+        username = username.lower()
         with self.connect() as db:
             row = db.execute(
                 "SELECT id, salt, password_hash FROM users WHERE username = ?",
-                (username.lower(),),
+                (username,),
             ).fetchone()
         if row is None:
             return None
         actual = hashlib.pbkdf2_hmac("sha256", password.encode(), row[1], 310_000)
-        return row[0] if hmac.compare_digest(actual, row[2]) else None
+        valid = hmac.compare_digest(actual, row[2])
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = int(time.time())
+            attempt = db.execute(
+                "SELECT failures, first_failed_at FROM login_attempts WHERE username = ?", (username,)
+            ).fetchone()
+            if attempt and now - attempt[1] >= 15 * 60:
+                db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+                attempt = None
+            if attempt and attempt[0] >= 5:
+                raise LoginRateLimited()
+            if valid:
+                db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+                return row[0]
+            if attempt:
+                db.execute("UPDATE login_attempts SET failures = failures + 1 WHERE username = ?", (username,))
+            else:
+                db.execute(
+                    "INSERT INTO login_attempts(username, failures, first_failed_at) VALUES (?, 1, ?)",
+                    (username, now),
+                )
+        return None
 
     def issue_token(self, user_id: str) -> str:
         token = secrets.token_urlsafe(32)
