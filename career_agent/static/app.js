@@ -354,11 +354,11 @@ $("material-file").onchange = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    if (!/\.(txt|md)$/i.test(file.name)) throw new Error("只支持 .txt 或 .md 文本文件");
-    const content = await file.text();
-    if (!content.trim() || content.length > 4000) throw new Error("文本文件须包含 1–4000 个字符");
-    $("material-content").value = content;
-    if (!$("material-title").value.trim()) $("material-title").value = file.name.replace(/\.(txt|md)$/i, "");
+    const body = new FormData();
+    body.append("file", file);
+    const extracted = await api("/materials/extract", { method: "POST", headers: {}, body });
+    $("material-content").value = extracted.content;
+    if (!$("material-title").value.trim()) $("material-title").value = file.name.replace(/\.(txt|md|docx|pdf)$/i, "");
     notice("文件内容已导入，请检查后保存材料。");
   } catch (error) { notice(error.message); }
   finally { event.target.value = ""; }

@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
+from docx import Document
 from fastapi.testclient import TestClient
 
 from career_agent import main
@@ -294,3 +296,57 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/chat/sessions/{chat_id}").status_code, 200)
         self.assertEqual(self.client.delete(f"/api/chat/sessions/{chat_id}").status_code, 404)
         self.assertEqual(self.client.get(f"/api/interview/sessions/{interview_id}").status_code, 200)
+
+    def test_material_file_extraction_returns_reviewable_text(self):
+        plain = self.client.post("/api/materials/extract", files={
+            "file": ("resume.txt", "项目经历：接口优化".encode("utf-8"), "text/plain"),
+        })
+        self.assertEqual(plain.status_code, 200)
+        self.assertEqual(plain.json()["content"], "项目经历：接口优化")
+
+        document = Document()
+        document.add_paragraph("项目说明")
+        table = document.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "职责"
+        table.cell(0, 1).text = "后端开发"
+        docx_bytes = BytesIO()
+        document.save(docx_bytes)
+        word = self.client.post("/api/materials/extract", files={
+            "file": ("resume.docx", docx_bytes.getvalue(),
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        })
+        self.assertEqual(word.status_code, 200, word.text)
+        self.assertIn("项目说明", word.json()["content"])
+        self.assertIn("后端开发", word.json()["content"])
+
+        pdf = self.client.post("/api/materials/extract", files={
+            "file": ("resume.pdf", self._simple_pdf(), "application/pdf"),
+        })
+        self.assertEqual(pdf.status_code, 200, pdf.text)
+        self.assertIn("Hello PDF", pdf.json()["content"])
+        too_long = self.client.post("/api/materials/extract", files={
+            "file": ("long.txt", b"x" * 4001, "text/plain"),
+        })
+        self.assertEqual(too_long.status_code, 422)
+        self.assertEqual(self.client.get("/api/materials").json(), [])
+
+    @staticmethod
+    def _simple_pdf():
+        stream = b"BT /F1 12 Tf 20 100 Td (Hello PDF) Tj ET"
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        ]
+        data = b"%PDF-1.4\n"
+        offsets = []
+        for number, body in enumerate(objects, 1):
+            offsets.append(len(data))
+            data += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+        xref = len(data)
+        data += b"xref\n0 6\n0000000000 65535 f \n"
+        data += b"".join(f"{offset:010} 00000 n \n".encode() for offset in offsets)
+        data += b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + str(xref).encode() + b"\n%%EOF"
+        return data

@@ -56,8 +56,8 @@
               <select id="material-kind"><option value="resume">简历</option><option value="job_description">岗位描述</option><option value="project">项目材料</option></select>
               <input id="material-title" maxlength="120" placeholder="材料标题" required>
               <textarea id="material-content" rows="3" maxlength="4000" placeholder="粘贴材料文本" required></textarea>
-              <label for="material-file">或导入 .txt / .md 文件，检查内容后再保存</label>
-              <input id="material-file" type="file" accept=".txt,.md,text/plain,text/markdown">
+              <label for="material-file">或导入 .txt / .md / .docx / .pdf 文件，检查内容后再保存</label>
+              <input id="material-file" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf">
               <button type="submit">保存材料</button>
             </form>
             <div id="material-list" class="resource-list"></div>

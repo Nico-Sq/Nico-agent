@@ -3,12 +3,13 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .auth import AuthStore
+from .extract import MAX_FILE_BYTES, extract_text
 from .provider import Provider
 from .runtime import AgentRuntime
 from .store import Store
@@ -181,6 +182,15 @@ def list_materials():
 @app.post("/api/materials")
 def create_material(body: MaterialInput):
     return active_store().create_material(body.kind, nonempty(body.title), nonempty(body.content))
+
+
+@app.post("/api/materials/extract")
+async def extract_material(file: UploadFile = File(...)):
+    data = await file.read(MAX_FILE_BYTES + 1)
+    try:
+        return {"filename": file.filename, "content": extract_text(file.filename or "", data)}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.put("/api/materials/{material_id}")
