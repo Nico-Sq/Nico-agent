@@ -110,6 +110,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(content["feedback"]), 3)
         self.assertNotIn("SECRET_ANSWER", allowed["content"])
 
+    def test_cancelled_report_can_be_discussed_without_answer_text(self):
+        interview = self.store.create("interview", "开发岗位")
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answered = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "SECRET_PARTIAL_ANSWER")
+        run_demo(self.runtime.run(answered))
+        self.store.cancel_interview(interview["id"])
+        chat = self.store.create("chat")
+        selected = self.store.claim_run(chat["id"], "chat", "active", f"请解释面试 {interview['id']} 的反馈")
+        call = {"id": "1", "function": {"name": "read_interview_feedback", "arguments": json.dumps({
+            "interview_session_id": interview["id"],
+        })}}
+        result = json.loads(self.runtime._execute_tool_sync(selected, call)["content"])
+        self.assertEqual(len(result["feedback"]), 1)
+        self.assertNotIn("SECRET_PARTIAL_ANSWER", json.dumps(result))
+
     def test_interrupted_run_cannot_commit_late_reply(self):
         interview = self.store.create("interview", "开发岗位")
         running = self.store.claim_run(interview["id"], "interview", "new")

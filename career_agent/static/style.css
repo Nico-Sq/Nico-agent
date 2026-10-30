@@ -65,6 +65,7 @@ textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }
 .interview-report { border-top: 1px solid #edf0ea; padding-top: 18px; }
 .interview-report h3 { margin: 0 0 10px; font-size: 17px; }
 .interview-report > p { margin: 0 0 14px; line-height: 1.6; }
+.interview-report > button { margin-bottom: 12px; }
 .report-item { background: #f4f7f3; border-radius: 10px; padding: 14px; margin: 10px 0; }
 .report-item p { white-space: pre-wrap; line-height: 1.6; margin: 7px 0; }
 .report-item button { margin-top: 7px; }

@@ -128,13 +128,15 @@ class AgentRuntime:
                         report = self.store.interview_report(target)
                         if report is None:
                             result = {"error": "interview_not_found"}
-                        elif report["status"] != "finished":
+                        elif report["status"] not in ("finished", "cancelled") or not any(
+                            item["feedback"] for item in report["items"]
+                        ):
                             result = {"error": "report_not_ready"}
                         else:
                             result = {"goal": report["goal"], "summary": report["summary"],
                                       "feedback": [{"number": item["number"], "question": item["question"],
                                                     "feedback": item["feedback"]}
-                                                   for item in report["items"]]}
+                                                   for item in report["items"] if item["feedback"]]}
             except (KeyError, ValueError, TypeError):
                 result = {"error": "invalid_arguments"}
         self.store.event(session["id"], "tool", {"name": name, "result": "ok" if "error" not in result else result["error"]})

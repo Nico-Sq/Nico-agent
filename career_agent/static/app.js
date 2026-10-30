@@ -184,6 +184,7 @@ function renderReport(report) {
   box.replaceChildren();
   comparison.replaceChildren();
   comparison.hidden = !report?.practice_source;
+  $("discuss-report").hidden = !report?.items.some((item) => item.feedback);
   if (!report) return;
   $("report-summary").textContent = report.summary || "本轮尚未形成总结。";
   if (report.practice_source) {
@@ -302,6 +303,13 @@ async function runRequest(kind, id, path, body) {
 $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
 $("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
+$("discuss-report").onclick = async () => {
+  const id = state.ids.interview;
+  if (!id) return;
+  await switchKind("chat");
+  $("chat-text").value = `请解释面试 ${id} 的反馈，并给我复练建议。`;
+  $("chat-text").focus();
+};
 $("new-session").onclick = () => selectSession(null);
 $("delete-session").onclick = async () => {
   const kind = state.kind;
