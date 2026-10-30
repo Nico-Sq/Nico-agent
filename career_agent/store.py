@@ -287,11 +287,14 @@ class Store:
         # The kind check is part of the query, so interview context cannot read chat rows.
         sql = """SELECT m.id, m.role, m.content, m.created_at FROM messages m
                  JOIN sessions s ON s.id = m.session_id
-                 WHERE m.session_id = ? AND s.kind = ? ORDER BY m.id"""
+                 WHERE m.session_id = ? AND s.kind = ?"""
         with self.connect() as db:
-            rows = db.execute(sql, (session_id, kind)).fetchall()
-        result = [dict(row) for row in rows]
-        return result[-limit:] if limit else result
+            if limit:
+                rows = db.execute(sql + " ORDER BY m.id DESC LIMIT ?",
+                                  (session_id, kind, limit)).fetchall()
+                return [dict(row) for row in reversed(rows)]
+            rows = db.execute(sql + " ORDER BY m.id", (session_id, kind)).fetchall()
+        return [dict(row) for row in rows]
 
     def events(self, session_id: str, kind: str) -> list[dict]:
         with self.connect() as db:

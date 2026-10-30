@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from career_agent.provider import Provider
-from career_agent.runtime import AgentRuntime
+from career_agent.runtime import MAX_CONTEXT_CHARS, AgentRuntime
 from career_agent.store import Store
 
 
@@ -47,6 +47,48 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("CHAT_SECRET_123", context)
         self.assertNotIn("私密聊天回复", context)
         self.assertIn("后端工程师", context)
+
+    def test_model_context_is_bounded_without_truncating_transcript(self):
+        chat = self.store.create("chat")
+        for number in range(7):
+            running = self.store.claim_run(
+                chat["id"], "chat", "active", f"用户-{number}-" + "甲" * 4000
+            )
+            self.store.finish_run(chat["id"], running["version"], "回复-" + "乙" * 4000, "active", 0)
+        latest = self.store.claim_run(chat["id"], "chat", "active", "LATEST_USER_MESSAGE")
+        context = self.runtime.build_context(latest)
+        self.assertLessEqual(sum(len(item["content"]) for item in context), MAX_CONTEXT_CHARS)
+        self.assertEqual(context[-1]["content"], "LATEST_USER_MESSAGE")
+        self.assertNotIn("用户-0-", json.dumps(context, ensure_ascii=False))
+        self.assertEqual(len(self.store.messages(chat["id"], "chat")), 15)
+
+    def test_run_event_records_metadata_without_message_content(self):
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "PRIVATE_CHAT_TEXT")
+        run_demo(self.runtime.run(running))
+        events = [event for event in self.store.events(chat["id"], "chat") if event["kind"] == "model_run"]
+        self.assertEqual(len(events), 1)
+        detail = json.loads(events[0]["detail"])
+        self.assertEqual(detail["status"], "completed")
+        self.assertGreater(detail["context_chars"], 0)
+        self.assertNotIn("PRIVATE_CHAT_TEXT", events[0]["detail"])
+
+    def test_tool_call_limit_rejects_oversized_batch(self):
+        class ExcessProvider:
+            async def complete(self, messages, tools):
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": str(number), "type": "function", "function": {
+                        "name": "read_confirmed_claims", "arguments": "{}",
+                    }} for number in range(9)
+                ]}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请整理经历")
+        with self.assertRaises(ValueError):
+            run_demo(AgentRuntime(self.store, ExcessProvider()).run(running))
+        self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
+        events = [event for event in self.store.events(chat["id"], "chat") if event["kind"] == "model_run"]
+        self.assertEqual(json.loads(events[0]["detail"])["status"], "failed")
 
     def test_tool_permission_and_explicit_report_selection(self):
         interview = self.store.create("interview", "开发岗位")

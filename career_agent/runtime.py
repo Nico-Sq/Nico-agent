@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from .provider import Provider
@@ -7,6 +8,8 @@ from .store import Store
 
 
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
+MAX_CONTEXT_CHARS = 32_000
+MAX_TOOL_CALLS = 8
 
 
 class AgentRuntime:
@@ -43,14 +46,23 @@ class AgentRuntime:
                     "content": "[INTERVIEW_RESOURCES]\n" + json.dumps(resources, ensure_ascii=False),
                 })
             if practice:
+                practice = {**practice, "answer": (practice["answer"] or "")[:4000],
+                            "feedback": (practice["feedback"] or "")[:4000]}
                 context.append({
                     "role": "user",
                     "content": "[PRACTICE_SOURCE]\n" + json.dumps(practice, ensure_ascii=False),
                 })
         messages = self.store.messages(session["id"], kind, limit=16)
-        return context + [
-            {"role": row["role"], "content": row["content"]} for row in messages
-        ]
+        remaining = MAX_CONTEXT_CHARS - sum(len(item["content"]) for item in context)
+        selected = []
+        for row in reversed(messages):
+            if len(row["content"]) > remaining:
+                break
+            selected.append({"role": row["role"], "content": row["content"]})
+            remaining -= len(row["content"])
+        if messages and not selected:
+            raise ValueError("上下文预算不足以容纳最新消息")
+        return context + list(reversed(selected))
 
     def _tools(self, kind: str) -> list[dict]:
         if kind == "chat":
@@ -126,8 +138,7 @@ class AgentRuntime:
         self.store.event(session["id"], "tool", {"name": name, "result": "ok" if "error" not in result else result["error"]})
         return {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)}
 
-    async def _model_loop(self, session: dict) -> str:
-        messages = self.build_context(session)
+    async def _model_loop(self, session: dict, messages: list[dict], tool_names: list[str]) -> str:
         tools = self._tools(session["kind"])
         for _ in range(4):
             reply = await self.provider.complete(messages, tools)
@@ -137,14 +148,23 @@ class AgentRuntime:
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("模型未返回有效内容")
                 return content.strip()
+            if len(tool_names) + len(calls) > MAX_TOOL_CALLS:
+                raise ValueError("本次运行的工具调用超过上限")
+            tool_names.extend(call["function"]["name"] for call in calls)
             messages.append({"role": "assistant", "content": reply.get("content"), "tool_calls": calls})
             messages.extend(await asyncio.gather(*(self._execute_tool(session, call) for call in calls)))
         raise ValueError("模型工具调用超过 4 轮")
 
     async def run(self, session: dict) -> dict:
         kind = session["kind"]
+        started = time.perf_counter()
+        outcome = "failed"
+        context_chars = 0
+        tool_names = []
         try:
-            raw = await self._model_loop(session)
+            context = self.build_context(session)
+            context_chars = sum(len(item["content"]) for item in context)
+            raw = await self._model_loop(session, context, tool_names)
             if kind == "chat":
                 content, status, count = raw, "active", 0
             else:
@@ -183,8 +203,22 @@ class AgentRuntime:
                 evidence=tuple(dict.fromkeys(evidence)) if kind == "interview" else (),
             )
             if not committed:
+                outcome = "interrupted"
                 return {"interrupted": True, "session": self.store.get(session["id"], kind)}
+            outcome = "completed"
             return {"message": content, "session": self.store.get(session["id"], kind)}
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            self.store.fail_run(session["id"], session["version"], kind, "cancelled")
+            raise
         except Exception as exc:
             self.store.fail_run(session["id"], session["version"], kind, str(exc))
             raise
+        finally:
+            self.store.event(session["id"], "model_run", {
+                "version": session["version"], "status": outcome,
+                "provider": getattr(self.provider, "mode", "custom"),
+                "model": getattr(self.provider, "model", ""),
+                "context_chars": context_chars, "tool_names": tool_names,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000),
+            })
