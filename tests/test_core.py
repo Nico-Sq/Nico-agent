@@ -88,6 +88,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(report["items"]), 3)
         self.assertEqual(report["items"][1]["answer"], "第 2 题回答")
         self.assertIn("演示反馈", report["items"][1]["feedback"])
+        self.assertEqual(report["items"][1]["evidence"], ["第 2 题回答"])
         self.assertIn("演示总结", report["summary"])
 
     def test_practice_uses_one_question_and_original_feedback(self):
@@ -126,6 +127,25 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(needs_run)
         run_demo(self.runtime.run(resumed))
         self.assertIsNotNone(self.store.interview_report(interview["id"])["items"][0]["feedback"])
+
+    def test_fabricated_answer_evidence_is_rejected(self):
+        class FabricatingProvider:
+            async def complete(self, messages, tools):
+                return {"role": "assistant", "content": json.dumps({
+                    "feedback": "模型声称用户有量化结果", "question": "请继续说明", "finished": False,
+                    "evidence": ["不存在于回答的数字"],
+                }, ensure_ascii=False)}
+
+        interview = self.store.create("interview", "开发岗位")
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answer = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "我负责排查接口问题")
+        with self.assertRaises(ValueError):
+            run_demo(AgentRuntime(self.store, FabricatingProvider()).run(answer))
+        report = self.store.interview_report(interview["id"])
+        self.assertEqual(report["items"][0]["answer"], "我负责排查接口问题")
+        self.assertIsNone(report["items"][0]["feedback"])
+        self.assertEqual(report["items"][0]["evidence"], [])
 
     def test_only_selected_materials_and_confirmed_claims_enter_interview(self):
         resume = self.store.create_material("resume", "我的简历", "已授权的项目原文")

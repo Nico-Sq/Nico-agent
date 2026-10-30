@@ -71,6 +71,13 @@ class Store:
                     feedback TEXT,
                     PRIMARY KEY (session_id, number)
                 );
+                CREATE TABLE IF NOT EXISTS interview_evidence (
+                    session_id TEXT NOT NULL,
+                    number INTEGER NOT NULL,
+                    quote TEXT NOT NULL,
+                    PRIMARY KEY (session_id, number, quote),
+                    FOREIGN KEY (session_id, number) REFERENCES interview_items(session_id, number)
+                );
                 CREATE TABLE IF NOT EXISTS practice_sessions (
                     session_id TEXT PRIMARY KEY REFERENCES sessions(id),
                     source_session_id TEXT NOT NULL REFERENCES sessions(id),
@@ -207,10 +214,16 @@ class Store:
                 "SELECT number, question, answer, feedback FROM interview_items "
                 "WHERE session_id = ? ORDER BY number", (session_id,)
             ).fetchall()
+            evidence = db.execute(
+                "SELECT number, quote FROM interview_evidence WHERE session_id = ? ORDER BY number, quote",
+                (session_id,),
+            ).fetchall()
         messages = self.messages(session_id, "interview")
         summary = messages[-1]["content"] if session["status"] == "finished" and messages else None
+        items = [dict(row) | {"evidence": [item["quote"] for item in evidence if item["number"] == row["number"]]}
+                 for row in rows]
         return {"session_id": session_id, "goal": session["goal"], "status": session["status"],
-                "items": [dict(row) for row in rows], "summary": summary}
+                "items": items, "summary": summary}
 
     def practice_source(self, session_id: str) -> dict | None:
         with self.connect() as db:
@@ -310,17 +323,19 @@ class Store:
                     (session_id, user_text, now()),
                 )
                 if kind == "interview":
-                    db.execute(
+                    changed_answer = db.execute(
                         "UPDATE interview_items SET answer = ? WHERE session_id = ? "
                         "AND number = (SELECT question_count FROM sessions WHERE id = ?)",
                         (user_text, session_id, session_id),
-                    )
+                    ).rowcount
+                    if changed_answer != 1:
+                        raise ValueError("当前题目记录缺失")
             row = db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row)
 
     def finish_run(
         self, session_id: str, version: int, content: str, status: str, question_count: int,
-        question: str | None = None, feedback: str | None = None,
+        question: str | None = None, feedback: str | None = None, evidence: tuple[str, ...] = (),
     ) -> bool:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -343,6 +358,10 @@ class Store:
                         db.execute(
                             "UPDATE interview_items SET feedback = ? WHERE session_id = ? AND number = ?",
                             (feedback, session_id, before["question_count"]),
+                        )
+                        db.executemany(
+                            "INSERT INTO interview_evidence(session_id, number, quote) VALUES (?, ?, ?)",
+                            [(session_id, before["question_count"], quote) for quote in evidence],
                         )
                     if question:
                         db.execute(

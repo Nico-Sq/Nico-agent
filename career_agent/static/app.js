@@ -136,6 +136,9 @@ function renderReport(report) {
       paragraph.textContent = `${label}：${value || "无"}`;
       row.append(paragraph);
     }
+    const evidence = document.createElement("p");
+    evidence.textContent = `回答依据：${item.evidence?.map((quote) => `“${quote}”`).join("、") || "无"}`;
+    row.append(evidence);
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "复练这题";

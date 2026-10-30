@@ -53,6 +53,7 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(report["status"], "finished")
         self.assertEqual(len(report["items"]), 3)
         self.assertEqual(report["items"][0]["answer"], "回答 0")
+        self.assertEqual(report["items"][0]["evidence"], ["回答 0"])
         practice = self.client.post(
             f"/api/interview/sessions/{session_id}/practice", json={"question_number": 2}
         ).json()

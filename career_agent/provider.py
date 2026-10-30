@@ -61,18 +61,22 @@ class Provider:
                     question = f"请结合你提供的“{resources['materials'][0]['title']}”，介绍一项与岗位相关的经历。"
                 else:
                     question = QUESTIONS[0]
-                result = {"feedback": "", "question": question, "finished": False}
+                result = {"feedback": "", "question": question, "finished": False, "evidence": []}
             elif count < max_questions:
+                answer = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "")
                 result = {
                     "feedback": "演示反馈：请补充你的具体行动、可核实的结果和反思。",
                     "question": QUESTIONS[count % len(QUESTIONS)],
                     "finished": False,
+                    "evidence": [answer[:80]],
                 }
             else:
+                answer = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "")
                 result = {
                     "feedback": f"演示总结：你已完成 {max_questions} 题。正式评价需要配置真实模型。",
                     "question": "",
                     "finished": True,
+                    "evidence": [answer[:80]],
                 }
             return {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)}
         if messages[-1]["role"] == "tool":
