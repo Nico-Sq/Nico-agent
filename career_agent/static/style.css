@@ -70,5 +70,11 @@ textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }
 .setup button { justify-self: start; }
 .resume-actions { padding: 15px 0; }
 .notice { min-height: 20px; color: #9c3d31; font-size: 13px; margin: 12px 0 0; }
+dialog { width: min(560px, calc(100vw - 24px)); border: 1px solid #d6dfd9; border-radius: 14px; padding: 22px; color: #202724; }
+dialog::backdrop { background: #162a2199; }
+dialog form { display: grid; gap: 10px; }
+dialog h2 { margin: 0; }
+dialog p { margin: 0 0 8px; color: #647267; font-size: 13px; }
+dialog input { width: 100%; padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; }
 [hidden] { display: none !important; }
 @media (max-width: 760px) { .shell { padding: 18px 12px; } .topbar { align-items: start; } .layout { grid-template-columns: 1fr; } .sidebar { min-height: 120px; } .sessions { display: flex; overflow-x: auto; } .sessions button { min-width: 170px; } .workspace { padding: 18px; min-height: 540px; } .panel-head { display: block; } .panel-head p { text-align: left; } }

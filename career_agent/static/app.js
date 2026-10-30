@@ -1,4 +1,4 @@
-const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0 };
+const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
@@ -67,6 +67,21 @@ function renderInterviewState(session) {
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
 }
 
+function openResourceEditor(kind, resource) {
+  state.editing = { kind, id: resource.id };
+  const material = kind === "material";
+  $("resource-editor-heading").textContent = material ? "编辑材料" : "编辑经历";
+  $("resource-edit-title-label").hidden = !material;
+  $("resource-edit-title").hidden = !material;
+  $("resource-edit-title").disabled = !material;
+  $("resource-edit-title").value = material ? resource.title : "";
+  $("resource-edit-content-label").textContent = material ? "材料内容" : "经历主张（保存后需要重新确认）";
+  $("resource-edit-content").maxLength = material ? 4000 : 500;
+  $("resource-edit-content").value = material ? resource.content : resource.text;
+  $("resource-edit-error").hidden = true;
+  $("resource-editor").showModal();
+}
+
 async function loadPreparation() {
   const [materials, claims] = await Promise.all([api("/materials"), api("/claims")]);
   const materialBox = $("material-list");
@@ -96,17 +111,7 @@ async function loadPreparation() {
     row.append(copy);
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "secondary"; edit.textContent = "编辑";
-    edit.onclick = () => {
-      const title = window.prompt("编辑材料标题；旧面试仍保留原版本", material.title);
-      if (!title?.trim()) return;
-      const content = window.prompt("编辑材料内容", material.content);
-      if (!content?.trim()) return;
-      action("interview", async () => {
-        await api(`/materials/${material.id}`, { method: "PUT", body: JSON.stringify({ title: title.trim(), content: content.trim() }) });
-        await loadPreparation();
-        notice("新版本已保存；关联旧材料的经历已撤回，请重新确认。");
-      });
-    };
+    edit.onclick = () => openResourceEditor("material", material);
     row.append(edit);
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "secondary"; remove.textContent = "撤回";
@@ -144,15 +149,7 @@ async function loadPreparation() {
     row.append(text);
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "secondary"; edit.textContent = "编辑";
-    edit.onclick = () => {
-      const value = window.prompt("编辑经历；新版本需要重新确认真实", claim.text);
-      if (!value?.trim()) return;
-      action("interview", async () => {
-        await api(`/claims/${claim.id}`, { method: "PUT", body: JSON.stringify({ text: value.trim() }) });
-        await loadPreparation();
-        notice("经历新版本已保存为待确认草稿。");
-      });
-    };
+    edit.onclick = () => openResourceEditor("claim", claim);
     row.append(edit);
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "secondary"; remove.textContent = "撤回";
@@ -180,9 +177,21 @@ function renderSelectedResources(resources) {
 function renderReport(report) {
   $("interview-report").hidden = !report;
   const box = $("report-items");
+  const comparison = $("practice-compare");
   box.replaceChildren();
+  comparison.replaceChildren();
+  comparison.hidden = !report?.practice_source;
   if (!report) return;
   $("report-summary").textContent = report.summary || "本轮尚未形成总结。";
+  if (report.practice_source) {
+    const source = report.practice_source;
+    for (const value of ["复练对照：原题与原反馈", `原题：${source.question}`,
+      `原回答：${source.answer || "无"}`, `原反馈：${source.feedback || "无"}`]) {
+      const line = document.createElement("p");
+      line.textContent = value;
+      comparison.append(line);
+    }
+  }
   for (const item of report.items) {
     const row = document.createElement("div");
     row.className = "report-item";
@@ -284,6 +293,46 @@ $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
 $("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
 $("new-session").onclick = () => selectSession(null);
+$("material-file").onchange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    if (!/\.(txt|md)$/i.test(file.name)) throw new Error("只支持 .txt 或 .md 文本文件");
+    const content = await file.text();
+    if (!content.trim() || content.length > 4000) throw new Error("文本文件须包含 1–4000 个字符");
+    $("material-content").value = content;
+    if (!$("material-title").value.trim()) $("material-title").value = file.name.replace(/\.(txt|md)$/i, "");
+    notice("文件内容已导入，请检查后保存材料。");
+  } catch (error) { notice(error.message); }
+  finally { event.target.value = ""; }
+};
+$("resource-edit-cancel").onclick = () => $("resource-editor").close();
+$("resource-editor").onclose = () => { state.editing = null; };
+$("resource-editor-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!state.editing) return;
+  const { kind, id } = state.editing;
+  const content = $("resource-edit-content").value.trim();
+  const title = $("resource-edit-title").value.trim();
+  const errorBox = $("resource-edit-error");
+  errorBox.hidden = true;
+  if (!content || (kind === "material" && !title)) return;
+  const submit = $("resource-editor-form").querySelector("button[type=submit]");
+  submit.disabled = true;
+  try {
+    const path = kind === "material" ? `/materials/${id}` : `/claims/${id}`;
+    const body = kind === "material" ? { title, content } : { text: content };
+    await api(path, { method: "PUT", body: JSON.stringify(body) });
+    $("resource-editor").close();
+    await loadPreparation();
+    notice(kind === "material" ? "材料新版本已保存；关联旧材料的经历已撤回。" : "经历新版本已保存为待确认草稿。");
+  } catch (error) {
+    if ($("resource-editor").open) {
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+    } else notice(error.message);
+  } finally { submit.disabled = false; }
+};
 $("material-form").onsubmit = (event) => {
   event.preventDefault();
   action("interview", async () => {

@@ -65,6 +65,8 @@ class InterviewApiTests(unittest.TestCase):
         practice_report = self.client.get(f"/api/interview/sessions/{practice_id}/report").json()
         self.assertEqual(practice_report["status"], "finished")
         self.assertEqual(len(practice_report["items"]), 1)
+        self.assertEqual(practice_report["practice_source"]["question_number"], 2)
+        self.assertEqual(practice_report["practice_source"]["answer"], "回答 1")
         self.assertEqual(len(self.client.get(
             f"/api/interview/sessions/{practice_id}"
         ).json()["resources"]["materials"]), 1)

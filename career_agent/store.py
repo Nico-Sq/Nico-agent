@@ -287,7 +287,7 @@ class Store:
         items = [dict(row) | {"evidence": [item["quote"] for item in evidence if item["number"] == row["number"]]}
                  for row in rows]
         return {"session_id": session_id, "goal": session["goal"], "status": session["status"],
-                "items": items, "summary": summary}
+                "items": items, "summary": summary, "practice_source": self.practice_source(session_id)}
 
     def practice_source(self, session_id: str) -> dict | None:
         with self.connect() as db:
