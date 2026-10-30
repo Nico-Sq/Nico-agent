@@ -290,6 +290,7 @@ async function selectSession(id) {
     if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
     $("chat-memory-form").hidden = !view;
     $("chat-memory").value = view?.session.chat_memory || "";
+    $("chat-retry").hidden = !view || view.session.status !== "active" || view.messages.at(-1)?.role !== "user";
   }
   renderMessages(state.kind, view?.messages || []);
   if (state.kind === "interview") {
@@ -330,6 +331,25 @@ async function runRequest(kind, id, path, body) {
   finally { if (state.pending[kind]?.controller === controller) state.pending[kind] = null; }
 }
 
+async function performChatRun(id, path, body) {
+  if (state.pending.chat?.id === id) state.pending.chat.controller.abort();
+  const seq = ++state.chatSeq;
+  let errorMessage = "";
+  try {
+    const run = runRequest("chat", id, path, body);
+    if (state.kind === "chat" && state.ids.chat === id) await selectSession(id);
+    notice("正在生成回复，可以继续发送补充消息。");
+    await run;
+  } catch (error) {
+    if (error.name !== "AbortError") errorMessage = error.message;
+  } finally {
+    if (seq === state.chatSeq && state.kind === "chat" && state.ids.chat === id) {
+      await selectSession(id);
+      if (errorMessage) notice(errorMessage);
+    }
+  }
+}
+
 $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
 $("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
@@ -341,6 +361,13 @@ $("discuss-report").onclick = async () => {
   $("chat-text").focus();
 };
 $("new-session").onclick = () => selectSession(null);
+$("chat-retry").onclick = async () => {
+  const id = state.ids.chat;
+  if (!id) return;
+  $("chat-retry").disabled = true;
+  try { await performChatRun(id, `/chat/sessions/${id}/retry`); }
+  finally { $("chat-retry").disabled = false; }
+};
 $("chat-memory-form").onsubmit = (event) => {
   event.preventDefault();
   const id = state.ids.chat;
@@ -444,22 +471,7 @@ $("chat-form").onsubmit = async (event) => {
   } catch (error) { notice(error.message); return; }
   finally { setBusy("chat", false); }
   $("chat-text").value = "";
-  if (state.pending.chat?.id === id) state.pending.chat.controller.abort();
-  const seq = ++state.chatSeq;
-  let errorMessage = "";
-  try {
-    const run = runRequest("chat", id, `/chat/sessions/${id}/messages/run`, { version: claimed.version });
-    if (state.kind === "chat" && state.ids.chat === id) await selectSession(id);
-    notice("正在生成回复，可以继续发送补充消息。");
-    await run;
-  } catch (error) {
-    if (error.name !== "AbortError") errorMessage = error.message;
-  } finally {
-    if (seq === state.chatSeq && state.kind === "chat" && state.ids.chat === id) {
-      await selectSession(id);
-      if (errorMessage) notice(errorMessage);
-    }
-  }
+  await performChatRun(id, `/chat/sessions/${id}/messages/run`, { version: claimed.version });
 };
 $("chat-interrupt").onclick = async () => {
   if (!state.ids.chat) return;

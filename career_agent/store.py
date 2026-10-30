@@ -478,6 +478,17 @@ class Store:
             ).rowcount
         return self.get(session_id, "chat") if changed else None
 
+    def retry_chat(self, session_id: str) -> dict | None:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE sessions SET status = 'running', version = version + 1, run_started = 0 "
+                "WHERE id = ? AND kind = 'chat' AND status = 'active' "
+                "AND (SELECT role FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1) = 'user'",
+                (session_id, session_id),
+            ).rowcount
+        return self.get(session_id, "chat") if changed else None
+
     def run_current(self, session_id: str, version: int) -> bool:
         with self.connect() as db:
             row = db.execute(

@@ -56,6 +56,25 @@ class InterviewApiTests(unittest.TestCase):
         self.client.put(f"/api/chat/sessions/{chat_id}/memory", json={"text": ""})
         self.assertEqual(self.client.get(f"/api/chat/sessions/{chat_id}").json()["session"]["chat_memory"], "")
 
+    def test_chat_retry_reuses_unanswered_message(self):
+        chat_id = self.client.post("/api/chat/sessions").json()["id"]
+        self.assertEqual(self.client.post(f"/api/chat/sessions/{chat_id}/retry").status_code, 409)
+        material = self.client.post("/api/materials", json={
+            "kind": "project", "title": "项目", "content": "缓存命中率提升",
+        }).json()
+        text = f"请解释材料 {material['id']}"
+        pending = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
+            "text": text,
+        }).json()
+        main.store.fail_run(chat_id, pending["version"], "chat", "model_unavailable")
+        result = self.client.post(f"/api/chat/sessions/{chat_id}/retry")
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("缓存命中率提升", result.json()["message"])
+        messages = self.client.get(f"/api/chat/sessions/{chat_id}").json()["messages"]
+        self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
+        self.assertEqual(messages[0]["content"], text)
+        self.assertEqual(self.client.post(f"/api/chat/sessions/{chat_id}/retry").status_code, 409)
+
     def test_backup_contains_committed_business_data(self):
         material = self.client.post("/api/materials", json={
             "kind": "resume", "title": "我的简历", "content": "备份中的经历",

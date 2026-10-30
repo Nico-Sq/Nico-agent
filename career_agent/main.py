@@ -363,6 +363,15 @@ async def run_chat_message(session_id: str, body: ChatRunInput):
     return await complete_run(session)
 
 
+@app.post("/api/chat/sessions/{session_id}/retry")
+async def retry_chat_message(session_id: str):
+    require_session(session_id, "chat")
+    session = active_store().retry_chat(session_id)
+    if session is None:
+        raise HTTPException(409, "当前没有待重试的消息")
+    return await complete_run(session)
+
+
 @app.post("/api/chat/sessions/{session_id}/interrupt")
 def interrupt_chat(session_id: str):
     require_session(session_id, "chat")
