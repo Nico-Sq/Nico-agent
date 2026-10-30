@@ -10,7 +10,7 @@ from unittest.mock import patch
 import httpx
 
 from career_agent.provider import ModelError, Provider
-from career_agent.runtime import MAX_CONTEXT_CHARS, AgentRuntime
+from career_agent.runtime import MAX_CONTEXT_CHARS, MAX_MODEL_OUTPUT_CHARS, AgentRuntime
 from career_agent.store import Store
 
 
@@ -146,6 +146,61 @@ class CoreTests(unittest.TestCase):
             run_demo(AgentRuntime(self.store, InventingProvider()).run(skipped))
         report = self.store.interview_report(interview["id"])
         self.assertEqual(report["status"], "paused")
+        self.assertIsNone(report["items"][0]["feedback"])
+
+    def test_interview_rejects_invalid_first_question_output(self):
+        class FixedProvider:
+            def __init__(self, content):
+                self.content = content
+
+            async def complete(self, messages, tools):
+                return {"content": self.content}
+
+        cases = [
+            json.dumps(["不是对象"]),
+            json.dumps({"feedback": "", "question": "题目", "finished": False}),
+            json.dumps({"feedback": "虚构反馈", "question": "题目", "finished": False,
+                        "evidence": [], "summary": ""}),
+            json.dumps({"feedback": "", "question": "题目", "finished": False,
+                        "evidence": [], "summary": "提前总结"}),
+            json.dumps({"feedback": "", "question": "题目" * 501, "finished": False,
+                        "evidence": [], "summary": ""}),
+        ]
+        for content in cases:
+            with self.subTest(content=content[:60]):
+                interview = self.store.create("interview", "后端工程师")
+                running = self.store.claim_run(interview["id"], "interview", "new")
+                with self.assertRaises(ValueError):
+                    run_demo(AgentRuntime(self.store, FixedProvider(content)).run(running))
+                self.assertEqual(self.store.interview_report(interview["id"])["items"], [])
+
+    def test_chat_rejects_oversized_model_output(self):
+        class OversizedProvider:
+            async def complete(self, messages, tools):
+                return {"content": "字" * (MAX_MODEL_OUTPUT_CHARS + 1)}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请回复")
+        with self.assertRaises(ValueError):
+            run_demo(AgentRuntime(self.store, OversizedProvider()).run(running))
+        self.assertEqual([row["role"] for row in self.store.messages(chat["id"], "chat")], ["user"])
+
+    def test_interview_rejects_next_question_after_last_answer(self):
+        class InvalidFinalProvider:
+            async def complete(self, messages, tools):
+                return {"content": json.dumps({
+                    "feedback": "回答有依据", "question": "多余题目", "finished": True,
+                    "evidence": ["原始回答"], "summary": "全场总结",
+                }, ensure_ascii=False)}
+
+        interview = self.store.create("interview", "后端工程师", max_questions=1)
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answer = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "原始回答")
+        with self.assertRaisesRegex(ValueError, "结束时不能生成下一题"):
+            run_demo(AgentRuntime(self.store, InvalidFinalProvider()).run(answer))
+        report = self.store.interview_report(interview["id"])
+        self.assertEqual(report["items"][0]["answer"], "原始回答")
         self.assertIsNone(report["items"][0]["feedback"])
 
     def test_chat_memory_survives_context_window(self):

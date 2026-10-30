@@ -364,9 +364,16 @@ class Store:
 
     def list_sessions(self, kind: str) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute(
-                "SELECT * FROM sessions WHERE kind = ? ORDER BY created_at DESC", (kind,)
-            ).fetchall()
+            if kind == "interview":
+                rows = db.execute(
+                    "SELECT s.*, EXISTS(SELECT 1 FROM interview_items i "
+                    "WHERE i.session_id = s.id AND i.feedback IS NOT NULL) AS has_feedback "
+                    "FROM sessions s WHERE s.kind = ? ORDER BY s.created_at DESC", (kind,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM sessions WHERE kind = ? ORDER BY created_at DESC", (kind,)
+                ).fetchall()
         sessions = [dict(row) for row in rows]
         for session in sessions:
             session.pop("run_started")

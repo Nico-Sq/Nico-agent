@@ -279,6 +279,7 @@ class InterviewApiTests(unittest.TestCase):
         }).json()
         self.assertEqual(final["session"]["status"], "finished")
         self.assertEqual(len(self.client.get(f"/api/interview/sessions/{interview_id}/report").json()["items"]), 2)
+        self.assertTrue(self.client.get("/api/interview/sessions").json()[0]["has_feedback"])
         practice = self.client.post(f"/api/interview/sessions/{interview_id}/practice", json={
             "question_number": 1,
         }).json()
@@ -333,6 +334,7 @@ class InterviewApiTests(unittest.TestCase):
         self.assertIn("跳过第 1 题", report["summary"])
         self.assertEqual(report["items"][0]["evidence"], [])
         self.assertIsNone(report["items"][0]["feedback"])
+        self.assertFalse(self.client.get("/api/interview/sessions").json()[0]["has_feedback"])
 
     def test_cancel_interview_keeps_partial_report_and_invalidates_run(self):
         interview_id = self.client.post("/api/interview/sessions", json={"goal": "开发"}).json()["id"]

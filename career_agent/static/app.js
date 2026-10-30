@@ -39,6 +39,31 @@ function setBusy(kind, value) {
   state.busy[kind] = value;
   document.querySelectorAll(`#${kind === "chat" ? "chat-panel" : "interview-panel"} button[type=submit]`).forEach((button) => { button.disabled = value; });
 }
+async function loadChatResources() {
+  const [materials, sessions] = await Promise.all([api("/materials"), api("/interview/sessions")]);
+  const select = $("chat-resource");
+  select.replaceChildren(new Option("选择要讨论的内容", ""));
+  for (const material of materials) {
+    const option = new Option(`材料 · ${material.title}`, material.id);
+    option.dataset.kind = "material";
+    select.append(option);
+  }
+  for (const session of sessions.filter((item) => ["finished", "cancelled"].includes(item.status) && item.has_feedback)) {
+    const option = new Option(`面试反馈 · ${session.goal}`, session.id);
+    option.dataset.kind = "interview";
+    select.append(option);
+  }
+  $("chat-insert-resource").disabled = true;
+}
+function insertChatReference(id, kind) {
+  const input = $("chat-text");
+  const existing = input.value.trim();
+  const prompt = kind === "material"
+    ? existing ? `请结合材料 ${id} 回答。` : `请分析材料 ${id} 的重点。`
+    : existing ? `请结合面试 ${id} 的反馈回答。` : `请解释面试 ${id} 的反馈，并给我复练建议。`;
+  input.value = existing ? `${existing}\n\n${prompt}` : prompt;
+  input.focus();
+}
 function renderMessages(kind, messages) {
   const box = $(`${kind}-messages`);
   box.replaceChildren();
@@ -317,6 +342,10 @@ async function switchKind(kind) {
     await selectSession(null);
     notice(error.message);
   }
+  if (kind === "chat" && !$("shell").hidden) {
+    try { await loadChatResources(); }
+    catch (error) { notice(error.message); }
+  }
 }
 
 async function action(kind, work) {
@@ -358,8 +387,15 @@ $("discuss-report").onclick = async () => {
   const id = state.ids.interview;
   if (!id) return;
   await switchKind("chat");
-  $("chat-text").value = `请解释面试 ${id} 的反馈，并给我复练建议。`;
-  $("chat-text").focus();
+  insertChatReference(id, "interview");
+};
+$("chat-resource").onchange = () => { $("chat-insert-resource").disabled = !$("chat-resource").value; };
+$("chat-insert-resource").onclick = () => {
+  const select = $("chat-resource");
+  if (!select.value) return;
+  insertChatReference(select.value, select.selectedOptions[0].dataset.kind);
+  select.value = "";
+  $("chat-insert-resource").disabled = true;
 };
 $("new-session").onclick = () => selectSession(null);
 $("chat-retry").onclick = async () => {

@@ -14,6 +14,7 @@ MAX_MODEL_INPUT_CHARS = 64_000
 MAX_TOOL_CALLS = 8
 MAX_RUN_SECONDS = 120
 MAX_RUN_TOKENS = 16_000
+MAX_MODEL_OUTPUT_CHARS = 12_000
 # 修改运行时的系统提示拼接规则时同步递增此版本。
 PROMPT_POLICY_VERSION = "4"
 
@@ -242,10 +243,16 @@ class AgentRuntime:
                     raw = await self._model_loop(session, context, tool_names, usage)
             except TimeoutError as exc:
                 raise ModelError("run_timeout", "本次模型运行超时", 504) from exc
+            if len(raw) > MAX_MODEL_OUTPUT_CHARS:
+                raise ValueError("模型输出超过长度上限")
             if kind == "chat":
                 content, status, count = raw, "active", 0
             else:
                 data = json.loads(raw)
+                if not isinstance(data, dict):
+                    raise ValueError("面试模型必须返回 JSON 对象")
+                if not {"feedback", "question", "finished", "evidence"}.issubset(data):
+                    raise ValueError("面试模型缺少必要字段")
                 feedback = data["feedback"]
                 question = data["question"]
                 evidence = data["evidence"]
@@ -254,12 +261,21 @@ class AgentRuntime:
                         or not isinstance(data["finished"], bool) or not isinstance(evidence, list)
                         or not isinstance(summary, str)):
                     raise ValueError("面试模型输出字段格式错误")
+                if (len(question) > 1000 or len(feedback) > 4000 or len(summary) > 4000
+                        or len(evidence) > 5):
+                    raise ValueError("面试模型输出超过长度上限")
                 old_count = session["question_count"]
                 max_questions = session["max_questions"]
                 report = self.store.interview_report(session["id"])
                 skipped = bool(old_count and report["items"][-1]["skipped"])
                 if data["finished"] != (old_count >= max_questions):
                     raise ValueError("面试模型完成状态与题数不符")
+                if not old_count and (feedback.strip() or summary.strip()):
+                    raise ValueError("首题不能包含反馈或总结")
+                if old_count < max_questions and summary.strip():
+                    raise ValueError("未结束时不能生成全场总结")
+                if old_count >= max_questions and question.strip():
+                    raise ValueError("结束时不能生成下一题")
                 if skipped and (feedback.strip() or evidence):
                     raise ValueError("跳过的题目不能生成反馈或回答证据")
                 if old_count and not skipped and not feedback.strip():

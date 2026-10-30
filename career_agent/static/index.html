@@ -39,7 +39,12 @@
       <section class="workspace">
         <div id="chat-panel">
           <div class="panel-head"><div><span class="eyebrow">ASSISTANT</span><h2>和助手聊聊</h2></div><div class="panel-meta"><p>讨论岗位、经历和面试反馈</p><a id="chat-export" class="button-link" hidden>导出聊天</a></div></div>
-          <p class="selected-resources">讨论指定材料或面试反馈时，可从面试页复制对应 ID 并写在消息中。</p>
+          <div class="chat-reference">
+            <label for="chat-resource">引用材料或面试反馈</label>
+            <select id="chat-resource"><option value="">选择要讨论的内容</option></select>
+            <button id="chat-insert-resource" type="button" class="secondary" disabled>加入消息</button>
+          </div>
+          <p class="selected-resources">引用会先加入消息草稿，检查并发送后助手才能读取该内容。</p>
           <form id="chat-memory-form" class="resource-form" hidden>
             <label for="chat-memory">当前聊天的固定备注</label>
             <textarea id="chat-memory" rows="2" maxlength="2000" placeholder="例如：目标岗位、准备重点或希望保持的回复风格"></textarea>
