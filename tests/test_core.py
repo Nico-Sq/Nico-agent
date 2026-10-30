@@ -130,6 +130,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(report["items"]), 3)
         self.assertEqual(report["items"][1]["answer"], "第 2 题回答")
         self.assertIn("演示反馈", report["items"][1]["feedback"])
+        self.assertIn("演示反馈", report["items"][2]["feedback"])
+        self.assertNotIn("演示总结", report["items"][2]["feedback"])
         self.assertEqual(report["items"][1]["evidence"], ["第 2 题回答"])
         self.assertIn("演示总结", report["summary"])
 
@@ -151,6 +153,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(report["status"], "finished")
         self.assertEqual(len(report["items"]), 1)
         self.assertEqual(report["items"][0]["answer"], "换一个场景的回答")
+        self.assertIn("演示反馈", report["items"][0]["feedback"])
+        self.assertIn("演示总结", report["summary"])
 
     def test_failed_model_call_keeps_answer_for_resume(self):
         class FailingProvider:
