@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>求职双线 Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div><span class="eyebrow">CAREER STUDIO</span><h1>求职双线 Agent</h1></div>
+      <span id="provider" class="badge">读取模型配置中</span>
+    </header>
+    <p class="intro">在聊天中梳理思路，在独立的面试会话中逐题练习。两条线各自保存记录。</p>
+    <nav class="tabs" aria-label="选择入口">
+      <button type="button" id="tab-chat" class="active">聊天助手</button>
+      <button type="button" id="tab-interview">模拟面试</button>
+    </nav>
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="side-title"><h2>会话记录</h2><button id="new-session" type="button">新建</button></div>
+        <div id="sessions" class="sessions"></div>
+      </aside>
+      <section class="workspace">
+        <div id="chat-panel">
+          <div class="panel-head"><div><span class="eyebrow">ASSISTANT</span><h2>和助手聊聊</h2></div><p>讨论岗位、经历和面试反馈</p></div>
+          <div id="chat-messages" class="messages" aria-live="polite"></div>
+          <form id="chat-form" class="composer">
+            <label for="chat-text">你的消息</label>
+            <textarea id="chat-text" rows="3" placeholder="例如：帮我梳理一下这个岗位最看重的能力" required></textarea>
+            <div class="composer-actions"><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div>
+          </form>
+        </div>
+        <div id="interview-panel" hidden>
+          <div class="panel-head"><div><span class="eyebrow">INTERVIEW</span><h2>逐题模拟面试</h2></div><p id="interview-status">创建一场面试</p></div>
+          <form id="interview-setup" class="setup">
+            <label for="interview-goal">目标岗位与练习重点</label>
+            <textarea id="interview-goal" rows="3" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
+            <button type="submit">开始面试</button>
+          </form>
+          <div id="interview-messages" class="messages" aria-live="polite"></div>
+          <form id="answer-form" class="composer" hidden>
+            <label for="answer-text">你的回答</label>
+            <textarea id="answer-text" rows="4" placeholder="结合真实经历作答，尽量说清行动和结果" required></textarea>
+            <div class="composer-actions"><button type="button" id="pause-button" class="secondary">暂停</button><button type="submit">提交回答</button></div>
+          </form>
+          <div id="resume-actions" class="resume-actions" hidden><button id="resume-button" type="button">继续面试</button></div>
+        </div>
+        <p id="notice" class="notice" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

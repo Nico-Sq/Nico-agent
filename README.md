@@ -1,1 +1,40 @@
 # Nico-agent
+
+面向求职者的文字版双线 Agent 原型：聊天助手用于讨论岗位、经历和反馈；模拟面试用于独立的逐题练习。两条入口使用不同会话，面试模型上下文只读取当前面试会话。完整消息记录保存在 SQLite，模型每次只读取最近 16 条消息。
+
+## 启动
+
+需要 Python 3.11+。在此目录执行：
+
+```powershell
+python -m pip install -e .
+python -m uvicorn career_agent.main:app --reload
+```
+
+浏览器打开 `http://127.0.0.1:8000`。默认 `MODEL_PROVIDER=demo`，可以直接体验三题流程；演示反馈是固定文本，不代表真实评价。
+
+接 OpenAI 兼容的聊天补全接口时，在启动前设置环境变量：
+
+```powershell
+$env:MODEL_PROVIDER = "openai_compatible"
+$env:MODEL_API_BASE_URL = "https://api.openai.com/v1"
+$env:MODEL_API_KEY = "你的密钥"
+$env:MODEL_NAME = "提供方的模型名"
+python -m uvicorn career_agent.main:app --reload
+```
+
+本地数据库默认位于 `data/career_agent.sqlite3`，可用 `DATA_DIR` 指定其他目录。不要将密钥写入项目文件。
+
+## 当前功能
+
+- 聊天与面试分别创建、保存、查询会话；刷新页面后可从历史中恢复。
+- 通用模型循环：构建所属会话上下文、请求模型、并发执行模型请求的只读工具、将结果交回模型，最多 4 轮工具调用。
+- Markdown Skill 分别定义聊天与面试行为。工具执行层按入口校验，聊天读取面试反馈还要求当前用户消息明确写出目标面试会话 ID；工具只返回反馈文本。
+- 面试状态为新建、运行中、等待回答、暂停、完成；三题后生成总结。回答先落库，模型失败后可继续重试。暂停会使旧运行的迟到结果失效。
+- 同一会话在运行中拒绝重复提交；不同会话可各自运行。
+
+## 当前边界
+
+这是本地单用户原型，尚无登录、租户授权、简历与 JD 材料管理，也没有真实的经历 Claim 核验。多用户上线前必须补身份与资源授权。语音、实时转写、多渠道、日程、外部搜索和更多 Provider 属于后续阶段。
+
+完整产品定义见 [项目定义.md](docs/项目定义.md)。
