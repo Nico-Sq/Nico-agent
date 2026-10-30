@@ -54,6 +54,7 @@ textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }
 .resource-form input, .resource-form select { min-width: 0; padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; background: white; }
 .resource-list { display: grid; gap: 7px; margin-bottom: 16px; }
 .resource-row { display: flex; align-items: start; gap: 10px; padding: 9px 11px; border-radius: 9px; background: #f4f7f3; font-size: 13px; overflow-wrap: anywhere; }
+.resource-selection { display: flex; flex: 1; align-items: start; gap: 10px; min-width: 0; }
 .resource-row input { margin-top: 3px; accent-color: #245c4a; }
 .resource-row span { flex: 1; }
 .resource-row button { padding: 5px 8px; font-size: 12px; flex-shrink: 0; }

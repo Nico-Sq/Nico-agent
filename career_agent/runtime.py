@@ -117,7 +117,8 @@ class AgentRuntime:
                     if not latest or latest[-1]["role"] != "user" or target not in latest[-1]["content"]:
                         result = {"error": "resource_not_authorized"}
                     else:
-                        result = self.store.get_material(target) or {"error": "material_not_found"}
+                        material = self.store.get_material(target)
+                        result = material if material and not material["revoked_at"] else {"error": "material_not_found"}
                 elif name == "read_interview_feedback":
                     target = args["interview_session_id"]
                     latest = self.store.messages(session["id"], "chat", limit=1)

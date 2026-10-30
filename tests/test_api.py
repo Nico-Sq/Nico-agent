@@ -105,3 +105,44 @@ class InterviewApiTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_INTERVIEW_ANSWER", discussed["message"])
         interview_view = self.client.get(f"/api/interview/sessions/{interview_id}").json()
         self.assertNotIn("请整理我的已确认经历", str(interview_view["messages"]))
+
+    def test_edit_and_revoke_preserve_old_interview_resources(self):
+        material = self.client.post("/api/materials", json={
+            "kind": "project", "title": "旧项目", "content": "旧版实施细节",
+        }).json()
+        claim = self.client.post("/api/claims", json={
+            "text": "旧版个人贡献", "material_id": material["id"],
+        }).json()
+        self.client.post(f"/api/claims/{claim['id']}/confirm")
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "material_ids": [material["id"]], "claim_ids": [claim["id"]],
+        }).json()
+        revised = self.client.put(f"/api/materials/{material['id']}", json={
+            "title": "新版项目", "content": "新版实施细节",
+        }).json()
+        self.assertNotEqual(revised["id"], material["id"])
+        self.assertEqual([item["id"] for item in self.client.get("/api/materials").json()], [revised["id"]])
+        self.assertEqual(self.client.get("/api/claims").json(), [])
+        self.assertEqual(self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "material_ids": [material["id"]],
+        }).status_code, 422)
+        self.assertEqual(self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "claim_ids": [claim["id"]],
+        }).status_code, 422)
+        old_view = self.client.get(f"/api/interview/sessions/{interview['id']}").json()
+        self.assertEqual(old_view["resources"]["materials"][0]["title"], "旧项目")
+        self.assertEqual(old_view["resources"]["claims"][0]["text"], "旧版个人贡献")
+        self.assertEqual(self.client.delete(f"/api/materials/{revised['id']}").status_code, 200)
+        self.assertEqual(self.client.get("/api/materials").json(), [])
+
+    def test_edited_claim_requires_new_confirmation(self):
+        claim = self.client.post("/api/claims", json={"text": "原贡献"}).json()
+        self.client.post(f"/api/claims/{claim['id']}/confirm")
+        edited = self.client.put(f"/api/claims/{claim['id']}", json={"text": "修正贡献"}).json()
+        self.assertEqual(edited["status"], "draft")
+        self.assertEqual(self.client.post("/api/interview/sessions", json={
+            "goal": "开发", "claim_ids": [edited["id"]],
+        }).status_code, 422)
+        self.assertEqual(self.client.post(f"/api/claims/{edited['id']}/confirm").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/claims/{edited['id']}").status_code, 200)
+        self.assertEqual(self.client.get("/api/claims").json(), [])

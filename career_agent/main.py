@@ -40,6 +40,15 @@ class ClaimInput(BaseModel):
     material_id: str | None = None
 
 
+class MaterialEdit(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ClaimEdit(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
 class PracticeInput(BaseModel):
     question_number: int = Field(ge=1)
 
@@ -80,6 +89,21 @@ def create_material(body: MaterialInput):
     return store.create_material(body.kind, nonempty(body.title), nonempty(body.content))
 
 
+@app.put("/api/materials/{material_id}")
+def edit_material(material_id: str, body: MaterialEdit):
+    material = store.replace_material(material_id, nonempty(body.title), nonempty(body.content))
+    if material is None:
+        raise HTTPException(404, "材料不存在或已撤回")
+    return material
+
+
+@app.delete("/api/materials/{material_id}")
+def delete_material(material_id: str):
+    if not store.revoke_material(material_id):
+        raise HTTPException(404, "材料不存在或已撤回")
+    return {"revoked": True}
+
+
 @app.get("/api/claims")
 def list_claims():
     return store.list_claims()
@@ -91,6 +115,21 @@ def create_claim(body: ClaimInput):
         return store.create_claim(nonempty(body.text), body.material_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.put("/api/claims/{claim_id}")
+def edit_claim(claim_id: str, body: ClaimEdit):
+    claim = store.replace_claim(claim_id, nonempty(body.text))
+    if claim is None:
+        raise HTTPException(404, "经历不存在或已撤回")
+    return claim
+
+
+@app.delete("/api/claims/{claim_id}")
+def delete_claim(claim_id: str):
+    if not store.revoke_claim(claim_id):
+        raise HTTPException(404, "经历不存在或已撤回")
+    return {"revoked": True}
 
 
 @app.post("/api/claims/{claim_id}/confirm")

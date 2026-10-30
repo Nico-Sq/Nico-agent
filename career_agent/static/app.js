@@ -76,17 +76,45 @@ async function loadPreparation() {
   source.replaceChildren(new Option("无关联材料", ""));
   const kinds = { resume: "简历", job_description: "岗位描述", project: "项目材料" };
   for (const material of materials) {
-    const row = document.createElement("label");
+    const row = document.createElement("div");
     row.className = "resource-row";
+    const selection = document.createElement("label");
+    selection.className = "resource-selection";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox"; checkbox.value = material.id; checkbox.checked = selectedMaterials.has(material.id);
     const text = document.createElement("span");
     text.textContent = `${kinds[material.kind]} · ${material.title}`;
-    row.append(checkbox, text);
+    selection.append(checkbox, text);
+    row.append(selection);
     const copy = document.createElement("button");
     copy.type = "button"; copy.className = "secondary"; copy.textContent = "复制 ID";
     copy.onclick = () => copyId(material.id);
     row.append(copy);
+    const edit = document.createElement("button");
+    edit.type = "button"; edit.className = "secondary"; edit.textContent = "编辑";
+    edit.onclick = () => {
+      const title = window.prompt("编辑材料标题；旧面试仍保留原版本", material.title);
+      if (!title?.trim()) return;
+      const content = window.prompt("编辑材料内容", material.content);
+      if (!content?.trim()) return;
+      action("interview", async () => {
+        await api(`/materials/${material.id}`, { method: "PUT", body: JSON.stringify({ title: title.trim(), content: content.trim() }) });
+        await loadPreparation();
+        notice("新版本已保存；关联旧材料的经历已撤回，请重新确认。");
+      });
+    };
+    row.append(edit);
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "secondary"; remove.textContent = "撤回";
+    remove.onclick = () => {
+      if (!window.confirm(`撤回“${material.title}”及其关联经历？旧面试记录会保留。`)) return;
+      action("interview", async () => {
+        await api(`/materials/${material.id}`, { method: "DELETE" });
+        await loadPreparation();
+        notice("材料及其关联经历已撤回。");
+      });
+    };
+    row.append(remove);
     materialBox.append(row);
     if (material.kind !== "job_description") source.append(new Option(material.title, material.id));
   }
@@ -110,6 +138,29 @@ async function loadPreparation() {
       row.append(confirm);
     }
     row.append(text);
+    const edit = document.createElement("button");
+    edit.type = "button"; edit.className = "secondary"; edit.textContent = "编辑";
+    edit.onclick = () => {
+      const value = window.prompt("编辑经历；新版本需要重新确认真实", claim.text);
+      if (!value?.trim()) return;
+      action("interview", async () => {
+        await api(`/claims/${claim.id}`, { method: "PUT", body: JSON.stringify({ text: value.trim() }) });
+        await loadPreparation();
+        notice("经历新版本已保存为待确认草稿。");
+      });
+    };
+    row.append(edit);
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "secondary"; remove.textContent = "撤回";
+    remove.onclick = () => {
+      if (!window.confirm("撤回这条经历？旧面试记录会保留。")) return;
+      action("interview", async () => {
+        await api(`/claims/${claim.id}`, { method: "DELETE" });
+        await loadPreparation();
+        notice("经历已撤回。");
+      });
+    };
+    row.append(remove);
     claimBox.append(row);
   }
 }

@@ -44,14 +44,16 @@ class Store:
                     kind TEXT NOT NULL CHECK (kind IN ('resume', 'job_description', 'project')),
                     title TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    revoked_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS claims (
                     id TEXT PRIMARY KEY,
                     material_id TEXT REFERENCES materials(id),
                     text TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN ('draft', 'confirmed')),
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    revoked_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS session_materials (
                     session_id TEXT NOT NULL REFERENCES sessions(id),
@@ -85,6 +87,10 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS messages_session_id ON messages(session_id, id);
             """)
+            for table in ("materials", "claims"):
+                columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+                if "revoked_at" not in columns:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN revoked_at TEXT")
 
     @contextmanager
     def connect(self):
@@ -108,11 +114,11 @@ class Store:
         with self.connect() as db:
             if kind == "interview":
                 for material_id in set(material_ids):
-                    if not db.execute("SELECT 1 FROM materials WHERE id = ?", (material_id,)).fetchone():
-                        raise ValueError(f"材料不存在：{material_id}")
+                    if not db.execute("SELECT 1 FROM materials WHERE id = ? AND revoked_at IS NULL", (material_id,)).fetchone():
+                        raise ValueError(f"材料不存在或已撤回：{material_id}")
                 for claim_id in set(claim_ids):
                     if not db.execute(
-                        "SELECT 1 FROM claims WHERE id = ? AND status = 'confirmed'", (claim_id,)
+                        "SELECT 1 FROM claims WHERE id = ? AND status = 'confirmed' AND revoked_at IS NULL", (claim_id,)
                     ).fetchone():
                         raise ValueError(f"经历尚未确认或不存在：{claim_id}")
             db.execute(
@@ -146,13 +152,39 @@ class Store:
 
     def list_materials(self) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT * FROM materials ORDER BY created_at DESC").fetchall()
+            rows = db.execute("SELECT * FROM materials WHERE revoked_at IS NULL ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
+
+    def replace_material(self, material_id: str, title: str, content: str) -> dict | None:
+        new_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute("SELECT kind FROM materials WHERE id = ? AND revoked_at IS NULL", (material_id,)).fetchone()
+            if old is None:
+                return None
+            db.execute("UPDATE materials SET revoked_at = ? WHERE id = ?", (now(), material_id))
+            db.execute("UPDATE claims SET revoked_at = ? WHERE material_id = ? AND revoked_at IS NULL", (now(), material_id))
+            db.execute(
+                "INSERT INTO materials(id, kind, title, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (new_id, old["kind"], title, content, now()),
+            )
+        return self.get_material(new_id)
+
+    def revoke_material(self, material_id: str) -> bool:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE materials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                (now(), material_id),
+            ).rowcount
+            if changed:
+                db.execute("UPDATE claims SET revoked_at = ? WHERE material_id = ? AND revoked_at IS NULL", (now(), material_id))
+        return bool(changed)
 
     def create_claim(self, text: str, material_id: str | None = None) -> dict:
         if material_id:
             material = self.get_material(material_id)
-            if material is None or material["kind"] == "job_description":
+            if material is None or material["revoked_at"] or material["kind"] == "job_description":
                 raise ValueError("经历来源必须是简历或项目材料")
         claim_id = uuid.uuid4().hex
         with self.connect() as db:
@@ -170,23 +202,48 @@ class Store:
 
     def list_claims(self) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT * FROM claims ORDER BY created_at DESC").fetchall()
+            rows = db.execute("SELECT * FROM claims WHERE revoked_at IS NULL ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
 
     def confirmed_claims(self) -> list[dict]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, text, material_id FROM claims WHERE status = 'confirmed' ORDER BY created_at DESC"
+                "SELECT id, text, material_id FROM claims WHERE status = 'confirmed' "
+                "AND revoked_at IS NULL ORDER BY created_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
 
     def confirm_claim(self, claim_id: str) -> dict | None:
         with self.connect() as db:
             changed = db.execute(
-                "UPDATE claims SET status = 'confirmed' WHERE id = ? AND status = 'draft'",
+                "UPDATE claims SET status = 'confirmed' WHERE id = ? AND status = 'draft' AND revoked_at IS NULL",
                 (claim_id,),
             ).rowcount
         return self.get_claim(claim_id) if changed else None
+
+    def replace_claim(self, claim_id: str, text: str) -> dict | None:
+        new_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT material_id FROM claims WHERE id = ? AND revoked_at IS NULL", (claim_id,)
+            ).fetchone()
+            if old is None:
+                return None
+            db.execute("UPDATE claims SET revoked_at = ? WHERE id = ?", (now(), claim_id))
+            db.execute(
+                "INSERT INTO claims(id, material_id, text, status, created_at) "
+                "VALUES (?, ?, ?, 'draft', ?)", (new_id, old["material_id"], text, now()),
+            )
+        return self.get_claim(new_id)
+
+    def revoke_claim(self, claim_id: str) -> bool:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE claims SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                (now(), claim_id),
+            ).rowcount
+        return bool(changed)
 
     def interview_resources(self, session_id: str, include_content: bool = False) -> dict:
         with self.connect() as db:
@@ -197,7 +254,7 @@ class Store:
             claims = db.execute("""SELECT c.id, c.text, c.material_id
                 FROM claims c JOIN session_claims sc ON sc.claim_id = c.id
                 JOIN sessions s ON s.id = sc.session_id
-                WHERE s.id = ? AND s.kind = 'interview' AND c.status = 'confirmed'
+                WHERE s.id = ? AND s.kind = 'interview'
                 ORDER BY c.created_at""", (session_id,)).fetchall()
         selected_materials = [dict(row) for row in materials]
         if not include_content:
