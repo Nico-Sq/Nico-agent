@@ -35,11 +35,67 @@ function renderMessages(kind, messages) {
 }
 
 function renderInterviewState(session) {
+  $("preparation").hidden = Boolean(session);
   $("interview-setup").hidden = Boolean(session);
   $("answer-form").hidden = !session || session.status !== "awaiting_answer";
   $("resume-actions").hidden = !session || session.status !== "paused";
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]}` : "创建一场面试";
+}
+
+async function loadPreparation() {
+  const [materials, claims] = await Promise.all([api("/materials"), api("/claims")]);
+  const materialBox = $("material-list");
+  const claimBox = $("claim-list");
+  const selectedMaterials = new Set([...materialBox.querySelectorAll("input:checked")].map((item) => item.value));
+  const selectedClaims = new Set([...claimBox.querySelectorAll("input:checked")].map((item) => item.value));
+  materialBox.replaceChildren();
+  claimBox.replaceChildren();
+  const source = $("claim-source");
+  const priorSource = source.value;
+  source.replaceChildren(new Option("无关联材料", ""));
+  const kinds = { resume: "简历", job_description: "岗位描述", project: "项目材料" };
+  for (const material of materials) {
+    const row = document.createElement("label");
+    row.className = "resource-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox"; checkbox.value = material.id; checkbox.checked = selectedMaterials.has(material.id);
+    const text = document.createElement("span");
+    text.textContent = `${kinds[material.kind]} · ${material.title}`;
+    row.append(checkbox, text);
+    materialBox.append(row);
+    if (material.kind !== "job_description") source.append(new Option(material.title, material.id));
+  }
+  source.value = priorSource;
+  for (const claim of claims) {
+    const row = document.createElement("div");
+    row.className = "resource-row";
+    const text = document.createElement("span");
+    text.textContent = `${claim.status === "confirmed" ? "已确认" : "待确认"} · ${claim.text}`;
+    if (claim.status === "confirmed") {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox"; checkbox.value = claim.id; checkbox.checked = selectedClaims.has(claim.id);
+      row.append(checkbox);
+    } else {
+      const confirm = document.createElement("button");
+      confirm.type = "button"; confirm.textContent = "确认真实";
+      confirm.onclick = () => action("interview", async () => {
+        await api(`/claims/${claim.id}/confirm`, { method: "POST" });
+        await loadPreparation();
+      });
+      row.append(confirm);
+    }
+    row.append(text);
+    claimBox.append(row);
+  }
+}
+
+function renderSelectedResources(resources) {
+  const box = $("selected-resources");
+  const materialCount = resources?.materials.length || 0;
+  const claimCount = resources?.claims.length || 0;
+  box.hidden = !resources || (!materialCount && !claimCount);
+  box.textContent = `本场已选择 ${materialCount} 份材料、${claimCount} 条已确认经历`;
 }
 
 async function loadSessions() {
@@ -71,7 +127,11 @@ async function selectSession(id) {
   else localStorage.removeItem(`${state.kind}Session`);
   const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
   renderMessages(state.kind, view?.messages || []);
-  if (state.kind === "interview") renderInterviewState(view?.session);
+  if (state.kind === "interview") {
+    renderInterviewState(view?.session);
+    renderSelectedResources(view?.resources);
+    if (!view) await loadPreparation();
+  }
   await loadSessions();
   notice();
 }
@@ -101,6 +161,30 @@ async function runRequest(kind, id, path, body) {
 $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
 $("new-session").onclick = () => selectSession(null);
+$("material-form").onsubmit = (event) => {
+  event.preventDefault();
+  action("interview", async () => {
+    await api("/materials", { method: "POST", body: JSON.stringify({
+      kind: $("material-kind").value,
+      title: $("material-title").value.trim(),
+      content: $("material-content").value.trim(),
+    }) });
+    $("material-title").value = "";
+    $("material-content").value = "";
+    await loadPreparation();
+  });
+};
+$("claim-form").onsubmit = (event) => {
+  event.preventDefault();
+  action("interview", async () => {
+    await api("/claims", { method: "POST", body: JSON.stringify({
+      text: $("claim-text").value.trim(),
+      material_id: $("claim-source").value || null,
+    }) });
+    $("claim-text").value = "";
+    await loadPreparation();
+  });
+};
 $("chat-form").onsubmit = (event) => {
   event.preventDefault();
   action("chat", async () => {
@@ -127,7 +211,9 @@ $("interview-setup").onsubmit = (event) => {
   action("interview", async () => {
     const goal = $("interview-goal").value.trim();
     if (!goal) return;
-    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal }) });
+    const material_ids = [...$("material-list").querySelectorAll("input:checked")].map((item) => item.value);
+    const claim_ids = [...$("claim-list").querySelectorAll("input:checked")].map((item) => item.value);
+    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, material_ids, claim_ids }) });
     state.ids.interview = session.id;
     localStorage.setItem("interviewSession", session.id);
     try { await api(`/interview/sessions/${session.id}/start`, { method: "POST" }); }

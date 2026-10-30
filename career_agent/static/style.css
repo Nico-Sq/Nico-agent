@@ -1,7 +1,7 @@
 :root { font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #202724; background: #f5f6f2; }
 * { box-sizing: border-box; }
 body { margin: 0; }
-button, textarea { font: inherit; }
+button, textarea, input, select { font: inherit; }
 button { border: 0; border-radius: 10px; background: #245c4a; color: white; padding: 11px 16px; cursor: pointer; }
 button:hover { background: #194736; }
 button:disabled { opacity: .55; cursor: wait; }
@@ -42,6 +42,19 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 label { font-size: 13px; font-weight: 650; }
 textarea { width: 100%; resize: vertical; border: 1px solid #d5ded5; border-radius: 10px; padding: 12px 14px; outline: 0; line-height: 1.5; }
 textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }
+.preparation { padding: 18px 0 4px; border-bottom: 1px solid #edf0ea; }
+.preparation h3 { margin: 0; font-size: 16px; }
+.preparation > p { margin: 5px 0 16px; color: #738078; font-size: 13px; }
+.resource-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; margin: 14px 0 8px; }
+.resource-form label, .resource-form textarea { grid-column: 1 / -1; }
+.resource-form button { grid-column: 2; justify-self: end; }
+.resource-form input, .resource-form select { min-width: 0; padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; background: white; }
+.resource-list { display: grid; gap: 7px; margin-bottom: 16px; }
+.resource-row { display: flex; align-items: start; gap: 10px; padding: 9px 11px; border-radius: 9px; background: #f4f7f3; font-size: 13px; overflow-wrap: anywhere; }
+.resource-row input { margin-top: 3px; accent-color: #245c4a; }
+.resource-row span { flex: 1; }
+.resource-row button { padding: 5px 8px; font-size: 12px; }
+.selected-resources { margin: 14px 0 0; color: #647267; font-size: 13px; }
 .composer-actions { display: flex; justify-content: flex-end; gap: 9px; }
 .setup button { justify-self: start; }
 .resume-actions { padding: 15px 0; }

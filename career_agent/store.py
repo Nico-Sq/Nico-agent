@@ -39,6 +39,30 @@ class Store:
                     detail TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS materials (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL CHECK (kind IN ('resume', 'job_description', 'project')),
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS claims (
+                    id TEXT PRIMARY KEY,
+                    material_id TEXT REFERENCES materials(id),
+                    text TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('draft', 'confirmed')),
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS session_materials (
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    material_id TEXT NOT NULL REFERENCES materials(id),
+                    PRIMARY KEY (session_id, material_id)
+                );
+                CREATE TABLE IF NOT EXISTS session_claims (
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    claim_id TEXT NOT NULL REFERENCES claims(id),
+                    PRIMARY KEY (session_id, claim_id)
+                );
                 CREATE INDEX IF NOT EXISTS messages_session_id ON messages(session_id, id);
             """)
 
@@ -56,15 +80,103 @@ class Store:
         finally:
             db.close()
 
-    def create(self, kind: str, goal: str = "") -> dict:
+    def create(
+        self, kind: str, goal: str = "", material_ids: tuple[str, ...] = (), claim_ids: tuple[str, ...] = ()
+    ) -> dict:
         session_id = uuid.uuid4().hex
         status = "active" if kind == "chat" else "new"
         with self.connect() as db:
+            if kind == "interview":
+                for material_id in set(material_ids):
+                    if not db.execute("SELECT 1 FROM materials WHERE id = ?", (material_id,)).fetchone():
+                        raise ValueError(f"材料不存在：{material_id}")
+                for claim_id in set(claim_ids):
+                    if not db.execute(
+                        "SELECT 1 FROM claims WHERE id = ? AND status = 'confirmed'", (claim_id,)
+                    ).fetchone():
+                        raise ValueError(f"经历尚未确认或不存在：{claim_id}")
             db.execute(
                 "INSERT INTO sessions(id, kind, status, goal, created_at) VALUES (?, ?, ?, ?, ?)",
                 (session_id, kind, status, goal, now()),
             )
+            if kind == "interview":
+                db.executemany(
+                    "INSERT INTO session_materials(session_id, material_id) VALUES (?, ?)",
+                    [(session_id, item) for item in set(material_ids)],
+                )
+                db.executemany(
+                    "INSERT INTO session_claims(session_id, claim_id) VALUES (?, ?)",
+                    [(session_id, item) for item in set(claim_ids)],
+                )
         return self.get(session_id, kind)
+
+    def create_material(self, kind: str, title: str, content: str) -> dict:
+        material_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO materials(id, kind, title, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (material_id, kind, title, content, now()),
+            )
+        return self.get_material(material_id)
+
+    def get_material(self, material_id: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM materials WHERE id = ?", (material_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_materials(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM materials ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def create_claim(self, text: str, material_id: str | None = None) -> dict:
+        if material_id:
+            material = self.get_material(material_id)
+            if material is None or material["kind"] == "job_description":
+                raise ValueError("经历来源必须是简历或项目材料")
+        claim_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO claims(id, material_id, text, status, created_at) "
+                "VALUES (?, ?, ?, 'draft', ?)",
+                (claim_id, material_id, text, now()),
+            )
+        return self.get_claim(claim_id)
+
+    def get_claim(self, claim_id: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM claims WHERE id = ?", (claim_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_claims(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM claims ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def confirm_claim(self, claim_id: str) -> dict | None:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE claims SET status = 'confirmed' WHERE id = ? AND status = 'draft'",
+                (claim_id,),
+            ).rowcount
+        return self.get_claim(claim_id) if changed else None
+
+    def interview_resources(self, session_id: str, include_content: bool = False) -> dict:
+        with self.connect() as db:
+            materials = db.execute("""SELECT m.id, m.kind, m.title, m.content
+                FROM materials m JOIN session_materials sm ON sm.material_id = m.id
+                JOIN sessions s ON s.id = sm.session_id
+                WHERE s.id = ? AND s.kind = 'interview' ORDER BY m.created_at""", (session_id,)).fetchall()
+            claims = db.execute("""SELECT c.id, c.text, c.material_id
+                FROM claims c JOIN session_claims sc ON sc.claim_id = c.id
+                JOIN sessions s ON s.id = sc.session_id
+                WHERE s.id = ? AND s.kind = 'interview' AND c.status = 'confirmed'
+                ORDER BY c.created_at""", (session_id,)).fetchall()
+        selected_materials = [dict(row) for row in materials]
+        if not include_content:
+            for material in selected_materials:
+                del material["content"]
+        return {"materials": selected_materials, "claims": [dict(row) for row in claims]}
 
     def get(self, session_id: str, kind: str) -> dict | None:
         with self.connect() as db:

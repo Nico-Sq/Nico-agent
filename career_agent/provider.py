@@ -41,7 +41,18 @@ class Provider:
         if "INTERVIEW_MODE" in system:
             count = int(system.split("QUESTION_COUNT=")[1].splitlines()[0])
             if count == 0:
-                result = {"feedback": "", "question": QUESTIONS[0], "finished": False}
+                resources = next(
+                    (json.loads(message["content"].split("\n", 1)[1]) for message in messages
+                     if message["role"] == "user" and message["content"].startswith("[INTERVIEW_RESOURCES]\n")),
+                    {"materials": [], "claims": []},
+                )
+                if resources["claims"]:
+                    question = f"你确认的经历中提到“{resources['claims'][0]['text'][:80]}”。请说明你的具体行动和结果。"
+                elif resources["materials"]:
+                    question = f"请结合你提供的“{resources['materials'][0]['title']}”，介绍一项与岗位相关的经历。"
+                else:
+                    question = QUESTIONS[0]
+                result = {"feedback": "", "question": question, "finished": False}
             elif count < len(QUESTIONS):
                 result = {
                     "feedback": "演示反馈：请补充你的具体行动、可核实的结果和反思。",

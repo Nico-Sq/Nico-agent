@@ -34,11 +34,31 @@
         </div>
         <div id="interview-panel" hidden>
           <div class="panel-head"><div><span class="eyebrow">INTERVIEW</span><h2>逐题模拟面试</h2></div><p id="interview-status">创建一场面试</p></div>
+          <section id="preparation" class="preparation">
+            <h3>准备本场材料</h3>
+            <p>材料和确认的经历只在你选择它们的面试中使用。</p>
+            <form id="material-form" class="resource-form">
+              <label for="material-kind">添加材料</label>
+              <select id="material-kind"><option value="resume">简历</option><option value="job_description">岗位描述</option><option value="project">项目材料</option></select>
+              <input id="material-title" maxlength="120" placeholder="材料标题" required>
+              <textarea id="material-content" rows="3" maxlength="4000" placeholder="粘贴材料文本" required></textarea>
+              <button type="submit">保存材料</button>
+            </form>
+            <div id="material-list" class="resource-list"></div>
+            <form id="claim-form" class="resource-form">
+              <label for="claim-text">添加一条经历主张</label>
+              <select id="claim-source"><option value="">无关联材料</option></select>
+              <textarea id="claim-text" rows="2" maxlength="500" placeholder="例如：我负责接口性能优化，平均延迟下降 40%" required></textarea>
+              <button type="submit">保存待确认经历</button>
+            </form>
+            <div id="claim-list" class="resource-list"></div>
+          </section>
           <form id="interview-setup" class="setup">
             <label for="interview-goal">目标岗位与练习重点</label>
             <textarea id="interview-goal" rows="3" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
             <button type="submit">开始面试</button>
           </form>
+          <p id="selected-resources" class="selected-resources" hidden></p>
           <div id="interview-messages" class="messages" aria-live="polite"></div>
           <form id="answer-form" class="composer" hidden>
             <label for="answer-text">你的回答</label>

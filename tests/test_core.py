@@ -74,3 +74,43 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(final["status"], "finished")
         self.assertEqual(final["question_count"], 3)
         self.assertEqual(len(self.store.messages(interview["id"], "interview")), 7)
+
+    def test_only_selected_materials_and_confirmed_claims_enter_interview(self):
+        resume = self.store.create_material("resume", "我的简历", "已授权的项目原文")
+        self.store.create_material("project", "其他项目", "UNSELECTED_SECRET")
+        claim = self.store.create_claim("我负责接口延迟优化", resume["id"])
+        unrelated_claim = self.store.create_claim("UNSELECTED_CLAIM")
+        self.store.confirm_claim(unrelated_claim["id"])
+        with self.assertRaises(ValueError):
+            self.store.create("interview", "后端开发", (resume["id"],), (claim["id"],))
+        self.store.confirm_claim(claim["id"])
+        interview = self.store.create("interview", "后端开发", (resume["id"],), (claim["id"],))
+        context = json.dumps(self.runtime.build_context(interview), ensure_ascii=False)
+        self.assertIn("我的简历", context)
+        self.assertIn("我负责接口延迟优化", context)
+        self.assertNotIn("已授权的项目原文", context)
+        self.assertNotIn("UNSELECTED_SECRET", context)
+        self.assertNotIn("UNSELECTED_CLAIM", context)
+        call = {"id": "1", "function": {"name": "read_interview_materials", "arguments": "{}"}}
+        result = json.loads(self.runtime._execute_tool_sync(interview, call)["content"])
+        self.assertEqual(result["materials"][0]["content"], "已授权的项目原文")
+        self.assertEqual(len(result["materials"]), 1)
+        self.assertEqual(result["claims"][0]["text"], "我负责接口延迟优化")
+        self.assertNotIn("UNSELECTED_SECRET", json.dumps(result, ensure_ascii=False))
+        self.assertNotIn("UNSELECTED_CLAIM", json.dumps(result, ensure_ascii=False))
+        chat = self.store.create("chat")
+        blocked = json.loads(self.runtime._execute_tool_sync(chat, call)["content"])
+        self.assertEqual(blocked["error"], "tool_not_allowed")
+
+    def test_job_description_cannot_be_claim_source(self):
+        jd = self.store.create_material("job_description", "岗位描述", "招聘要求")
+        with self.assertRaises(ValueError):
+            self.store.create_claim("我满足全部要求", jd["id"])
+
+    def test_demo_question_uses_explicitly_selected_claim(self):
+        claim = self.store.create_claim("优化接口响应时间")
+        self.store.confirm_claim(claim["id"])
+        interview = self.store.create("interview", "后端开发", claim_ids=(claim["id"],))
+        running = self.store.claim_run(interview["id"], "interview", "new")
+        reply = run_demo(self.runtime.run(running))
+        self.assertIn("优化接口响应时间", reply["message"])
