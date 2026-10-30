@@ -23,7 +23,7 @@ class AgentRuntime:
         system = skill
         if kind == "interview":
             practice = self.store.practice_source(session["id"])
-            max_questions = 1 if practice else 3
+            max_questions = session["max_questions"]
             system += (
                 f"\nINTERVIEW_MODE\nQUESTION_COUNT={session['question_count']}\n"
                 f"MAX_QUESTIONS={max_questions}\n"
@@ -180,7 +180,7 @@ class AgentRuntime:
                         or not isinstance(summary, str)):
                     raise ValueError("面试模型输出字段格式错误")
                 old_count = session["question_count"]
-                max_questions = 1 if self.store.practice_source(session["id"]) else 3
+                max_questions = session["max_questions"]
                 if data["finished"] != (old_count >= max_questions):
                     raise ValueError("面试模型完成状态与题数不符")
                 if old_count and not feedback.strip():

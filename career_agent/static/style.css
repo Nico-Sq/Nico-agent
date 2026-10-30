@@ -42,6 +42,7 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 .message .save-claim { display: block; margin-top: 10px; padding: 6px 9px; font-size: 11px; }
 .composer, .setup { display: grid; gap: 10px; border-top: 1px solid #edf0ea; padding-top: 18px; }
 .setup { border: 0; padding: 26px 0; }
+.setup input[type=number] { width: 100px; padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; background: white; }
 label { font-size: 13px; font-weight: 650; }
 textarea { width: 100%; resize: vertical; border: 1px solid #d5ded5; border-radius: 10px; padding: 12px 14px; outline: 0; line-height: 1.5; }
 textarea:focus { border-color: #3b8d69; box-shadow: 0 0 0 3px #3b8d6920; }

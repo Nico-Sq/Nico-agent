@@ -22,6 +22,7 @@ class Store:
                     status TEXT NOT NULL,
                     goal TEXT NOT NULL DEFAULT '',
                     question_count INTEGER NOT NULL DEFAULT 0,
+                    max_questions INTEGER NOT NULL DEFAULT 3,
                     version INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
@@ -91,6 +92,9 @@ class Store:
                 columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
                 if "revoked_at" not in columns:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN revoked_at TEXT")
+            session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)")}
+            if "max_questions" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN max_questions INTEGER NOT NULL DEFAULT 3")
 
     @contextmanager
     def connect(self):
@@ -107,8 +111,11 @@ class Store:
             db.close()
 
     def create(
-        self, kind: str, goal: str = "", material_ids: tuple[str, ...] = (), claim_ids: tuple[str, ...] = ()
+        self, kind: str, goal: str = "", material_ids: tuple[str, ...] = (), claim_ids: tuple[str, ...] = (),
+        max_questions: int = 3,
     ) -> dict:
+        if kind == "interview" and not 1 <= max_questions <= 10:
+            raise ValueError("面试题数必须在 1 到 10 之间")
         session_id = uuid.uuid4().hex
         status = "active" if kind == "chat" else "new"
         with self.connect() as db:
@@ -122,8 +129,8 @@ class Store:
                     ).fetchone():
                         raise ValueError(f"经历尚未确认或不存在：{claim_id}")
             db.execute(
-                "INSERT INTO sessions(id, kind, status, goal, created_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, kind, status, goal, now()),
+                "INSERT INTO sessions(id, kind, status, goal, max_questions, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, kind, status, goal, max_questions, now()),
             )
             if kind == "interview":
                 db.executemany(
@@ -306,8 +313,8 @@ class Store:
             if source is None or item is None:
                 raise ValueError("只能复练已完成面试中有反馈的题目")
             db.execute(
-                "INSERT INTO sessions(id, kind, status, goal, created_at) "
-                "VALUES (?, 'interview', 'new', ?, ?)",
+                "INSERT INTO sessions(id, kind, status, goal, max_questions, created_at) "
+                "VALUES (?, 'interview', 'new', ?, 1, ?)",
                 (session_id, source["goal"], now()),
             )
             db.execute(

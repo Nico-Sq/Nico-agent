@@ -57,6 +57,8 @@
           <form id="interview-setup" class="setup">
             <label for="interview-goal">目标岗位与练习重点</label>
             <textarea id="interview-goal" rows="3" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
+            <label for="interview-max-questions">本轮题数（1–10）</label>
+            <input id="interview-max-questions" type="number" min="1" max="10" value="3" required>
             <button type="submit">开始面试</button>
           </form>
           <p id="selected-resources" class="selected-resources" hidden></p>

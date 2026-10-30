@@ -25,6 +25,7 @@ class TextInput(BaseModel):
 
 class InterviewInput(BaseModel):
     goal: str = Field(min_length=1, max_length=500)
+    max_questions: int = Field(default=3, ge=1, le=10)
     material_ids: list[str] = Field(default_factory=list, max_length=5)
     claim_ids: list[str] = Field(default_factory=list, max_length=10)
 
@@ -210,7 +211,8 @@ def interrupt_chat(session_id: str):
 @app.post("/api/interview/sessions")
 def create_interview(body: InterviewInput):
     try:
-        return store.create("interview", nonempty(body.goal), tuple(body.material_ids), tuple(body.claim_ids))
+        return store.create("interview", nonempty(body.goal), tuple(body.material_ids),
+                            tuple(body.claim_ids), body.max_questions)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

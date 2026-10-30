@@ -64,7 +64,7 @@ function renderInterviewState(session) {
   $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
   $("resume-actions").hidden = !session || session.status !== "paused";
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成" };
-  $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]}` : "创建一场面试";
+  $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
 }
 
 async function loadPreparation() {
@@ -356,9 +356,10 @@ $("interview-setup").onsubmit = (event) => {
   action("interview", async () => {
     const goal = $("interview-goal").value.trim();
     if (!goal) return;
+    const max_questions = Number($("interview-max-questions").value);
     const material_ids = [...$("material-list").querySelectorAll("input:checked")].map((item) => item.value);
     const claim_ids = [...$("claim-list").querySelectorAll("input:checked")].map((item) => item.value);
-    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, material_ids, claim_ids }) });
+    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, max_questions, material_ids, claim_ids }) });
     state.ids.interview = session.id;
     localStorage.setItem("interviewSession", session.id);
     try {

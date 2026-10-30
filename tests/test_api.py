@@ -193,3 +193,24 @@ class InterviewApiTests(unittest.TestCase):
         messages = self.client.get(f"/api/interview/sessions/{interview_id}").json()["messages"]
         self.assertIn("最初回答", [item["content"] for item in messages])
         self.assertIn("更正后的回答", [item["content"] for item in messages])
+
+    def test_interview_respects_selected_question_count(self):
+        self.assertEqual(self.client.post("/api/interview/sessions", json={
+            "goal": "开发", "max_questions": 0,
+        }).status_code, 422)
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "开发", "max_questions": 2,
+        }).json()
+        interview_id = interview["id"]
+        self.assertEqual(interview["max_questions"], 2)
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={"text": "第一题回答"})
+        final = self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+            "text": "第二题回答",
+        }).json()
+        self.assertEqual(final["session"]["status"], "finished")
+        self.assertEqual(len(self.client.get(f"/api/interview/sessions/{interview_id}/report").json()["items"]), 2)
+        practice = self.client.post(f"/api/interview/sessions/{interview_id}/practice", json={
+            "question_number": 1,
+        }).json()
+        self.assertEqual(practice["max_questions"], 1)
