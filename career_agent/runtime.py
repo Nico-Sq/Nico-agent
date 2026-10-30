@@ -9,6 +9,7 @@ from .store import Store
 
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 MAX_CONTEXT_CHARS = 32_000
+MAX_MODEL_INPUT_CHARS = 64_000
 MAX_TOOL_CALLS = 8
 
 
@@ -157,6 +158,9 @@ class AgentRuntime:
             tool_names.extend(call["function"]["name"] for call in calls)
             messages.append({"role": "assistant", "content": reply.get("content"), "tool_calls": calls})
             messages.extend(await asyncio.gather(*(self._execute_tool(session, call) for call in calls)))
+            if sum(len(message.get("content") or "") + len(json.dumps(message.get("tool_calls", []), ensure_ascii=False))
+                   for message in messages) > MAX_MODEL_INPUT_CHARS:
+                raise ValueError("工具结果超过模型上下文预算，请减少本次读取的材料或经历")
         raise ValueError("模型工具调用超过 4 轮")
 
     async def run(self, session: dict) -> dict:

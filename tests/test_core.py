@@ -118,6 +118,30 @@ class CoreTests(unittest.TestCase):
         events = [event for event in self.store.events(chat["id"], "chat") if event["kind"] == "model_run"]
         self.assertEqual(json.loads(events[0]["detail"])["status"], "failed")
 
+    def test_tool_results_cannot_overflow_model_input(self):
+        class RepeatingToolProvider:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": str(number), "type": "function", "function": {
+                        "name": "read_confirmed_claims", "arguments": "{}",
+                    }} for number in range(8)
+                ]}
+
+        for number in range(20):
+            claim = self.store.create_claim(f"经历 {number} " + "甲" * 490)
+            self.store.confirm_claim(claim["id"])
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请整理经历")
+        provider = RepeatingToolProvider()
+        with self.assertRaisesRegex(ValueError, "工具结果超过模型上下文预算"):
+            asyncio.run(AgentRuntime(self.store, provider).run(running))
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(self.store.messages(chat["id"], "chat")[-1]["content"], "请整理经历")
+
     def test_tool_permission_and_explicit_report_selection(self):
         interview = self.store.create("interview", "开发岗位")
         call = {"id": "1", "function": {"name": "read_interview_feedback", "arguments": json.dumps({"interview_session_id": interview["id"]})}}
