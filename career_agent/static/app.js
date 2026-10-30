@@ -1,9 +1,31 @@
-const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
+const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
+
+function showAuth() {
+  $("shell").hidden = true;
+  $("auth-panel").hidden = false;
+  for (const kind of ["chat", "interview"]) state.pending[kind]?.controller.abort();
+  state.ids = { chat: null, interview: null };
+  state.username = null;
+  $("sessions").replaceChildren();
+  renderMessages("chat", []);
+  renderMessages("interview", []);
+  renderReport(null);
+  renderInterviewState(null);
+}
+
+function showApp(username = null) {
+  state.username = username;
+  state.ids = { chat: localStorage.getItem(sessionKey("chat")), interview: localStorage.getItem(sessionKey("interview")) };
+  $("auth-panel").hidden = true;
+  $("shell").hidden = false;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
   const data = await response.json();
+  if (response.status === 401 && !path.startsWith("/auth/")) showAuth();
   if (!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
   return data;
 }
@@ -224,7 +246,7 @@ function startPractice(sourceId, questionNumber) {
       method: "POST", body: JSON.stringify({ question_number: questionNumber }),
     });
     state.ids.interview = session.id;
-    localStorage.setItem("interviewSession", session.id);
+    localStorage.setItem(sessionKey("interview"), session.id);
     try {
       const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
       await selectSession(session.id);
@@ -260,8 +282,8 @@ async function loadSessions() {
 async function selectSession(id) {
   state.ids[state.kind] = id;
   $("delete-session").hidden = !id;
-  if (id) localStorage.setItem(`${state.kind}Session`, id);
-  else localStorage.removeItem(`${state.kind}Session`);
+  if (id) localStorage.setItem(sessionKey(state.kind), id);
+  else localStorage.removeItem(sessionKey(state.kind));
   const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
   if (state.kind === "chat") {
     $("chat-export").hidden = !view;
@@ -284,7 +306,13 @@ async function switchKind(kind) {
   $("tab-interview").classList.toggle("active", kind === "interview");
   $("chat-panel").hidden = kind !== "chat";
   $("interview-panel").hidden = kind !== "interview";
-  try { await selectSession(state.ids[kind]); } catch (error) { state.ids[kind] = null; await selectSession(null); notice(error.message); }
+  try { await selectSession(state.ids[kind]); }
+  catch (error) {
+    if (!$("auth-panel").hidden) return;
+    state.ids[kind] = null;
+    await selectSession(null);
+    notice(error.message);
+  }
 }
 
 async function action(kind, work) {
@@ -397,7 +425,7 @@ $("chat-form").onsubmit = async (event) => {
     if (!id) {
       id = (await api("/chat/sessions", { method: "POST" })).id;
       state.ids.chat = id;
-      localStorage.setItem("chatSession", id);
+      localStorage.setItem(sessionKey("chat"), id);
     }
     claimed = await api(`/chat/sessions/${id}/messages/claim`, { method: "POST", body: JSON.stringify({ text }) });
   } catch (error) { notice(error.message); return; }
@@ -439,7 +467,7 @@ $("interview-setup").onsubmit = (event) => {
     const claim_ids = [...$("claim-list").querySelectorAll("input:checked")].map((item) => item.value);
     const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, max_questions, material_ids, claim_ids }) });
     state.ids.interview = session.id;
-    localStorage.setItem("interviewSession", session.id);
+    localStorage.setItem(sessionKey("interview"), session.id);
     try {
       const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
       await selectSession(session.id);
@@ -505,5 +533,39 @@ $("resume-button").onclick = () => action("interview", async () => {
   finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
 });
 
-api("/config").then((config) => { $("provider").textContent = config.provider === "demo" ? "演示模式" : `模型：${config.model}`; });
-switchKind("chat");
+async function authenticate(mode) {
+  const username = $("auth-username").value.trim();
+  const password = $("auth-password").value;
+  try {
+    const user = await api(`/auth/${mode}`, { method: "POST", body: JSON.stringify({ username, password }) });
+    $("auth-password").value = "";
+    $("auth-notice").textContent = "";
+    showApp(user.username);
+    await switchKind("chat");
+  } catch (error) { $("auth-notice").textContent = error.message; }
+}
+$("auth-form").onsubmit = (event) => { event.preventDefault(); authenticate("login"); };
+$("auth-register").onclick = () => authenticate("register");
+$("logout").onclick = async () => {
+  try { await api("/auth/logout", { method: "POST" }); showAuth(); }
+  catch (error) { notice(error.message); }
+};
+
+async function bootstrap() {
+  try {
+    const config = await api("/config");
+    $("provider").textContent = config.provider === "demo" ? "演示模式" : `模型：${config.model}`;
+    $("logout").hidden = !config.auth_required;
+    if (config.auth_required) {
+      try {
+        const user = await api("/auth/me");
+        showApp(user.username);
+      } catch { showAuth(); return; }
+    } else showApp();
+    await switchKind("chat");
+  } catch (error) {
+    showAuth();
+    $("auth-notice").textContent = error.message;
+  }
+}
+bootstrap();

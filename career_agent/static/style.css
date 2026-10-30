@@ -8,6 +8,11 @@ button:disabled { opacity: .55; cursor: wait; }
 button.secondary { color: #245c4a; background: #e8f0ea; }
 button.secondary:hover { background: #d9e8dc; }
 .shell { max-width: 1160px; margin: auto; padding: 34px 24px; }
+.auth-panel { max-width: 420px; margin: 12vh auto; padding: 28px; background: white; border: 1px solid #e5e9e2; border-radius: 16px; }
+.auth-panel form { display: grid; gap: 10px; }
+.auth-panel input { padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; }
+.auth-panel p { color: #647267; }
+#logout { margin-left: 12px; padding: 7px 10px; font-size: 12px; }
 .topbar { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 h1 { margin: 6px 0 0; font-size: 31px; letter-spacing: -.04em; }
 h2 { margin: 4px 0 0; font-size: 19px; }

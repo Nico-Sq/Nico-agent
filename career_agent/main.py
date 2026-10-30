@@ -1,22 +1,56 @@
 import os
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .auth import AuthStore
 from .provider import Provider
 from .runtime import AgentRuntime
 from .store import Store
 
 
 ROOT = Path(__file__).resolve().parent.parent
-store = Store(Path(os.getenv("DATA_DIR", ROOT / "data")) / "career_agent.sqlite3")
+DATA_DIR = Path(os.getenv("DATA_DIR", ROOT / "data"))
+AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
+store = Store(DATA_DIR / "career_agent.sqlite3")
 provider = Provider()
 runtime = AgentRuntime(store, provider)
 app = FastAPI(title="双线求职 Agent")
+request_store: ContextVar[Store | None] = ContextVar("request_store", default=None)
+request_runtime: ContextVar[AgentRuntime | None] = ContextVar("request_runtime", default=None)
+
+
+def active_store() -> Store:
+    return request_store.get() or store
+
+
+def active_runtime() -> AgentRuntime:
+    return request_runtime.get() or runtime
+
+
+@app.middleware("http")
+async def bind_account(request: Request, call_next):
+    if not AUTH_REQUIRED or request.url.path in (
+        "/", "/api/config", "/api/auth/register", "/api/auth/login", "/api/auth/logout",
+    ) or request.url.path.startswith("/static/"):
+        return await call_next(request)
+    user_id = auth_store.resolve_token(request.cookies.get("nico_session"))
+    if user_id is None:
+        return JSONResponse({"detail": "请先登录"}, status_code=401)
+    scoped_store = Store(DATA_DIR / "users" / user_id / "career_agent.sqlite3")
+    store_token = request_store.set(scoped_store)
+    runtime_token = request_runtime.set(AgentRuntime(scoped_store, provider))
+    try:
+        return await call_next(request)
+    finally:
+        request_store.reset(store_token)
+        request_runtime.reset(runtime_token)
 
 
 class TextInput(BaseModel):
@@ -62,6 +96,11 @@ class PracticeInput(BaseModel):
     question_number: int = Field(ge=1)
 
 
+class Credentials(BaseModel):
+    username: str = Field(pattern=r"^[A-Za-z0-9_-]{3,32}$")
+    password: str = Field(min_length=8, max_length=128)
+
+
 def nonempty(value: str) -> str:
     value = value.strip()
     if not value:
@@ -70,7 +109,7 @@ def nonempty(value: str) -> str:
 
 
 def require_session(session_id: str, kind: str) -> dict:
-    session = store.get(session_id, kind)
+    session = active_store().get(session_id, kind)
     if session is None:
         raise HTTPException(404, "会话不存在")
     return session
@@ -78,29 +117,75 @@ def require_session(session_id: str, kind: str) -> dict:
 
 async def complete_run(session: dict) -> dict:
     try:
-        return await runtime.run(session)
+        return await active_runtime().run(session)
     except Exception as exc:
         raise HTTPException(502, f"模型运行失败：{exc}") from exc
 
 
 @app.get("/api/config")
 def config():
-    return {"provider": provider.mode, "model": provider.model}
+    return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED}
+
+
+def set_login_cookie(response: Response, request: Request, user_id: str):
+    response.set_cookie("nico_session", auth_store.issue_token(user_id), max_age=7 * 24 * 3600,
+                        httponly=True, secure=request.url.scheme == "https", samesite="strict", path="/")
+
+
+@app.post("/api/auth/register")
+def register(body: Credentials, request: Request, response: Response):
+    if not AUTH_REQUIRED:
+        raise HTTPException(404)
+    user_id = auth_store.register(body.username, body.password)
+    if user_id is None:
+        raise HTTPException(409, "用户名已存在")
+    set_login_cookie(response, request, user_id)
+    return {"username": body.username.lower()}
+
+
+@app.post("/api/auth/login")
+def login(body: Credentials, request: Request, response: Response):
+    if not AUTH_REQUIRED:
+        raise HTTPException(404)
+    user_id = auth_store.login(body.username, body.password)
+    if user_id is None:
+        raise HTTPException(401, "用户名或密码错误")
+    set_login_cookie(response, request, user_id)
+    return {"username": body.username.lower()}
+
+
+@app.get("/api/auth/me")
+def current_user(request: Request):
+    if not AUTH_REQUIRED:
+        raise HTTPException(404)
+    user_id = auth_store.resolve_token(request.cookies.get("nico_session"))
+    if user_id is None:
+        raise HTTPException(401, "请先登录")
+    return {"username": auth_store.username(user_id)}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    if not AUTH_REQUIRED:
+        raise HTTPException(404)
+    auth_store.revoke_token(request.cookies.get("nico_session"))
+    response.delete_cookie("nico_session", path="/")
+    return {"logged_out": True}
 
 
 @app.get("/api/materials")
 def list_materials():
-    return store.list_materials()
+    return active_store().list_materials()
 
 
 @app.post("/api/materials")
 def create_material(body: MaterialInput):
-    return store.create_material(body.kind, nonempty(body.title), nonempty(body.content))
+    return active_store().create_material(body.kind, nonempty(body.title), nonempty(body.content))
 
 
 @app.put("/api/materials/{material_id}")
 def edit_material(material_id: str, body: MaterialEdit):
-    material = store.replace_material(material_id, nonempty(body.title), nonempty(body.content))
+    material = active_store().replace_material(material_id, nonempty(body.title), nonempty(body.content))
     if material is None:
         raise HTTPException(404, "材料不存在或已撤回")
     return material
@@ -108,27 +193,27 @@ def edit_material(material_id: str, body: MaterialEdit):
 
 @app.delete("/api/materials/{material_id}")
 def delete_material(material_id: str):
-    if not store.revoke_material(material_id):
+    if not active_store().revoke_material(material_id):
         raise HTTPException(404, "材料不存在或已撤回")
     return {"revoked": True}
 
 
 @app.get("/api/claims")
 def list_claims():
-    return store.list_claims()
+    return active_store().list_claims()
 
 
 @app.post("/api/claims")
 def create_claim(body: ClaimInput):
     try:
-        return store.create_claim(nonempty(body.text), body.material_id)
+        return active_store().create_claim(nonempty(body.text), body.material_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
 @app.put("/api/claims/{claim_id}")
 def edit_claim(claim_id: str, body: ClaimEdit):
-    claim = store.replace_claim(claim_id, nonempty(body.text))
+    claim = active_store().replace_claim(claim_id, nonempty(body.text))
     if claim is None:
         raise HTTPException(404, "经历不存在或已撤回")
     return claim
@@ -136,14 +221,14 @@ def edit_claim(claim_id: str, body: ClaimEdit):
 
 @app.delete("/api/claims/{claim_id}")
 def delete_claim(claim_id: str):
-    if not store.revoke_claim(claim_id):
+    if not active_store().revoke_claim(claim_id):
         raise HTTPException(404, "经历不存在或已撤回")
     return {"revoked": True}
 
 
 @app.post("/api/claims/{claim_id}/confirm")
 def confirm_claim(claim_id: str):
-    claim = store.confirm_claim(claim_id)
+    claim = active_store().confirm_claim(claim_id)
     if claim is None:
         raise HTTPException(404, "待确认经历不存在")
     return claim
@@ -153,7 +238,7 @@ def confirm_claim(claim_id: str):
 def list_sessions(kind: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    return store.list_sessions(kind)
+    return active_store().list_sessions(kind)
 
 
 @app.get("/api/{kind}/sessions/{session_id}")
@@ -161,10 +246,10 @@ def get_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     session = require_session(session_id, kind)
-    result = {"session": session, "messages": store.messages(session_id, kind), "events": store.events(session_id, kind)}
+    result = {"session": session, "messages": active_store().messages(session_id, kind), "events": active_store().events(session_id, kind)}
     if kind == "interview":
-        result["resources"] = store.interview_resources(session_id)
-        result["practice_source"] = store.practice_source(session_id)
+        result["resources"] = active_store().interview_resources(session_id)
+        result["practice_source"] = active_store().practice_source(session_id)
     return result
 
 
@@ -172,7 +257,7 @@ def get_session(kind: str, session_id: str):
 def delete_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    if not store.delete_session(session_id, kind):
+    if not active_store().delete_session(session_id, kind):
         raise HTTPException(404, "会话不存在")
     return {"deleted": True}
 
@@ -184,11 +269,11 @@ def export_session(kind: str, session_id: str):
     session = require_session(session_id, kind)
     lines = ["# 聊天记录" if kind == "chat" else "# 模拟面试记录", ""]
     if kind == "chat":
-        for message in store.messages(session_id, kind):
+        for message in active_store().messages(session_id, kind):
             lines.extend([f"## {'用户' if message['role'] == 'user' else '聊天助手'}", "",
                           message["content"], ""])
     else:
-        report = store.interview_report(session_id)
+        report = active_store().interview_report(session_id)
         lines.extend([f"岗位目标：{session['goal']}", f"状态：{session['status']}", ""])
         if report["practice_source"]:
             source = report["practice_source"]
@@ -204,7 +289,7 @@ def export_session(kind: str, session_id: str):
         if report["summary"]:
             lines.extend(["## 全场总结", "", report["summary"], ""])
         lines.extend(["## 完整对话", ""])
-        for message in store.messages(session_id, kind):
+        for message in active_store().messages(session_id, kind):
             lines.extend([f"### {'用户' if message['role'] == 'user' else '面试官'}", "",
                           message["content"], ""])
     return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
@@ -213,13 +298,13 @@ def export_session(kind: str, session_id: str):
 
 @app.post("/api/chat/sessions")
 def create_chat():
-    return store.create("chat")
+    return active_store().create("chat")
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
 async def chat_message(session_id: str, body: TextInput):
     require_session(session_id, "chat")
-    session = store.claim_run(session_id, "chat", "active", nonempty(body.text))
+    session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能发送消息")
     return await complete_run(session)
@@ -228,7 +313,7 @@ async def chat_message(session_id: str, body: TextInput):
 @app.post("/api/chat/sessions/{session_id}/messages/claim")
 def claim_chat_message(session_id: str, body: TextInput):
     require_session(session_id, "chat")
-    session = store.claim_run(session_id, "chat", "active", nonempty(body.text))
+    session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能发送消息")
     return session
@@ -245,7 +330,7 @@ async def run_chat_message(session_id: str, body: ChatRunInput):
 @app.post("/api/chat/sessions/{session_id}/interrupt")
 def interrupt_chat(session_id: str):
     require_session(session_id, "chat")
-    result = store.interrupt(session_id, "chat")
+    result = active_store().interrupt(session_id, "chat")
     if result is None:
         raise HTTPException(409, "当前没有可中断的运行")
     return result
@@ -254,7 +339,7 @@ def interrupt_chat(session_id: str):
 @app.post("/api/interview/sessions")
 def create_interview(body: InterviewInput):
     try:
-        return store.create("interview", nonempty(body.goal), tuple(body.material_ids),
+        return active_store().create("interview", nonempty(body.goal), tuple(body.material_ids),
                             tuple(body.claim_ids), body.max_questions)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -262,7 +347,7 @@ def create_interview(body: InterviewInput):
 
 @app.get("/api/interview/sessions/{session_id}/report")
 def interview_report(session_id: str):
-    report = store.interview_report(session_id)
+    report = active_store().interview_report(session_id)
     if report is None:
         raise HTTPException(404, "面试不存在")
     return report
@@ -272,7 +357,7 @@ def interview_report(session_id: str):
 def create_practice(session_id: str, body: PracticeInput):
     require_session(session_id, "interview")
     try:
-        return store.create_practice(session_id, body.question_number)
+        return active_store().create_practice(session_id, body.question_number)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -280,7 +365,7 @@ def create_practice(session_id: str, body: PracticeInput):
 @app.post("/api/interview/sessions/{session_id}/start")
 async def start_interview(session_id: str):
     require_session(session_id, "interview")
-    session = store.claim_run(session_id, "interview", "new")
+    session = active_store().claim_run(session_id, "interview", "new")
     if session is None:
         raise HTTPException(409, "面试已开始")
     return await complete_run(session)
@@ -289,7 +374,7 @@ async def start_interview(session_id: str):
 @app.post("/api/interview/sessions/{session_id}/answers")
 async def answer_interview(session_id: str, body: TextInput):
     require_session(session_id, "interview")
-    session = store.claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text))
+    session = active_store().claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能提交回答")
     return await complete_run(session)
@@ -298,7 +383,7 @@ async def answer_interview(session_id: str, body: TextInput):
 @app.post("/api/interview/sessions/{session_id}/answers/claim")
 def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
     require_session(session_id, "interview")
-    session = store.claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text),
+    session = active_store().claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text),
                               expected_question=body.question_number)
     if session is None:
         raise HTTPException(409, "当前题目已变化，无法提交回答")
@@ -316,7 +401,7 @@ async def run_interview_answer(session_id: str, body: ChatRunInput):
 @app.post("/api/interview/sessions/{session_id}/pause")
 def pause_interview(session_id: str):
     require_session(session_id, "interview")
-    result = store.interrupt(session_id, "interview")
+    result = active_store().interrupt(session_id, "interview")
     if result is None:
         raise HTTPException(409, "当前不能暂停")
     return result
@@ -325,7 +410,7 @@ def pause_interview(session_id: str):
 @app.post("/api/interview/sessions/{session_id}/cancel")
 def cancel_interview(session_id: str):
     require_session(session_id, "interview")
-    result = store.cancel_interview(session_id)
+    result = active_store().cancel_interview(session_id)
     if result is None:
         raise HTTPException(409, "当前不能结束面试")
     return result
@@ -334,7 +419,7 @@ def cancel_interview(session_id: str):
 @app.post("/api/interview/sessions/{session_id}/resume")
 async def resume_interview(session_id: str):
     require_session(session_id, "interview")
-    result = store.resume(session_id)
+    result = active_store().resume(session_id)
     if result is None:
         raise HTTPException(409, "当前不能恢复")
     session, needs_run = result

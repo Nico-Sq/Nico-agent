@@ -7,10 +7,22 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="shell">
+  <section id="auth-panel" class="auth-panel" hidden>
+    <h1>登录求职双线 Agent</h1>
+    <p>登录后查看自己的聊天、材料和面试记录。</p>
+    <form id="auth-form">
+      <label for="auth-username">用户名</label>
+      <input id="auth-username" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_-]+" required>
+      <label for="auth-password">密码（至少 8 位）</label>
+      <input id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+      <div class="composer-actions"><button type="submit">登录</button><button id="auth-register" type="button" class="secondary">注册并登录</button></div>
+      <p id="auth-notice" role="alert"></p>
+    </form>
+  </section>
+  <div id="shell" class="shell" hidden>
     <header class="topbar">
       <div><span class="eyebrow">CAREER STUDIO</span><h1>求职双线 Agent</h1></div>
-      <span id="provider" class="badge">读取模型配置中</span>
+      <div><span id="provider" class="badge">读取模型配置中</span><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
     </header>
     <p class="intro">在聊天中梳理思路，在独立的面试会话中逐题练习。两条线各自保存记录。</p>
     <nav class="tabs" aria-label="选择入口">

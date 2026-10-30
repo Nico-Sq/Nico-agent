@@ -1,0 +1,94 @@
+import asyncio
+import tempfile
+import unittest
+from pathlib import Path
+
+import httpx
+from fastapi.testclient import TestClient
+
+from career_agent import main
+from career_agent.auth import AuthStore
+
+
+class AuthApiTests(unittest.TestCase):
+    def setUp(self):
+        temp_root = Path(__file__).parent / ".tmp"
+        temp_root.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=temp_root)
+        self.original = main.AUTH_REQUIRED, main.auth_store, main.DATA_DIR, main.provider.mode
+        main.DATA_DIR = Path(self.temp.name)
+        main.auth_store = AuthStore(main.DATA_DIR / "auth.sqlite3")
+        main.AUTH_REQUIRED = True
+        main.provider.mode = "demo"
+        self.alice = TestClient(main.app)
+        self.bob = TestClient(main.app)
+
+    def tearDown(self):
+        self.alice.close()
+        self.bob.close()
+        main.AUTH_REQUIRED, main.auth_store, main.DATA_DIR, main.provider.mode = self.original
+        self.temp.cleanup()
+
+    def test_login_and_account_data_isolation(self):
+        self.assertEqual(self.alice.get("/api/materials").status_code, 401)
+        self.assertTrue(self.alice.get("/api/config").json()["auth_required"])
+        alice = self.alice.post("/api/auth/register", json={
+            "username": "Alice", "password": "correct-password",
+        })
+        self.assertEqual(alice.status_code, 200, alice.text)
+        self.assertIn("HttpOnly", alice.headers["set-cookie"])
+        self.assertEqual(self.alice.get("/api/auth/me").json()["username"], "alice")
+        self.assertEqual(self.bob.post("/api/auth/register", json={
+            "username": "alice", "password": "another-password",
+        }).status_code, 409)
+        self.assertEqual(self.bob.post("/api/auth/register", json={
+            "username": "bob", "password": "correct-password",
+        }).status_code, 200)
+        material = self.alice.post("/api/materials", json={
+            "kind": "project", "title": "Alice 的材料", "content": "PRIVATE_ALICE",
+        }).json()
+        interview = self.alice.post("/api/interview/sessions", json={
+            "goal": "Alice 的面试", "material_ids": [material["id"]],
+        }).json()
+        self.assertEqual(self.bob.get("/api/materials").json(), [])
+        self.assertEqual(self.bob.get(f"/api/interview/sessions/{interview['id']}").status_code, 404)
+        self.assertEqual(self.bob.post("/api/interview/sessions", json={
+            "goal": "窃取材料", "material_ids": [material["id"]],
+        }).status_code, 422)
+        self.assertEqual(self.bob.get(f"/api/interview/sessions/{interview['id']}/export.md").status_code, 404)
+        bob_chat = self.bob.post("/api/chat/sessions").json()["id"]
+        tool_reply = self.bob.post(f"/api/chat/sessions/{bob_chat}/messages", json={
+            "text": f"请解释材料 {material['id']}",
+        }).json()["message"]
+        self.assertNotIn("PRIVATE_ALICE", tool_reply)
+        self.assertEqual(self.alice.post("/api/auth/logout").status_code, 200)
+        self.assertEqual(self.alice.get("/api/materials").status_code, 401)
+        self.assertEqual(self.alice.post("/api/auth/login", json={
+            "username": "alice", "password": "wrong-password",
+        }).status_code, 401)
+        self.assertEqual(self.alice.post("/api/auth/login", json={
+            "username": "alice", "password": "correct-password",
+        }).status_code, 200)
+        self.assertEqual(self.alice.get("/api/materials").json()[0]["id"], material["id"])
+
+    def test_parallel_accounts_keep_request_context_separate(self):
+        for client, username in ((self.alice, "alice"), (self.bob, "bob")):
+            self.assertEqual(client.post("/api/auth/register", json={
+                "username": username, "password": "correct-password",
+            }).status_code, 200)
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=main.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
+                                         cookies={"nico_session": self.alice.cookies.get("nico_session")}) as alice:
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
+                                             cookies={"nico_session": self.bob.cookies.get("nico_session")}) as bob:
+                    await asyncio.gather(
+                        alice.post("/api/materials", json={"kind": "project", "title": "Alice", "content": "A_ONLY"}),
+                        bob.post("/api/materials", json={"kind": "project", "title": "Bob", "content": "B_ONLY"}),
+                    )
+                    return await asyncio.gather(alice.get("/api/materials"), bob.get("/api/materials"))
+
+        alice_list, bob_list = asyncio.run(scenario())
+        self.assertEqual([item["content"] for item in alice_list.json()], ["A_ONLY"])
+        self.assertEqual([item["content"] for item in bob_list.json()], ["B_ONLY"])
