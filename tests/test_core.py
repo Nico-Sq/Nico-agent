@@ -25,6 +25,15 @@ class CoreTests(unittest.TestCase):
         self.store = Store(Path(self.temp.name) / "test.sqlite3")
         self.runtime = AgentRuntime(self.store, Provider())
 
+    def finish_interview(self, interview, answer_prefix="第"):
+        running = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(running))
+        for number in range(1, 4):
+            current = self.store.claim_run(
+                interview["id"], "interview", "awaiting_answer", f"{answer_prefix} {number} 题回答"
+            )
+            run_demo(self.runtime.run(current))
+
     def tearDown(self):
         self.temp.cleanup()
 
@@ -50,9 +59,13 @@ class CoreTests(unittest.TestCase):
         blocked = self.runtime._execute_tool_sync(chat_run, call)
         self.assertEqual(json.loads(blocked["content"])["error"], "resource_not_authorized")
         self.store.finish_run(chat["id"], chat_run["version"], "好的", "active", 0)
+        self.finish_interview(interview, "SECRET_ANSWER")
         selected = self.store.claim_run(chat["id"], "chat", "active", f"请解释面试 {interview['id']} 的反馈")
         allowed = self.runtime._execute_tool_sync(selected, call)
-        self.assertEqual(json.loads(allowed["content"])["goal"], "开发岗位")
+        content = json.loads(allowed["content"])
+        self.assertEqual(content["goal"], "开发岗位")
+        self.assertEqual(len(content["feedback"]), 3)
+        self.assertNotIn("SECRET_ANSWER", allowed["content"])
 
     def test_interrupted_run_cannot_commit_late_reply(self):
         interview = self.store.create("interview", "开发岗位")
@@ -62,18 +75,57 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(result["interrupted"])
         self.assertEqual(self.store.get(interview["id"], "interview")["status"], "paused")
         self.assertEqual(self.store.messages(interview["id"], "interview"), [])
+        self.assertEqual(self.store.interview_report(interview["id"])["items"], [])
 
     def test_three_question_flow(self):
         interview = self.store.create("interview", "开发岗位")
-        running = self.store.claim_run(interview["id"], "interview", "new")
-        run_demo(self.runtime.run(running))
-        for number in range(1, 4):
-            current = self.store.claim_run(interview["id"], "interview", "awaiting_answer", f"第 {number} 题回答")
-            run_demo(self.runtime.run(current))
+        self.finish_interview(interview)
         final = self.store.get(interview["id"], "interview")
         self.assertEqual(final["status"], "finished")
         self.assertEqual(final["question_count"], 3)
         self.assertEqual(len(self.store.messages(interview["id"], "interview")), 7)
+        report = self.store.interview_report(interview["id"])
+        self.assertEqual(len(report["items"]), 3)
+        self.assertEqual(report["items"][1]["answer"], "第 2 题回答")
+        self.assertIn("演示反馈", report["items"][1]["feedback"])
+        self.assertIn("演示总结", report["summary"])
+
+    def test_practice_uses_one_question_and_original_feedback(self):
+        source = self.store.create("interview", "开发岗位")
+        with self.assertRaises(ValueError):
+            self.store.create_practice(source["id"], 1)
+        self.finish_interview(source)
+        practice = self.store.create_practice(source["id"], 2)
+        context = json.dumps(self.runtime.build_context(practice), ensure_ascii=False)
+        self.assertIn("[PRACTICE_SOURCE]", context)
+        self.assertIn("第 2 题回答", context)
+        running = self.store.claim_run(practice["id"], "interview", "new")
+        first = run_demo(self.runtime.run(running))
+        self.assertIn("复练", first["message"])
+        answer = self.store.claim_run(practice["id"], "interview", "awaiting_answer", "换一个场景的回答")
+        run_demo(self.runtime.run(answer))
+        report = self.store.interview_report(practice["id"])
+        self.assertEqual(report["status"], "finished")
+        self.assertEqual(len(report["items"]), 1)
+        self.assertEqual(report["items"][0]["answer"], "换一个场景的回答")
+
+    def test_failed_model_call_keeps_answer_for_resume(self):
+        class FailingProvider:
+            async def complete(self, messages, tools):
+                raise RuntimeError("模拟模型故障")
+
+        interview = self.store.create("interview", "开发岗位")
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answer = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "已保存的原始回答")
+        with self.assertRaises(RuntimeError):
+            run_demo(AgentRuntime(self.store, FailingProvider()).run(answer))
+        self.assertEqual(self.store.get(interview["id"], "interview")["status"], "paused")
+        self.assertEqual(self.store.interview_report(interview["id"])["items"][0]["answer"], "已保存的原始回答")
+        resumed, needs_run = self.store.resume(interview["id"])
+        self.assertTrue(needs_run)
+        run_demo(self.runtime.run(resumed))
+        self.assertIsNotNone(self.store.interview_report(interview["id"])["items"][0]["feedback"])
 
     def test_only_selected_materials_and_confirmed_claims_enter_interview(self):
         resume = self.store.create_material("resume", "我的简历", "已授权的项目原文")

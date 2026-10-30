@@ -40,28 +40,36 @@ class Provider:
         system = messages[0]["content"]
         if "INTERVIEW_MODE" in system:
             count = int(system.split("QUESTION_COUNT=")[1].splitlines()[0])
+            max_questions = int(system.split("MAX_QUESTIONS=")[1].splitlines()[0])
             if count == 0:
+                practice = next(
+                    (json.loads(message["content"].split("\n", 1)[1]) for message in messages
+                     if message["role"] == "user" and message["content"].startswith("[PRACTICE_SOURCE]\n")),
+                    None,
+                )
                 resources = next(
                     (json.loads(message["content"].split("\n", 1)[1]) for message in messages
                      if message["role"] == "user" and message["content"].startswith("[INTERVIEW_RESOURCES]\n")),
                     {"materials": [], "claims": []},
                 )
-                if resources["claims"]:
+                if practice:
+                    question = f"复练：换一个具体场景回答“{practice['question'][:80]}”，并说明你如何验证结果。"
+                elif resources["claims"]:
                     question = f"你确认的经历中提到“{resources['claims'][0]['text'][:80]}”。请说明你的具体行动和结果。"
                 elif resources["materials"]:
                     question = f"请结合你提供的“{resources['materials'][0]['title']}”，介绍一项与岗位相关的经历。"
                 else:
                     question = QUESTIONS[0]
                 result = {"feedback": "", "question": question, "finished": False}
-            elif count < len(QUESTIONS):
+            elif count < max_questions:
                 result = {
                     "feedback": "演示反馈：请补充你的具体行动、可核实的结果和反思。",
-                    "question": QUESTIONS[count],
+                    "question": QUESTIONS[count % len(QUESTIONS)],
                     "finished": False,
                 }
             else:
                 result = {
-                    "feedback": "演示总结：你已完成三题。正式评价需要配置真实模型。",
+                    "feedback": f"演示总结：你已完成 {max_questions} 题。正式评价需要配置真实模型。",
                     "question": "",
                     "finished": True,
                 }

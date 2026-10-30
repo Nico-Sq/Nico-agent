@@ -98,6 +98,41 @@ function renderSelectedResources(resources) {
   box.textContent = `本场已选择 ${materialCount} 份材料、${claimCount} 条已确认经历`;
 }
 
+function renderReport(report) {
+  $("interview-report").hidden = !report;
+  const box = $("report-items");
+  box.replaceChildren();
+  if (!report) return;
+  $("report-summary").textContent = report.summary || "本轮尚未形成总结。";
+  for (const item of report.items) {
+    const row = document.createElement("div");
+    row.className = "report-item";
+    for (const [label, value] of [[`第 ${item.number} 题`, item.question], ["你的回答", item.answer], ["反馈", item.feedback]]) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = `${label}：${value || "无"}`;
+      row.append(paragraph);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "复练这题";
+    button.onclick = () => startPractice(report.session_id, item.number);
+    row.append(button);
+    box.append(row);
+  }
+}
+
+function startPractice(sourceId, questionNumber) {
+  action("interview", async () => {
+    const session = await api(`/interview/sessions/${sourceId}/practice`, {
+      method: "POST", body: JSON.stringify({ question_number: questionNumber }),
+    });
+    state.ids.interview = session.id;
+    localStorage.setItem("interviewSession", session.id);
+    try { await runRequest("interview", session.id, `/interview/sessions/${session.id}/start`); }
+    finally { if (state.kind === "interview" && state.ids.interview === session.id) await selectSession(session.id); }
+  });
+}
+
 async function loadSessions() {
   const sessions = await api(`/${state.kind}/sessions`);
   const box = $("sessions");
@@ -130,6 +165,7 @@ async function selectSession(id) {
   if (state.kind === "interview") {
     renderInterviewState(view?.session);
     renderSelectedResources(view?.resources);
+    renderReport(view?.session.status === "finished" ? await api(`/interview/sessions/${id}/report`) : null);
     if (!view) await loadPreparation();
   }
   await loadSessions();

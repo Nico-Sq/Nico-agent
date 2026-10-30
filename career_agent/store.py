@@ -63,6 +63,19 @@ class Store:
                     claim_id TEXT NOT NULL REFERENCES claims(id),
                     PRIMARY KEY (session_id, claim_id)
                 );
+                CREATE TABLE IF NOT EXISTS interview_items (
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    number INTEGER NOT NULL,
+                    question TEXT NOT NULL,
+                    answer TEXT,
+                    feedback TEXT,
+                    PRIMARY KEY (session_id, number)
+                );
+                CREATE TABLE IF NOT EXISTS practice_sessions (
+                    session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+                    source_session_id TEXT NOT NULL REFERENCES sessions(id),
+                    question_number INTEGER NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS messages_session_id ON messages(session_id, id);
             """)
 
@@ -178,6 +191,64 @@ class Store:
                 del material["content"]
         return {"materials": selected_materials, "claims": [dict(row) for row in claims]}
 
+    def interview_report(self, session_id: str) -> dict | None:
+        session = self.get(session_id, "interview")
+        if session is None:
+            return None
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT number, question, answer, feedback FROM interview_items "
+                "WHERE session_id = ? ORDER BY number", (session_id,)
+            ).fetchall()
+        messages = self.messages(session_id, "interview")
+        summary = messages[-1]["content"] if session["status"] == "finished" and messages else None
+        return {"session_id": session_id, "goal": session["goal"], "status": session["status"],
+                "items": [dict(row) for row in rows], "summary": summary}
+
+    def practice_source(self, session_id: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute("""SELECT p.source_session_id, p.question_number,
+                    i.question, i.answer, i.feedback
+                FROM practice_sessions p JOIN interview_items i
+                  ON i.session_id = p.source_session_id AND i.number = p.question_number
+                WHERE p.session_id = ?""", (session_id,)).fetchone()
+        return dict(row) if row else None
+
+    def create_practice(self, source_session_id: str, question_number: int) -> dict:
+        session_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            source = db.execute(
+                "SELECT goal FROM sessions WHERE id = ? AND kind = 'interview' AND status = 'finished'",
+                (source_session_id,),
+            ).fetchone()
+            item = db.execute(
+                "SELECT 1 FROM interview_items WHERE session_id = ? AND number = ? AND feedback IS NOT NULL",
+                (source_session_id, question_number),
+            ).fetchone()
+            if source is None or item is None:
+                raise ValueError("只能复练已完成面试中有反馈的题目")
+            db.execute(
+                "INSERT INTO sessions(id, kind, status, goal, created_at) "
+                "VALUES (?, 'interview', 'new', ?, ?)",
+                (session_id, source["goal"], now()),
+            )
+            db.execute(
+                "INSERT INTO session_materials(session_id, material_id) "
+                "SELECT ?, material_id FROM session_materials WHERE session_id = ?",
+                (session_id, source_session_id),
+            )
+            db.execute(
+                "INSERT INTO session_claims(session_id, claim_id) "
+                "SELECT ?, claim_id FROM session_claims WHERE session_id = ?",
+                (session_id, source_session_id),
+            )
+            db.execute(
+                "INSERT INTO practice_sessions(session_id, source_session_id, question_number) "
+                "VALUES (?, ?, ?)", (session_id, source_session_id, question_number),
+            )
+        return self.get(session_id, "interview")
+
     def get(self, session_id: str, kind: str) -> dict | None:
         with self.connect() as db:
             row = db.execute(
@@ -231,12 +302,25 @@ class Store:
                     "INSERT INTO messages(session_id, role, content, created_at) VALUES (?, 'user', ?, ?)",
                     (session_id, user_text, now()),
                 )
+                if kind == "interview":
+                    db.execute(
+                        "UPDATE interview_items SET answer = ? WHERE session_id = ? "
+                        "AND number = (SELECT question_count FROM sessions WHERE id = ?)",
+                        (user_text, session_id, session_id),
+                    )
             row = db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row)
 
-    def finish_run(self, session_id: str, version: int, content: str, status: str, question_count: int) -> bool:
+    def finish_run(
+        self, session_id: str, version: int, content: str, status: str, question_count: int,
+        question: str | None = None, feedback: str | None = None,
+    ) -> bool:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            before = db.execute(
+                "SELECT kind, question_count FROM sessions WHERE id = ? AND status = 'running' AND version = ?",
+                (session_id, version),
+            ).fetchone()
             changed = db.execute(
                 "UPDATE sessions SET status = ?, question_count = ? "
                 "WHERE id = ? AND status = 'running' AND version = ?",
@@ -247,6 +331,17 @@ class Store:
                     "INSERT INTO messages(session_id, role, content, created_at) VALUES (?, 'assistant', ?, ?)",
                     (session_id, content, now()),
                 )
+                if before["kind"] == "interview":
+                    if before["question_count"]:
+                        db.execute(
+                            "UPDATE interview_items SET feedback = ? WHERE session_id = ? AND number = ?",
+                            (feedback, session_id, before["question_count"]),
+                        )
+                    if question:
+                        db.execute(
+                            "INSERT INTO interview_items(session_id, number, question) VALUES (?, ?, ?)",
+                            (session_id, question_count, question),
+                        )
         return bool(changed)
 
     def fail_run(self, session_id: str, version: int, kind: str, error: str):

@@ -40,6 +40,10 @@ class ClaimInput(BaseModel):
     material_id: str | None = None
 
 
+class PracticeInput(BaseModel):
+    question_number: int = Field(ge=1)
+
+
 def nonempty(value: str) -> str:
     value = value.strip()
     if not value:
@@ -112,6 +116,7 @@ def get_session(kind: str, session_id: str):
     result = {"session": session, "messages": store.messages(session_id, kind), "events": store.events(session_id, kind)}
     if kind == "interview":
         result["resources"] = store.interview_resources(session_id)
+        result["practice_source"] = store.practice_source(session_id)
     return result
 
 
@@ -144,6 +149,23 @@ def create_interview(body: InterviewInput):
         return store.create("interview", nonempty(body.goal), tuple(body.material_ids), tuple(body.claim_ids))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/interview/sessions/{session_id}/report")
+def interview_report(session_id: str):
+    report = store.interview_report(session_id)
+    if report is None:
+        raise HTTPException(404, "面试不存在")
+    return report
+
+
+@app.post("/api/interview/sessions/{session_id}/practice")
+def create_practice(session_id: str, body: PracticeInput):
+    require_session(session_id, "interview")
+    try:
+        return store.create_practice(session_id, body.question_number)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/start")
