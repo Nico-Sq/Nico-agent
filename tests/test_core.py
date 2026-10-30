@@ -1,7 +1,9 @@
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from career_agent.provider import Provider
@@ -37,6 +39,31 @@ class CoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_existing_database_gains_new_columns_without_losing_rows(self):
+        legacy_path = Path(self.temp.name) / "legacy.sqlite3"
+        with closing(sqlite3.connect(legacy_path)) as db:
+            db.executescript("""
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY, kind TEXT, status TEXT, goal TEXT,
+                    question_count INTEGER, version INTEGER, created_at TEXT
+                );
+                CREATE TABLE materials (
+                    id TEXT PRIMARY KEY, kind TEXT, title TEXT, content TEXT, created_at TEXT
+                );
+                CREATE TABLE claims (
+                    id TEXT PRIMARY KEY, material_id TEXT, text TEXT, status TEXT, created_at TEXT
+                );
+                INSERT INTO sessions VALUES ('legacy-chat', 'chat', 'active', '', 0, 0, '2026-01-01');
+                INSERT INTO materials VALUES ('legacy-material', 'project', '旧材料', '原始内容', '2026-01-01');
+                INSERT INTO claims VALUES ('legacy-claim', 'legacy-material', '原始经历', 'confirmed', '2026-01-01');
+            """)
+        upgraded = Store(legacy_path)
+        self.assertEqual(upgraded.get("legacy-chat", "chat")["max_questions"], 3)
+        self.assertEqual(upgraded.list_materials()[0]["content"], "原始内容")
+        self.assertEqual(upgraded.list_claims()[0]["text"], "原始经历")
+        self.assertTrue(upgraded.revoke_material("legacy-material"))
+        self.assertEqual(upgraded.list_claims(), [])
 
     def test_interview_context_excludes_chat_history(self):
         chat = self.store.create("chat")
