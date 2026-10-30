@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -26,15 +27,32 @@ QUESTIONS = (
 class Provider:
     def __init__(self):
         self.mode = os.getenv("MODEL_PROVIDER", "demo")
-        self.model = os.getenv("MODEL_NAME", "")
-        self.base_url = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1")
+        self.model = os.getenv("MODEL_NAME", "").strip()
+        self.base_url = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1").strip()
         self.api_key = os.getenv("MODEL_API_KEY", "")
 
+    def configuration_error(self) -> str | None:
+        if self.mode == "demo":
+            return None
+        if self.mode != "openai_compatible":
+            return "MODEL_PROVIDER 仅支持 demo 或 openai_compatible"
+        if not self.model.strip():
+            return "请设置 MODEL_NAME"
+        try:
+            url = urlsplit(self.base_url)
+            port = url.port
+        except ValueError:
+            return "MODEL_API_BASE_URL 必须是 http:// 或 https:// 地址"
+        if url.scheme not in ("http", "https") or not url.hostname or port == 0:
+            return "MODEL_API_BASE_URL 必须是 http:// 或 https:// 地址"
+        return None
+
     async def complete(self, messages: list[dict], tools: list[dict]) -> dict:
+        config_error = self.configuration_error()
+        if config_error:
+            raise ModelError("model_config_invalid", config_error)
         if self.mode == "demo":
             return self._demo(messages, tools)
-        if self.mode != "openai_compatible" or not self.model:
-            raise ModelError("model_config_invalid", "请设置 MODEL_PROVIDER=openai_compatible 和 MODEL_NAME")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -67,10 +85,11 @@ class Provider:
                     raise ModelError("model_unavailable", "无法连接模型服务") from exc
         try:
             data = response.json()
-            message = data["choices"][0]["message"]
+            choice = data["choices"][0]
+            message = choice["message"]
             if not isinstance(message, dict):
                 raise TypeError("模型消息不是对象")
-            return {**message, "usage": data.get("usage")}
+            return {**message, "usage": data.get("usage"), "finish_reason": choice.get("finish_reason")}
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelError("model_invalid_response", "模型服务返回了无效响应") from exc
 

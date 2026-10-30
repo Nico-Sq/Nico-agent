@@ -162,7 +162,8 @@ async def complete_run(session: dict) -> dict | JSONResponse:
 
 @app.get("/api/config")
 def config():
-    return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED}
+    return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED,
+            "config_error": provider.configuration_error()}
 
 
 @app.get("/api/data/backup")

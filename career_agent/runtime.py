@@ -193,6 +193,8 @@ class AgentRuntime:
                             usage["covered_requests"] += 1
             if not self.store.run_current(session["id"], session["version"]):
                 raise RunSuperseded()
+            if reply.get("finish_reason") == "length":
+                raise ModelError("model_output_truncated", "模型输出达到上限，请缩短本轮材料或请求后重试")
             calls = reply.get("tool_calls") or []
             if (not isinstance(calls, list) or any(
                 not isinstance(call, dict) or not isinstance(call.get("id"), str)

@@ -26,6 +26,7 @@
     </header>
     <p class="intro">在聊天中梳理思路，在独立的面试会话中逐题练习。两条线各自保存记录。</p>
     <p id="provider-data-notice" class="intro" hidden>真实模型模式会把本次消息、面试回答及获授权读取的材料发送到已配置的模型服务。</p>
+    <p id="model-config-notice" class="notice" role="alert" hidden></p>
     <nav class="tabs" aria-label="选择入口">
       <button type="button" id="tab-chat" class="active">聊天助手</button>
       <button type="button" id="tab-interview">模拟面试</button>
@@ -53,7 +54,7 @@
           <div id="chat-messages" class="messages" aria-live="polite"></div>
           <form id="chat-form" class="composer">
             <label for="chat-text">你的消息</label>
-            <textarea id="chat-text" rows="3" placeholder="例如：帮我梳理一下这个岗位最看重的能力" required></textarea>
+            <textarea id="chat-text" rows="3" maxlength="12000" placeholder="例如：帮我梳理一下这个岗位最看重的能力" required></textarea>
             <div class="composer-actions"><button type="button" id="chat-retry" class="secondary" hidden>重试上条消息</button><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div>
           </form>
         </div>
@@ -82,7 +83,7 @@
           </section>
           <form id="interview-setup" class="setup">
             <label for="interview-goal">目标岗位与练习重点</label>
-            <textarea id="interview-goal" rows="3" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
+            <textarea id="interview-goal" rows="3" maxlength="500" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
             <label for="interview-max-questions">本轮题数（1–10）</label>
             <input id="interview-max-questions" type="number" min="1" max="10" value="3" required>
             <button type="submit">开始面试</button>
@@ -91,7 +92,7 @@
           <div id="interview-messages" class="messages" aria-live="polite"></div>
           <form id="answer-form" class="composer" hidden>
             <label for="answer-text">你的回答</label>
-            <textarea id="answer-text" rows="4" placeholder="结合真实经历作答，尽量说清行动和结果" required></textarea>
+            <textarea id="answer-text" rows="4" maxlength="12000" placeholder="结合真实经历作答，尽量说清行动和结果" required></textarea>
             <div class="composer-actions"><button type="button" id="skip-question" class="secondary">跳过本题</button><button type="button" id="pause-button" class="secondary">暂停</button><button type="submit">提交回答</button></div>
           </form>
           <div id="resume-actions" class="resume-actions" hidden><button id="resume-button" type="button">继续面试</button></div>

@@ -1,4 +1,4 @@
-const state = { kind: "chat", username: null, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
 
@@ -24,9 +24,14 @@ function showApp(username = null) {
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
   if (response.status === 401 && !path.startsWith("/auth/")) showAuth();
-  if (!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
+  if (!response.ok) {
+    const detail = data?.detail;
+    const message = typeof detail === "string" ? detail
+      : Array.isArray(detail) ? "输入不符合要求，请检查必填项、长度和格式。" : `请求失败 (${response.status})`;
+    throw new Error(message);
+  }
   return data;
 }
 
@@ -37,7 +42,9 @@ async function copyId(id) {
 }
 function setBusy(kind, value) {
   state.busy[kind] = value;
-  document.querySelectorAll(`#${kind === "chat" ? "chat-panel" : "interview-panel"} button[type=submit]`).forEach((button) => { button.disabled = value; });
+  document.querySelectorAll(`#${kind === "chat" ? "chat-panel" : "interview-panel"} button[type=submit]`).forEach((button) => {
+    button.disabled = value || (!state.modelReady && Boolean(button.closest("#chat-form, #interview-setup, #answer-form")));
+  });
 }
 async function loadChatResources() {
   const [materials, sessions] = await Promise.all([api("/materials"), api("/interview/sessions")]);
@@ -113,7 +120,9 @@ function renderInterviewState(session) {
     (session.status === "running" && session.question_count > 0));
   $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
   $("skip-question").hidden = !session || session.status !== "awaiting_answer";
+  $("skip-question").disabled = !state.modelReady;
   $("resume-actions").hidden = !session || session.status !== "paused";
+  $("resume-button").disabled = !state.modelReady;
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成", cancelled: "已结束" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
 }
@@ -259,6 +268,7 @@ function renderReport(report) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = "复练这题";
+      button.disabled = !state.modelReady;
       button.onclick = () => startPractice(report.session_id, item.number);
       row.append(button);
     }
@@ -267,6 +277,7 @@ function renderReport(report) {
 }
 
 function startPractice(sourceId, questionNumber) {
+  if (!state.modelReady) return;
   action("interview", async () => {
     const session = await api(`/interview/sessions/${sourceId}/practice`, {
       method: "POST", body: JSON.stringify({ question_number: questionNumber }),
@@ -317,6 +328,7 @@ async function selectSession(id) {
     $("chat-memory-form").hidden = !view;
     $("chat-memory").value = view?.session.chat_memory || "";
     $("chat-retry").hidden = !view || view.session.status !== "active" || view.messages.at(-1)?.role !== "user";
+    $("chat-retry").disabled = !state.modelReady;
   }
   renderMessages(state.kind, view?.messages || []);
   if (state.kind === "interview") {
@@ -403,7 +415,7 @@ $("chat-retry").onclick = async () => {
   if (!id) return;
   $("chat-retry").disabled = true;
   try { await performChatRun(id, `/chat/sessions/${id}/retry`); }
-  finally { $("chat-retry").disabled = false; }
+  finally { $("chat-retry").disabled = !state.modelReady; }
 };
 $("chat-memory-form").onsubmit = (event) => {
   event.preventDefault();
@@ -493,6 +505,7 @@ $("claim-form").onsubmit = (event) => {
 };
 $("chat-form").onsubmit = async (event) => {
   event.preventDefault();
+  if (!state.modelReady) return;
   const text = $("chat-text").value.trim();
   if (!text || state.busy.chat) return;
   let id = state.ids.chat;
@@ -521,6 +534,7 @@ $("chat-interrupt").onclick = async () => {
 };
 $("interview-setup").onsubmit = (event) => {
   event.preventDefault();
+  if (!state.modelReady) return;
   action("interview", async () => {
     const goal = $("interview-goal").value.trim();
     if (!goal) return;
@@ -540,6 +554,7 @@ $("interview-setup").onsubmit = (event) => {
 };
 $("answer-form").onsubmit = async (event) => {
   event.preventDefault();
+  if (!state.modelReady) return;
   const text = $("answer-text").value.trim();
   if (!text || state.busy.interview) return;
   const id = state.ids.interview;
@@ -625,8 +640,13 @@ $("logout").onclick = async () => {
 async function bootstrap() {
   try {
     const config = await api("/config");
-    $("provider").textContent = config.provider === "demo" ? "演示模式" : `模型：${config.model}`;
+    state.modelReady = !config.config_error;
+    $("provider").textContent = config.config_error ? "模型未就绪" : config.provider === "demo" ? "演示模式" : `模型：${config.model}`;
     $("provider-data-notice").hidden = config.provider === "demo";
+    $("model-config-notice").hidden = state.modelReady;
+    $("model-config-notice").textContent = config.config_error ? `${config.config_error}；修改环境变量后重启应用。` : "";
+    setBusy("chat", false);
+    setBusy("interview", false);
     $("logout").hidden = !config.auth_required;
     if (config.auth_required) {
       try {

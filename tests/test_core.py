@@ -50,7 +50,7 @@ class CoreTests(unittest.TestCase):
             async def post(self, url, headers, json):
                 self.payload = json
                 return httpx.Response(200, json={
-                    "choices": [{"message": {"content": "回复"}}],
+                    "choices": [{"message": {"content": "回复"}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
                 }, request=httpx.Request("POST", url))
 
@@ -62,6 +62,41 @@ class CoreTests(unittest.TestCase):
             reply = asyncio.run(provider.complete([{"role": "user", "content": "问题"}], []))
         self.assertEqual(client.payload["max_tokens"], 2048)
         self.assertEqual(reply["usage"]["total_tokens"], 6)
+        self.assertEqual(reply["finish_reason"], "stop")
+
+    def test_provider_reports_configuration_errors_before_request(self):
+        provider = Provider()
+        provider.mode = "openai_compatible"
+        provider.model = ""
+        self.assertEqual(provider.configuration_error(), "请设置 MODEL_NAME")
+        with self.assertRaises(ModelError) as caught:
+            run_demo(provider.complete([], []))
+        self.assertEqual(caught.exception.code, "model_config_invalid")
+        provider.model = "test-model"
+        provider.base_url = "not-a-url"
+        self.assertIn("MODEL_API_BASE_URL", provider.configuration_error())
+        provider.base_url = "http://[invalid"
+        self.assertIn("MODEL_API_BASE_URL", provider.configuration_error())
+
+    def test_truncated_model_reply_keeps_input_and_skips_tools(self):
+        class TruncatedProvider:
+            async def complete(self, messages, tools):
+                return {"content": None, "finish_reason": "length", "usage": {
+                    "prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6,
+                }, "tool_calls": [{"id": "incomplete", "function": {
+                    "name": "read_confirmed_claims", "arguments": "{",
+                }}]}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请整理我的经历")
+        with self.assertRaises(ModelError) as caught:
+            run_demo(AgentRuntime(self.store, TruncatedProvider()).run(running))
+        self.assertEqual(caught.exception.code, "model_output_truncated")
+        self.assertEqual([item["role"] for item in self.store.messages(chat["id"], "chat")], ["user"])
+        events = self.store.events(chat["id"], "chat")
+        self.assertFalse(any(item["kind"] == "tool" for item in events))
+        detail = json.loads(next(item["detail"] for item in events if item["kind"] == "model_run"))
+        self.assertEqual(detail["usage"]["total_tokens"], 6)
 
     def test_provider_error_does_not_expose_upstream_response(self):
         class Client:

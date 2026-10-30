@@ -4,6 +4,7 @@ import unittest
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 from fastapi.testclient import TestClient
@@ -30,6 +31,12 @@ class InterviewApiTests(unittest.TestCase):
         self.client.close()
         main.store, main.runtime = self.original_store, self.original_runtime
         self.temp.cleanup()
+
+    def test_config_shows_missing_model_without_exposing_key(self):
+        with patch.object(main.provider, "mode", "openai_compatible"), patch.object(main.provider, "model", ""):
+            config = self.client.get("/api/config").json()
+        self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
+        self.assertNotIn("api_key", config)
 
     def test_chat_memory_is_editable_and_invalidates_old_run(self):
         chat_id = self.client.post("/api/chat/sessions").json()["id"]
