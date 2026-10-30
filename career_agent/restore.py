@@ -37,15 +37,25 @@ def restore(backup_path: Path, target_path: Path) -> Path | None:
     with closing(sqlite3.connect(backup_path.resolve().as_uri() + "?mode=ro", uri=True)) as source:
         validate_backup(source)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        previous = None
-        if target_path.exists():
-            previous = target_path.with_name(f"career_agent.before-restore-{uuid.uuid4().hex}.sqlite3")
-            with closing(sqlite3.connect(target_path)) as current:
-                validate_backup(current)
-                with closing(sqlite3.connect(previous)) as safety_copy:
-                    current.backup(safety_copy)
-        with closing(sqlite3.connect(target_path)) as target:
-            source.backup(target)
+        temporary = target_path.with_name(f".career_agent.restore-{uuid.uuid4().hex}.tmp")
+        try:
+            with closing(sqlite3.connect(temporary)) as staged:
+                source.backup(staged)
+                validate_backup(staged)
+            previous = None
+            if target_path.exists():
+                previous = target_path.with_name(f"career_agent.before-restore-{uuid.uuid4().hex}.sqlite3")
+                try:
+                    with closing(sqlite3.connect(target_path)) as current:
+                        validate_backup(current)
+                        with closing(sqlite3.connect(previous)) as safety_copy:
+                            current.backup(safety_copy)
+                except Exception:
+                    previous.unlink(missing_ok=True)
+                    raise
+            os.replace(temporary, target_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     return previous
 
 

@@ -1,4 +1,4 @@
-"""Daily local snapshots of business databases."""
+"""Daily and latest local snapshots of business databases."""
 
 import logging
 import os
@@ -14,11 +14,13 @@ def backup_database(path: Path, day: date | None = None) -> Path:
     directory = path.parent / "backups"
     directory.mkdir(exist_ok=True)
     destination = directory / f"career_agent-{day:%Y%m%d}.sqlite3"
-    if not destination.exists():
+    snapshot = Store(path).backup()
+    targets = ([destination] if not destination.exists() else []) + [directory / "career_agent-latest.sqlite3"]
+    for target in targets:
         temporary = directory / f".{uuid.uuid4().hex}.tmp"
         try:
-            temporary.write_bytes(Store(path).backup())
-            os.replace(temporary, destination)
+            temporary.write_bytes(snapshot)
+            os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
     snapshots = [item for item in directory.glob("career_agent-*.sqlite3")

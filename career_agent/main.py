@@ -49,6 +49,7 @@ async def lifespan(_app: FastAPI):
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        await backup_once()
 
 
 app = FastAPI(title="双线求职 Agent", lifespan=lifespan)

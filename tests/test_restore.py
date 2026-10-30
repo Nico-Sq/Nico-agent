@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from career_agent.restore import restore
 from career_agent.store import Store
@@ -47,6 +48,19 @@ class RestoreTests(unittest.TestCase):
 
         self.assertIsNone(restore(backup, new_target))
         self.assertEqual(Store(new_target).list_materials()[0]["content"], "恢复前的数据")
+
+    def test_failed_replace_keeps_original_database(self):
+        source = Store(self.root / "source" / "career_agent.sqlite3")
+        source.create_material("resume", "备份简历", "新数据")
+        backup = self.root / "download.sqlite3"
+        backup.write_bytes(source.backup())
+
+        with patch("career_agent.restore.os.replace", side_effect=OSError("替换失败")):
+            with self.assertRaises(OSError):
+                restore(backup, self.target)
+
+        self.assertEqual(Store(self.target).list_materials()[0]["content"], "恢复前的数据")
+        self.assertEqual(list(self.target.parent.glob(".career_agent.restore-*.tmp")), [])
 
 
 if __name__ == "__main__":

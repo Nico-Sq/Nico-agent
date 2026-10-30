@@ -41,6 +41,10 @@ class AutoBackupTests(unittest.TestCase):
         self.root.create_material("project", "新项目", "新内容")
         self.assertEqual(backup_all(self.data_dir, start), first)
         self.assertEqual(self.material_contents(first[0]), ["旧内容"])
+        self.assertEqual(self.material_contents(self.data_dir / "backups" / "career_agent-latest.sqlite3"),
+                         ["新内容", "旧内容"])
+        self.assertEqual(self.material_contents(self.data_dir / "users" / "account-id" / "backups" /
+                                                "career_agent-latest.sqlite3"), ["私有内容"])
         unrelated = self.data_dir / "backups" / "career_agent-abcdefgh.sqlite3"
         unrelated.write_bytes(b"user file")
 
@@ -54,13 +58,19 @@ class AutoBackupTests(unittest.TestCase):
         self.assertEqual(len(account_backups), 7)
         self.assertFalse(first[0].exists())
         self.assertTrue(unrelated.exists())
+        self.assertTrue((self.data_dir / "backups" / "career_agent-latest.sqlite3").exists())
         self.assertEqual(self.material_contents(root_backups[-1]), ["新内容", "旧内容"])
         self.assertEqual(self.material_contents(account_backups[-1]), ["私有内容"])
 
     def test_app_startup_creates_local_snapshot(self):
         with patch.object(main, "DATA_DIR", self.data_dir):
             with TestClient(main.app):
-                self.assertEqual(len(list((self.data_dir / "backups").glob("career_agent-*.sqlite3"))), 1)
+                daily = [item for item in (self.data_dir / "backups").glob("career_agent-*.sqlite3")
+                         if item.stem[-8:].isdigit()]
+                self.assertEqual(len(daily), 1)
+                self.root.create_material("project", "退出前项目", "退出前内容")
+            latest = self.data_dir / "backups" / "career_agent-latest.sqlite3"
+            self.assertEqual(self.material_contents(latest), ["旧内容", "退出前内容"])
 
 
 if __name__ == "__main__":
