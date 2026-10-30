@@ -268,3 +268,29 @@ class InterviewApiTests(unittest.TestCase):
         self.assertIn("INTERVIEW_PRIVATE", interview_export.text)
         self.assertIn("全场总结", interview_export.text)
         self.assertNotIn("CHAT_PRIVATE", interview_export.text)
+
+    def test_deleting_interview_removes_derived_practice_chain(self):
+        source_id = self.client.post("/api/interview/sessions", json={
+            "goal": "开发岗位", "max_questions": 1,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{source_id}/start")
+        self.client.post(f"/api/interview/sessions/{source_id}/answers", json={"text": "原回答"})
+        practice_id = self.client.post(f"/api/interview/sessions/{source_id}/practice", json={
+            "question_number": 1,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{practice_id}/start")
+        self.client.post(f"/api/interview/sessions/{practice_id}/answers", json={"text": "复练回答"})
+        nested_id = self.client.post(f"/api/interview/sessions/{practice_id}/practice", json={
+            "question_number": 1,
+        }).json()["id"]
+        self.assertEqual(self.client.delete(f"/api/interview/sessions/{source_id}").status_code, 200)
+        for session_id in (source_id, practice_id, nested_id):
+            self.assertEqual(self.client.get(f"/api/interview/sessions/{session_id}").status_code, 404)
+        self.assertEqual(self.client.get("/api/interview/sessions").json(), [])
+
+    def test_deleting_chat_leaves_interview_untouched(self):
+        chat_id = self.client.post("/api/chat/sessions").json()["id"]
+        interview_id = self.client.post("/api/interview/sessions", json={"goal": "开发"}).json()["id"]
+        self.assertEqual(self.client.delete(f"/api/chat/sessions/{chat_id}").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/chat/sessions/{chat_id}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/interview/sessions/{interview_id}").status_code, 200)

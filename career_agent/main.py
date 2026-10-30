@@ -168,6 +168,15 @@ def get_session(kind: str, session_id: str):
     return result
 
 
+@app.delete("/api/{kind}/sessions/{session_id}")
+def delete_session(kind: str, session_id: str):
+    if kind not in ("chat", "interview"):
+        raise HTTPException(404)
+    if not store.delete_session(session_id, kind):
+        raise HTTPException(404, "会话不存在")
+    return {"deleted": True}
+
+
 @app.get("/api/{kind}/sessions/{session_id}/export.md")
 def export_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):

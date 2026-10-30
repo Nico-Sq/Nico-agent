@@ -23,6 +23,7 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 .side-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .side-title h2 { font-size: 15px; margin: 0; }
 .side-title button { font-size: 12px; padding: 7px 10px; }
+#delete-session { width: 100%; margin-bottom: 12px; padding: 7px 10px; font-size: 12px; }
 .sessions { display: grid; gap: 8px; }
 .sessions button { background: #f4f7f3; color: #27382c; text-align: left; padding: 12px; overflow-wrap: anywhere; }
 .sessions button.selected { background: #e0eee5; outline: 1px solid #9ac3a9; }

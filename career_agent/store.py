@@ -347,6 +347,23 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_session(self, session_id: str, kind: str) -> bool:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("""WITH RECURSIVE related(id) AS (
+                    SELECT id FROM sessions WHERE id = ? AND kind = ?
+                    UNION ALL
+                    SELECT p.session_id FROM practice_sessions p JOIN related r ON p.source_session_id = r.id
+                ) SELECT id FROM related""", (session_id, kind)).fetchall()
+            ids = [row["id"] for row in rows]
+            if not ids:
+                return False
+            for table in ("interview_evidence", "interview_items", "session_materials",
+                          "session_claims", "messages", "events", "practice_sessions"):
+                db.executemany(f"DELETE FROM {table} WHERE session_id = ?", [(item,) for item in ids])
+            db.executemany("DELETE FROM sessions WHERE id = ?", [(item,) for item in ids])
+        return True
+
     def messages(self, session_id: str, kind: str, limit: int | None = None) -> list[dict]:
         # The kind check is part of the query, so interview context cannot read chat rows.
         sql = """SELECT m.id, m.role, m.content, m.created_at FROM messages m
@@ -370,8 +387,9 @@ class Store:
     def event(self, session_id: str, kind: str, detail: dict):
         with self.connect() as db:
             db.execute(
-                "INSERT INTO events(session_id, kind, detail, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, kind, json.dumps(detail, ensure_ascii=False), now()),
+                "INSERT INTO events(session_id, kind, detail, created_at) "
+                "SELECT id, ?, ?, ? FROM sessions WHERE id = ?",
+                (kind, json.dumps(detail, ensure_ascii=False), now(), session_id),
             )
 
     def claim_run(self, session_id: str, kind: str, expected: str, user_text: str | None = None,

@@ -153,6 +153,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual([item["content"] for item in self.store.messages(chat["id"], "chat")],
                          ["旧消息", "新消息", "新回复"])
 
+    def test_deleting_session_during_model_run_discards_late_events(self):
+        class SlowProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                await self.release.wait()
+                return {"content": "迟到回复"}
+
+        provider = SlowProvider()
+        chat = self.store.create("chat")
+
+        async def scenario():
+            running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+            task = asyncio.create_task(AgentRuntime(self.store, provider).run(running))
+            await provider.started.wait()
+            self.assertTrue(self.store.delete_session(chat["id"], "chat"))
+            provider.release.set()
+            return await task
+
+        self.assertTrue(asyncio.run(scenario())["interrupted"])
+        self.assertIsNone(self.store.get(chat["id"], "chat"))
+
     def test_three_question_flow(self):
         interview = self.store.create("interview", "开发岗位")
         self.finish_interview(interview)

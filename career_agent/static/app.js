@@ -258,6 +258,7 @@ async function loadSessions() {
 
 async function selectSession(id) {
   state.ids[state.kind] = id;
+  $("delete-session").hidden = !id;
   if (id) localStorage.setItem(`${state.kind}Session`, id);
   else localStorage.removeItem(`${state.kind}Session`);
   const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
@@ -302,6 +303,17 @@ $("tab-chat").onclick = () => switchKind("chat");
 $("tab-interview").onclick = () => switchKind("interview");
 $("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
 $("new-session").onclick = () => selectSession(null);
+$("delete-session").onclick = async () => {
+  const kind = state.kind;
+  const id = state.ids[kind];
+  if (!id || !window.confirm("删除当前会话及其记录？删除面试会同时删除由它创建的复练。")) return;
+  try {
+    await api(`/${kind}/sessions/${id}`, { method: "DELETE" });
+    if (state.pending[kind]?.id === id) state.pending[kind].controller.abort();
+    await selectSession(null);
+    notice("会话已删除。");
+  } catch (error) { notice(error.message); }
+};
 $("material-file").onchange = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
