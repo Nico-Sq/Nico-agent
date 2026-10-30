@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -118,6 +119,39 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(interview["id"], "interview")["status"], "paused")
         self.assertEqual(self.store.messages(interview["id"], "interview"), [])
         self.assertEqual(self.store.interview_report(interview["id"])["items"], [])
+
+    def test_inflight_chat_followup_invalidates_old_reply(self):
+        class SlowProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def complete(self, messages, tools):
+                if any(message.get("content") == "新消息" for message in messages):
+                    return {"content": "新回复"}
+                self.started.set()
+                await self.release.wait()
+                return {"content": "旧回复"}
+
+        provider = SlowProvider()
+        runtime = AgentRuntime(self.store, provider)
+        chat = self.store.create("chat")
+
+        async def scenario():
+            old = self.store.claim_run(chat["id"], "chat", "active", "旧消息")
+            old_task = asyncio.create_task(runtime.run(old))
+            await provider.started.wait()
+            new = self.store.claim_run(chat["id"], "chat", "active", "新消息")
+            latest = await runtime.run(new)
+            provider.release.set()
+            stale = await old_task
+            return latest, stale
+
+        latest, stale = asyncio.run(scenario())
+        self.assertEqual(latest["message"], "新回复")
+        self.assertTrue(stale["interrupted"])
+        self.assertEqual([item["content"] for item in self.store.messages(chat["id"], "chat")],
+                         ["旧消息", "新消息", "新回复"])
 
     def test_three_question_flow(self):
         interview = self.store.create("interview", "开发岗位")

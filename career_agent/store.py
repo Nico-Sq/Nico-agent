@@ -370,11 +370,18 @@ class Store:
     def claim_run(self, session_id: str, kind: str, expected: str, user_text: str | None = None) -> dict | None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            changed = db.execute(
-                "UPDATE sessions SET status = 'running', version = version + 1 "
-                "WHERE id = ? AND kind = ? AND status = ?",
-                (session_id, kind, expected),
-            ).rowcount
+            if kind == "chat" and user_text is not None:
+                changed = db.execute(
+                    "UPDATE sessions SET status = 'running', version = version + 1 "
+                    "WHERE id = ? AND kind = 'chat' AND status IN ('active', 'running')",
+                    (session_id,),
+                ).rowcount
+            else:
+                changed = db.execute(
+                    "UPDATE sessions SET status = 'running', version = version + 1 "
+                    "WHERE id = ? AND kind = ? AND status = ?",
+                    (session_id, kind, expected),
+                ).rowcount
             if not changed:
                 return None
             if user_text is not None:

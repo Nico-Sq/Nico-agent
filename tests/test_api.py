@@ -146,3 +146,23 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/claims/{edited['id']}/confirm").status_code, 200)
         self.assertEqual(self.client.delete(f"/api/claims/{edited['id']}").status_code, 200)
         self.assertEqual(self.client.get("/api/claims").json(), [])
+
+    def test_chat_followup_supersedes_older_run_without_losing_messages(self):
+        chat_id = self.client.post("/api/chat/sessions").json()["id"]
+        first = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
+            "text": "先讨论岗位",
+        }).json()
+        second = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
+            "text": "补充：重点是后端开发",
+        }).json()
+        old = self.client.post(f"/api/chat/sessions/{chat_id}/messages/run", json={
+            "version": first["version"],
+        }).json()
+        self.assertTrue(old["interrupted"])
+        latest = self.client.post(f"/api/chat/sessions/{chat_id}/messages/run", json={
+            "version": second["version"],
+        }).json()
+        self.assertIn("补充：重点是后端开发", latest["message"])
+        messages = self.client.get(f"/api/chat/sessions/{chat_id}").json()["messages"]
+        self.assertEqual([item["role"] for item in messages], ["user", "user", "assistant"])
+        self.assertEqual([item["content"] for item in messages[:2]], ["先讨论岗位", "补充：重点是后端开发"])

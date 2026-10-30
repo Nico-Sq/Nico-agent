@@ -1,4 +1,4 @@
-const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null } };
+const state = { kind: "chat", ids: { chat: localStorage.getItem("chatSession"), interview: localStorage.getItem("interviewSession") }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0 };
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
@@ -300,17 +300,39 @@ $("claim-form").onsubmit = (event) => {
     await loadPreparation();
   });
 };
-$("chat-form").onsubmit = (event) => {
+$("chat-form").onsubmit = async (event) => {
   event.preventDefault();
-  action("chat", async () => {
-    const text = $("chat-text").value.trim();
-    if (!text) return;
-    let id = state.ids.chat;
-    if (!id) { id = (await api("/chat/sessions", { method: "POST" })).id; state.ids.chat = id; localStorage.setItem("chatSession", id); }
-    $("chat-text").value = "";
-    try { await runRequest("chat", id, `/chat/sessions/${id}/messages`, { text }); }
-    finally { if (state.kind === "chat" && state.ids.chat === id) await selectSession(id); }
-  });
+  const text = $("chat-text").value.trim();
+  if (!text || state.busy.chat) return;
+  let id = state.ids.chat;
+  setBusy("chat", true);
+  let claimed;
+  try {
+    if (!id) {
+      id = (await api("/chat/sessions", { method: "POST" })).id;
+      state.ids.chat = id;
+      localStorage.setItem("chatSession", id);
+    }
+    claimed = await api(`/chat/sessions/${id}/messages/claim`, { method: "POST", body: JSON.stringify({ text }) });
+  } catch (error) { notice(error.message); return; }
+  finally { setBusy("chat", false); }
+  $("chat-text").value = "";
+  if (state.pending.chat?.id === id) state.pending.chat.controller.abort();
+  const seq = ++state.chatSeq;
+  let errorMessage = "";
+  try {
+    const run = runRequest("chat", id, `/chat/sessions/${id}/messages/run`, { version: claimed.version });
+    if (state.kind === "chat" && state.ids.chat === id) await selectSession(id);
+    notice("正在生成回复，可以继续发送补充消息。");
+    await run;
+  } catch (error) {
+    if (error.name !== "AbortError") errorMessage = error.message;
+  } finally {
+    if (seq === state.chatSeq && state.kind === "chat" && state.ids.chat === id) {
+      await selectSession(id);
+      if (errorMessage) notice(errorMessage);
+    }
+  }
 };
 $("chat-interrupt").onclick = async () => {
   if (!state.ids.chat) return;

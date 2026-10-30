@@ -49,6 +49,10 @@ class ClaimEdit(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class ChatRunInput(BaseModel):
+    version: int = Field(ge=1)
+
+
 class PracticeInput(BaseModel):
     question_number: int = Field(ge=1)
 
@@ -169,7 +173,24 @@ async def chat_message(session_id: str, body: TextInput):
     require_session(session_id, "chat")
     session = store.claim_run(session_id, "chat", "active", nonempty(body.text))
     if session is None:
-        raise HTTPException(409, "会话正在运行")
+        raise HTTPException(409, "当前不能发送消息")
+    return await complete_run(session)
+
+
+@app.post("/api/chat/sessions/{session_id}/messages/claim")
+def claim_chat_message(session_id: str, body: TextInput):
+    require_session(session_id, "chat")
+    session = store.claim_run(session_id, "chat", "active", nonempty(body.text))
+    if session is None:
+        raise HTTPException(409, "当前不能发送消息")
+    return session
+
+
+@app.post("/api/chat/sessions/{session_id}/messages/run")
+async def run_chat_message(session_id: str, body: ChatRunInput):
+    session = require_session(session_id, "chat")
+    if session["status"] != "running" or session["version"] != body.version:
+        return {"interrupted": True, "session": session}
     return await complete_run(session)
 
 
