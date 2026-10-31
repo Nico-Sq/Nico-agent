@@ -23,12 +23,20 @@ class RestoreTests(unittest.TestCase):
     def test_restore_replaces_business_data_and_preserves_previous_snapshot(self):
         source = Store(self.root / "source" / "career_agent.sqlite3")
         source.create_material("resume", "备份简历", "恢复后的数据")
+        chat = source.create("chat")
+        source.claim_run(chat["id"], "chat", "active", "恢复后的候选来源")
+        source_message = source.messages(chat["id"], "chat")[0]
+        candidate = source.create_memory_candidate(
+            chat["id"], "恢复后的候选", [source_message["id"]]
+        )
         backup = self.root / "download.sqlite3"
         backup.write_bytes(source.backup())
 
         previous = restore(backup, self.target)
 
-        self.assertEqual(Store(self.target).list_materials()[0]["content"], "恢复后的数据")
+        restored = Store(self.target)
+        self.assertEqual(restored.list_materials()[0]["content"], "恢复后的数据")
+        self.assertEqual(restored.memory_candidate(candidate["id"])["content"], "恢复后的候选")
         self.assertEqual(Store(previous).list_materials()[0]["content"], "恢复前的数据")
 
     def test_invalid_backup_does_not_touch_existing_data(self):

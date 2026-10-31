@@ -84,13 +84,14 @@ class ExtensionTests(unittest.TestCase):
         usage.request_count = 2
         self.assertEqual(usage.coverage(), "partial")
 
-    def test_builtin_tool_schemas_are_shared_and_read_only(self):
+    def test_builtin_tool_schemas_keep_memory_proposal_out_of_read_only_set(self):
         chat = [item["function"]["name"] for item in schemas("chat")]
         interview = [item["function"]["name"] for item in schemas("interview")]
         self.assertEqual(chat, ["read_interview_feedback", "read_confirmed_claims",
-                                "read_material", "search_memories"])
+                                "read_material", "propose_memory", "search_memories"])
         self.assertEqual(interview, ["read_interview_goal", "read_interview_materials"])
-        self.assertTrue(set(chat + interview) <= READ_ONLY_TOOLS)
+        self.assertNotIn("propose_memory", READ_ONLY_TOOLS)
+        self.assertTrue(set(chat + interview) - {"propose_memory"} <= READ_ONLY_TOOLS)
 
     def test_plugin_config_tolerates_a_byte_order_mark(self):
         plugin = (Path(__file__).resolve().parent.parent / "examples" / "echo_plugin.py").as_posix()

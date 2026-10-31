@@ -11,7 +11,7 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 MAX_CONTEXT_CHARS = 32_000
 # 修改系统提示拼接规则时同步递增此版本。
-PROMPT_POLICY_VERSION = "4"
+PROMPT_POLICY_VERSION = "5"
 
 
 class ContextBudgetError(ValueError):

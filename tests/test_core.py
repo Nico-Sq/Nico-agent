@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import httpx
 
-from career_agent.context import MAX_CONTEXT_CHARS
+from career_agent.context import MAX_CONTEXT_CHARS, assemble
 from career_agent.models import ModelCatalog
 from career_agent.provider import ModelError, Provider
 from career_agent.runtime import MAX_MODEL_OUTPUT_CHARS, AgentRuntime
@@ -390,6 +390,114 @@ class CoreTests(unittest.TestCase):
         self.assertIn("[CHAT_MEMORY]", context)
         self.assertIn("重点准备后端岗位", context)
         self.assertNotIn("旧消息-0", context)
+
+    def test_memory_candidate_keeps_sources_and_requires_confirmation(self):
+        chat = self.store.create("chat")
+        first = self.store.claim_run(chat["id"], "chat", "active", "我的长期偏好是后端岗位")
+        self.store.finish_run(chat["id"], first["version"], "已了解", "active", 0)
+        for number in range(10):
+            running = self.store.claim_run(chat["id"], "chat", "active", f"继续讨论 {number}")
+            self.store.finish_run(chat["id"], running["version"], f"回复 {number}", "active", 0)
+        messages = self.store.messages(chat["id"], "chat")
+        self.assertGreater(len(messages), 16)
+        old_message = messages[0]
+
+        candidate = self.store.create_memory_candidate(
+            chat["id"], "  偏好后端岗位  ", [old_message["id"]]
+        )
+
+        self.assertEqual(candidate["status"], "pending")
+        self.assertEqual(candidate["content"], "偏好后端岗位")
+        self.assertEqual([source["id"] for source in candidate["sources"]], [old_message["id"]])
+        self.assertEqual(candidate["sources"][0]["content"], old_message["content"])
+        self.assertFalse(any("偏好后端岗位" == item["content"]
+                             for item in self.store.search_memories()))
+        context, _ = assemble(self.store, self.store.get(chat["id"], "chat"))
+        self.assertNotIn(old_message["content"], "\n".join(item["content"] for item in context))
+
+        edited = self.store.update_memory_candidate(candidate["id"], "长期偏好后端开发岗位")
+        self.assertEqual(edited["content"], "长期偏好后端开发岗位")
+        confirmed = self.store.confirm_memory_candidate(candidate["id"])
+        self.assertEqual(confirmed["status"], "confirmed")
+        self.assertTrue(confirmed["memory"]["created"])
+        repeated = self.store.confirm_memory_candidate(candidate["id"])
+        self.assertEqual(repeated["memory"]["id"], confirmed["memory"]["id"])
+        self.assertFalse(repeated["memory"]["created"])
+        self.assertEqual(self.store.search_memories("后端开发")[0]["content"],
+                         "长期偏好后端开发岗位")
+        self.assertEqual(len(self.store.messages(chat["id"], "chat")), len(messages))
+
+        reopened = Store(self.store.path)
+        saved = reopened.memory_candidate(candidate["id"])
+        self.assertEqual(saved["status"], "confirmed")
+        self.assertEqual(saved["memory_id"], confirmed["memory"]["id"])
+        self.assertTrue(reopened.delete_memory(saved["memory_id"]))
+        self.assertIsNone(reopened.memory_candidate(candidate["id"])["memory_id"])
+        self.assertEqual(reopened.search_memories("后端开发"), [])
+
+    def test_memory_candidate_source_must_belong_to_same_chat(self):
+        first = self.store.create("chat")
+        second = self.store.create("chat")
+        running = self.store.claim_run(first["id"], "chat", "active", "第一条消息")
+        message_id = self.store.messages(first["id"], "chat")[0]["id"]
+        self.store.finish_run(first["id"], running["version"], "回复", "active", 0)
+
+        with self.assertRaisesRegex(ValueError, "来源消息"):
+            self.store.create_memory_candidate(second["id"], "错误来源", [message_id])
+        interview = self.store.create("interview", "开发岗位")
+        with self.assertRaisesRegex(ValueError, "聊天会话"):
+            self.store.create_memory_candidate(interview["id"], "错误会话", [message_id])
+        stale = self.store.claim_run(first["id"], "chat", "active", "新消息取代旧运行")
+        with self.assertRaisesRegex(ValueError, "运行已失效"):
+            self.store.create_memory_candidate(
+                first["id"], "迟到候选", [message_id], expected_version=running["version"]
+            )
+        candidate = self.store.create_memory_candidate(first["id"], "随会话删除", [message_id])
+        self.assertTrue(self.store.delete_session(first["id"], "chat"))
+        self.assertIsNone(self.store.memory_candidate(candidate["id"]))
+
+    def test_propose_memory_tool_creates_candidate_then_search_finds_confirmed_memory(self):
+        class ProposalProvider:
+            def __init__(self):
+                self.turn = 0
+
+            async def complete(self, messages, tools):
+                self.turn += 1
+                if self.turn == 1:
+                    return {"tool_calls": [{"id": "proposal-1", "function": {
+                        "name": "propose_memory",
+                        "arguments": json.dumps({"content": "长期偏好后端岗位"}),
+                    }}]}
+                return {"content": messages[-1]["content"]}
+
+        chat = self.store.create("chat")
+        proposal = self.store.claim_run(chat["id"], "chat", "active", "请记住我偏好后端岗位")
+        proposed = run_demo(AgentRuntime(self.store, ProposalProvider()).run(proposal))
+        self.assertIn('"status": "pending"', proposed["message"])
+        candidates = self.store.list_memory_candidates(chat["id"], "pending")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(len(candidates[0]["sources"]), 1)
+        self.assertEqual(candidates[0]["sources"][0]["content"], "请记住我偏好后端岗位")
+        self.assertEqual(self.store.search_memories("后端岗位"), [])
+
+        confirmed = self.store.confirm_memory_candidate(candidates[0]["id"])
+        self.assertEqual(confirmed["status"], "confirmed")
+
+        class SearchProvider:
+            def __init__(self):
+                self.turn = 0
+
+            async def complete(self, messages, tools):
+                self.turn += 1
+                if self.turn == 1:
+                    return {"tool_calls": [{"id": "search-1", "function": {
+                        "name": "search_memories", "arguments": '{"query":"后端岗位"}',
+                    }}]}
+                return {"content": "我记得：" + messages[-1]["content"]}
+
+        later = self.store.claim_run(chat["id"], "chat", "active", "我之前确认过什么岗位偏好？")
+        answer = run_demo(AgentRuntime(self.store, SearchProvider()).run(later))
+        self.assertIn("长期偏好后端岗位", answer["message"])
 
     def test_ten_question_summary_context_keeps_early_evidence(self):
         interview = self.store.create("interview", "后端工程师", max_questions=10)

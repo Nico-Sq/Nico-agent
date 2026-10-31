@@ -13,7 +13,9 @@ TABLES = {
     "session_materials", "session_claims", "interview_items",
     "interview_evidence", "practice_sessions",
 }
-OPTIONAL_TABLES = {"session_tool_grants", "memories"}
+OPTIONAL_TABLES = {
+    "session_tool_grants", "memories", "memory_candidates", "memory_candidate_sources",
+}
 
 
 def validate_backup(db: sqlite3.Connection):

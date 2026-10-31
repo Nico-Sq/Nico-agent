@@ -67,6 +67,17 @@ class AuthApiTests(unittest.TestCase):
         self.alice.post(f"/api/chat/sessions/{private_chat['id']}/messages/claim", json={
             "text": "仅 Alice 可查找的内容",
         })
+        private_source = self.alice.get(
+            f"/api/chat/sessions/{private_chat['id']}"
+        ).json()["messages"][0]
+        private_candidate = self.alice.post(
+            f"/api/chat/sessions/{private_chat['id']}/memory-candidates",
+            json={"content": "Alice 私有候选", "source_message_ids": [private_source["id"]]},
+        ).json()
+        self.assertEqual(self.bob.get("/api/memory-candidates").json(), [])
+        self.assertEqual(self.bob.get(
+            f"/api/memory-candidates/{private_candidate['id']}"
+        ).status_code, 404)
         self.assertEqual(self.bob.get("/api/chat/sessions", params={
             "q": "仅 Alice 可查找的内容",
         }).json(), [])

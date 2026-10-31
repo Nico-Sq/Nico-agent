@@ -121,6 +121,8 @@ class AgentRuntime:
                 result = {"error": failure}
             record(self.store, session, name, result)
             return tool_message(call, result)
+        if not self.store.run_current(session["id"], session["version"]):
+            raise RunSuperseded()
         return await asyncio.to_thread(run_internal, self.store, session, call)
 
     def _execute_tool_sync(self, session: dict, call: dict) -> dict:

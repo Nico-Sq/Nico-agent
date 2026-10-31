@@ -156,6 +156,14 @@ class LongMemoryInput(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
 
 
+class MemoryCandidateInput(LongMemoryInput):
+    source_message_ids: list[int] = Field(min_length=1, max_length=16)
+
+
+class MemoryCandidateEdit(LongMemoryInput):
+    pass
+
+
 class SessionTitleInput(BaseModel):
     title: str = Field(max_length=80)
 
@@ -229,6 +237,70 @@ def add_memory(body: LongMemoryInput):
 def delete_memory(memory_id: str):
     if not active_store().delete_memory(memory_id):
         raise HTTPException(404, "记忆不存在")
+    return {"deleted": True}
+
+
+@app.get("/api/memory-candidates")
+def list_memory_candidates(
+    session_id: str | None = Query(default=None),
+    status: Literal["pending", "confirmed"] | None = Query(default=None),
+):
+    if session_id is not None:
+        require_session(session_id, "chat")
+    return active_store().list_memory_candidates(session_id, status)
+
+
+@app.get("/api/memory-candidates/{candidate_id}")
+def get_memory_candidate(candidate_id: str):
+    candidate = active_store().memory_candidate(candidate_id)
+    if candidate is None:
+        raise HTTPException(404, "记忆候选不存在")
+    return candidate
+
+
+@app.post("/api/chat/sessions/{session_id}/memory-candidates")
+def create_memory_candidate(session_id: str, body: MemoryCandidateInput):
+    require_session(session_id, "chat")
+    try:
+        return active_store().create_memory_candidate(
+            session_id, body.content, body.source_message_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.put("/api/memory-candidates/{candidate_id}")
+def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
+    candidate = active_store().memory_candidate(candidate_id)
+    if candidate is None:
+        raise HTTPException(404, "记忆候选不存在")
+    if candidate["status"] != "pending":
+        raise HTTPException(409, "已确认的记忆候选不能修改")
+    try:
+        return active_store().update_memory_candidate(candidate_id, body.content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/memory-candidates/{candidate_id}/confirm")
+def confirm_memory_candidate(candidate_id: str):
+    try:
+        candidate = active_store().confirm_memory_candidate(candidate_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if candidate is None:
+        raise HTTPException(404, "记忆候选不存在")
+    return candidate
+
+
+@app.delete("/api/memory-candidates/{candidate_id}")
+def delete_memory_candidate(candidate_id: str):
+    candidate = active_store().memory_candidate(candidate_id)
+    if candidate is None:
+        raise HTTPException(404, "记忆候选不存在")
+    if candidate["status"] != "pending":
+        raise HTTPException(409, "已确认的记忆候选不能删除")
+    active_store().delete_memory_candidate(candidate_id)
     return {"deleted": True}
 
 

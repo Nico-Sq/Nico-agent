@@ -96,6 +96,64 @@ class InterviewApiTests(unittest.TestCase):
         self.assertIn("上限", over.json()["detail"])
         self.assertEqual(len(self.client.get("/api/memories").json()), 1)
 
+    def test_memory_candidate_review_and_confirmation(self):
+        chat = self.client.post("/api/chat/sessions").json()
+        message = self.client.post(f"/api/chat/sessions/{chat['id']}/messages", json={
+            "text": "请记住我偏好后端开发岗位",
+        })
+        self.assertEqual(message.status_code, 200, message.text)
+        source = self.client.get(f"/api/chat/sessions/{chat['id']}").json()["messages"][0]
+
+        created = self.client.post(f"/api/chat/sessions/{chat['id']}/memory-candidates", json={
+            "content": "偏好后端开发岗位",
+            "source_message_ids": [source["id"]],
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        candidate = created.json()
+        self.assertEqual(candidate["status"], "pending")
+        self.assertEqual(candidate["sources"][0]["id"], source["id"])
+        self.assertEqual(self.client.get("/api/memories", params={
+            "q": "后端开发",
+        }).json(), [])
+        pending = self.client.get("/api/memory-candidates", params={
+            "session_id": chat["id"], "status": "pending",
+        }).json()
+        self.assertEqual([item["id"] for item in pending], [candidate["id"]])
+
+        edited = self.client.put(f"/api/memory-candidates/{candidate['id']}", json={
+            "content": "长期偏好：后端开发岗位",
+        }).json()
+        self.assertEqual(edited["content"], "长期偏好：后端开发岗位")
+        confirmed = self.client.post(f"/api/memory-candidates/{candidate['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(confirmed.json()["status"], "confirmed")
+        self.assertEqual(self.client.get("/api/memories", params={
+            "q": "后端开发",
+        }).json()[0]["content"], "长期偏好：后端开发岗位")
+        self.assertEqual(self.client.delete(f"/api/memory-candidates/{candidate['id']}").status_code, 409)
+
+        memory_id = confirmed.json()["memory"]["id"]
+        self.client.delete(f"/api/memories/{memory_id}")
+        self.assertIsNone(self.client.get(f"/api/memory-candidates/{candidate['id']}").json()["memory_id"])
+
+        removable = self.client.post(f"/api/chat/sessions/{chat['id']}/memory-candidates", json={
+            "content": "稍后删除的候选",
+            "source_message_ids": [source["id"]],
+        }).json()
+        self.assertEqual(self.client.delete(
+            f"/api/memory-candidates/{removable['id']}"
+        ).status_code, 200)
+        self.assertEqual(self.client.get(
+            f"/api/memory-candidates/{removable['id']}"
+        ).status_code, 404)
+
+        other = self.client.post("/api/chat/sessions").json()
+        rejected = self.client.post(f"/api/chat/sessions/{other['id']}/memory-candidates", json={
+            "content": "错误来源",
+            "source_message_ids": [source["id"]],
+        })
+        self.assertEqual(rejected.status_code, 422)
+
     def test_session_titles_are_display_only_and_can_be_reset(self):
         chat = self.client.post("/api/chat/sessions").json()
         pending = self.client.post(f"/api/chat/sessions/{chat['id']}/messages/claim", json={

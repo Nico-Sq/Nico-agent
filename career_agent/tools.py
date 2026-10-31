@@ -1,7 +1,7 @@
 ﻿"""Built-in tool schemas and the execution boundary for one tool call.
 
-Tools only read: every implementation below answers a question about the data
-the session is already allowed to see, which is why they can run in parallel.
+Built-in reads stay parallel-safe; the memory proposal only creates a
+user-reviewable candidate and never commits long-term memory directly.
 """
 
 import hashlib
@@ -38,6 +38,13 @@ CHAT_TOOLS = [
         "parameters": {"type": "object", "properties": {
             "material_id": {"type": "string"}
         }, "required": ["material_id"], "additionalProperties": False},
+    }},
+    {"type": "function", "function": {
+        "name": "propose_memory",
+        "description": "为用户明确要求长期记住的信息创建待确认候选；确认前不能当作已保存。",
+        "parameters": {"type": "object", "properties": {
+            "content": {"type": "string", "minLength": 1, "maxLength": 2000}
+        }, "required": ["content"], "additionalProperties": False},
     }},
     {"type": "function", "function": {
         "name": "search_memories",
@@ -104,7 +111,7 @@ def call(store, session: dict, request: dict) -> dict:
 
 
 def run(store, session: dict, name: str, args: dict, schema: dict) -> dict:
-    """Validate the arguments and dispatch one built-in read."""
+    """Validate the arguments and dispatch one built-in operation."""
     jsonschema.validate(args, schema)
     if name == "read_interview_goal":
         return {"goal": session["goal"]}
@@ -116,6 +123,15 @@ def run(store, session: dict, name: str, args: dict, schema: dict) -> dict:
         return {"claims": claims[:20], "next_offset": offset + 20 if len(claims) > 20 else None}
     if name == "search_memories":
         return {"memories": store.search_memories(args["query"])[:10]}
+    if name == "propose_memory":
+        recent = store.messages(session["id"], "chat", limit=16)
+        source_ids = [message["id"] for message in recent if message["role"] == "user"]
+        candidate = store.create_memory_candidate(
+            session["id"], args["content"], source_ids, expected_version=session["version"]
+        )
+        return {"candidate": {"id": candidate["id"], "content": candidate["content"],
+                              "status": candidate["status"]},
+                "requires_confirmation": True, "created": candidate["created"]}
     if name == "read_material":
         target = args["material_id"]
         if not store.chat_authorizes(session["id"], session["version"], target):

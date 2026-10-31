@@ -1,6 +1,6 @@
 # Nico-agent 后续开发阶段任务文档
 
-> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–3 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
+> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–4 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
 
 ## 目标与边界
 
@@ -40,11 +40,11 @@ flowchart LR
 | 内置只读工具与资源权限 | 已完成 | `career_agent/tools.py`、`career_agent/store.py`；`tests/test_core.py` 中 permission/material/report 用例 | 授权规则主要针对现有读取范围 |
 | 本地 stdio MCP、白名单、会话授权、连接复用及失败隔离 | 已完成只读安全闭环 | `career_agent/mcp.py`、`career_agent/runtime.py`、`career_agent/main.py`；`tests/test_mcp.py` | 仅 stdio；非只读工具默认不可授权和调用；工具名有长度与碰撞处理 |
 | 本地 Python 插件发现、参数校验、调用 | 已完成可信插件只读基础能力 | `career_agent/plugins.py`、`career_agent/runtime.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 只有 `read_only=true` 会提供并执行；插件同进程运行，超时线程不能保证停止，不能视为沙箱 |
-| 短期上下文、聊天固定备注、手动长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`；`tests/test_core.py`、`tests/test_api.py` | 长期记忆需用户主动保存，`LIKE` 字面检索；无自动摘要/提炼 |
+| 短期上下文、固定备注、可回源记忆候选与确认后长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`、`career_agent/main.py`；`tests/test_core.py`、`tests/test_api.py`、`tests/test_auth.py` | 候选需用户确认；长期记忆仍为 `LIKE` 字面检索，没有自动确认或向量检索 |
 | CLI 文字聊天、模型/记忆/工具命令 | 已完成基础入口 | `career_agent/cli.py`、`career_agent/channels.py`；`tests/test_extensions.py` | CLI 无面试工作流；账户模式下拒绝直连数据库 |
 | WebUI、登录、业务数据备份/恢复与文本材料提取 | 已有可用实现 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`career_agent/extract.py`；`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py`、`tests/test_restore.py` | 不作为公网部署方案 |
 | 通用聊天渠道接入 | 部分：仅接口与终端实例 | `career_agent/channels.py`、`career_agent/cli.py`；`tests/test_extensions.py` | 没有其他渠道适配、身份映射、入站路由或投递失败处理 |
-| 自动会话摘要/长期记忆提炼、远端 MCP、插件隔离、流式输出 | 尚未实现 | 现有入口见 `career_agent/context.py`、`career_agent/store.py`、`career_agent/mcp.py`、`career_agent/plugins.py`、`career_agent/provider.py`；这些文件没有对应执行路径 | 均不是当前阶段自动承诺的功能；按下方触发条件扩展 |
+| 自动写入未经确认的记忆、语义检索、远端 MCP、插件隔离、流式输出 | 尚未实现 | 现有入口见 `career_agent/context.py`、`career_agent/store.py`、`career_agent/mcp.py`、`career_agent/plugins.py`、`career_agent/provider.py`；这些文件没有对应执行路径 | 均不是当前阶段自动承诺的功能；按下方触发条件扩展 |
 
 ## 影响后续开发的缺口与风险
 
@@ -52,7 +52,7 @@ flowchart LR
 
 1. `career_agent/runtime.py` 已登记当前运行 Task，控制入口会取消本进程中的旧模型请求；`career_agent/providers/transport.py` 的 HTTP 上下文会随 Task 取消关闭。`career_agent/plugins.py` 仍用 `asyncio.to_thread` 调用同步插件，已经进入线程的工作不能保证停止；已发出的 MCP 远端操作也不能保证撤销。
 2. `career_agent/store.py:set_tool_grants` 仍只存工具名；当前由 API/CLI 授权检查和 `career_agent/runtime.py` 执行检查共同强制“只有只读工具可用”。增加写工具前必须增加操作等级与确认语义，不能只放宽 `readOnlyHint`。
-3. `career_agent/context.py` 仅取最近 16 条完整消息、可选固定备注；`career_agent/store.py:search_memories` 是 SQLite `LIKE`。跨长会话信息会掉出模型输入，检索同义表述也无保证。
+3. `career_agent/context.py` 仍只取最近 16 条完整消息、可选固定备注和按需工具结果；`career_agent/store.py:search_memories` 是 SQLite `LIKE`。超出窗口的信息现在可经带来源候选转为长期记忆，但不会自动注入上下文，检索同义表述仍无保证。
 4. `career_agent/channels.py` 只有 `receive/send` 与终端实现；`career_agent/cli.py` 只有聊天运行入口。新增渠道需要先处理发送者身份、会话归属和授权上下文，不能仅转发文本。
 
 **需要验证的推测：**真实 OpenAI 兼容服务对工具参数、finish reason、用量字段和超时行为可能有差异；当前单例 MCP 连接在频繁掉线时的恢复可能影响体验；`LIKE` 检索是否足够取决于用户长期记忆规模和查询习惯。先用指定端点的契约测试或使用记录验证，再决定是否扩展协议或检索技术。当前自动化测试结果如下，真实端点效果仍未验证。
@@ -74,6 +74,9 @@ flowchart LR
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/tool_hooks/executor.py`、`tool_hooks/base.py` | pre hook 可拒绝或改参，只有通过后才进入真实工具；结果区分 denied、success、error | **调整后采用**“执行前拒绝后才调用工具”的顺序和可记录错误；当前只有每会话只读策略，不引入可插拔 hook 框架。 |
 | nanobot：`E:/nanobot/nanobot/agent/tools/mcp.py` | MCP 白名单、工具包装、连接管理与调用错误处理较完整 | **只采用**白名单和失败隔离原则；其工具调用重试**不采用**，因为调用可能已经产生远端副作用。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/extensions/mcp/tools.ts`、`extensions/mcp/runtime.ts` | MCP 名称冲突或过长时追加哈希；工具调用避免不确定重试 | **采用**稳定哈希命名和“调用不自动重试”；远端 HTTP/OAuth 仍暂不采用。 |
+| nanobot：`E:/nanobot/nanobot/agent/memory.py` 的 `Consolidator.archive` | 按预算把旧消息交给模型摘要并持久化历史，另保留原始会话文件 | **调整后采用**“旧内容压缩成可追溯记录”的流程；自动落为长期事实**不采用**，当前候选必须经用户确认。 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/core/memory/engine.py`、`core/memory/utils.py`、`core/memory/markdown.py` | 记忆条目保存 `source_ref` 和证据引用，可回源到消息 | **调整后采用**来源消息 ID 与候选审计；向量记忆和复杂记忆引擎**不采用**，SQLite 足够当前规模。 |
+| Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/core/compaction/compaction.ts` | 压缩摘要保留来源条目边界，更新摘要时保持此前信息 | **采用原则**只压缩模型视图并保留原始记录；本阶段生成的是用户候选而非自动上下文摘要。 |
 
 ## 后续阶段（必须完成）
 
@@ -106,13 +109,14 @@ flowchart LR
 - **验证记录（2026-10-31）**：非只读工具不会提供给模型，API/CLI 不接受其授权，执行层仍返回 `tool_write_disabled`；撤销后新运行不可见；参数错误不会调用 MCP；断线调用只执行一次；跨服务器和插件超长名称使用稳定哈希。全套 119 个测试通过。
 - **依赖/风险**：依赖阶段 1；只读安全闭环已完成。**待决**：未来若开放写工具，采用“每次调用确认”还是会话短时授权。
 
-### 阶段 4：可回源的长会话记忆
+### 阶段 4：可回源的长会话记忆（已完成）
 
 - **具体功能**：保留当前手动长期记忆与聊天/面试隔离。为超出 16 条窗口的聊天内容提供用户可查看、可删改、带来源消息 ID 的摘要或候选记忆；只有用户确认后才作为跨会话长期记忆。检索先继续用 SQLite，确认字面检索不够再换方案。
-- **预期改动**：`career_agent/context.py`、`store.py`、`tools.py`、`main.py`；`tests/test_core.py`、`test_api.py`。
+- **实际改动**：`career_agent/context.py`、`store.py`、`tools.py`、`main.py`、`restore.py`、`skills/chat.md`；`tests/test_core.py`、`test_api.py`、`test_auth.py`、`test_restore.py`。
 - **对外结果**：长聊天续谈时能看到经过确认的关键背景；可追溯和纠正过时信息，面试仍不读聊天记忆。
 - **完成标准与必要测试**：原始消息不被摘要覆盖；来源和确认状态可查询；删除/更正后旧信息不再进入上下文；预算内优先保留最新消息；不同账户和面试会话隔离。建议 `python -m unittest tests.test_core tests.test_api tests.test_auth -v`。
-- **依赖/风险**：依赖阶段 1 的上下文与运行版本契约。自动提炼可能误写事实，默认只产生候选而不直接写长期记忆。**待决**：是否接受候选摘要需逐条确认的交互成本。
+- **验证记录（2026-10-31）**：候选保存 1–16 条同聊天来源消息且不进入模型上下文；确认前不可被 `search_memories` 检索，确认后才写入 `memories`；支持查看、编辑、删除、备份恢复和账户隔离。删除长期记忆后检索立即失效，原始消息和候选来源不被改写。全套 123 个测试通过。
+- **依赖/风险**：依赖阶段 1 的上下文与运行版本契约。自动提炼会误写事实，因此只产生候选，不直接写长期记忆；跨会话检索仍只保证 SQLite `LIKE` 字面匹配。
 
 ### 阶段 5：完整本机 CLI
 
@@ -150,7 +154,7 @@ flowchart LR
 - [x] 阶段 1：单次运行与中断契约通过测试；记录验证命令/结果。
 - [x] 阶段 2：本地模型协议契约通过测试；真实端点尚未另行验证。
 - [x] 阶段 3：外部工具只读权限和本地 MCP 安全闭环通过测试；写工具仍关闭。
-- [ ] 阶段 4：长会话摘要/候选记忆可回源、可纠正且隔离。
+- [x] 阶段 4：记忆候选可回源、可修改和确认，确认后进入长期记忆且保持账户/面试隔离。
 - [ ] 阶段 5：CLI 聊天与面试完整闭环可用。
 - [ ] 阶段 6：插件与渠道边界通过测试；有明确渠道时再接第二文字入口。
 - [ ] 阶段 7：现有 WebUI 接入新增能力并完成本机检查。
@@ -159,4 +163,4 @@ flowchart LR
 
 1. 是否在近期允许 MCP/插件执行写操作；若允许，每次调用确认还是会话短时授权？在此之前按拒绝非只读工具规划。
 2. 阶段 2 优先验证哪个真实模型端点？没有端点时先做本地契约测试，真实兼容性保持“未验证”。
-3. 长会话摘要候选是否逐条确认；第二文字渠道是否已有具体目标？无目标时不提前实现对应平台。
+3. 第二文字渠道是否已有具体目标？无目标时，阶段 6 先收尾插件边界，不提前实现对应平台。
