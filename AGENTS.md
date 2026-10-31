@@ -103,4 +103,6 @@ git push -u origin main
 
 涉及前端结构、交互、样式、可访问性或响应式的开发与修改时，先读取并使用 `ui-ux-pro-max` 与 `impeccable` 两个 Skill，再按其相关指导实现和检查界面。纯后端任务不需要套用前端 Skill。
 
+两个 Skill 已随仓库安装在 `.qoder/skills/` 下，来源与版本记录见 `.qoder/skills/README.md`。`ui-ux-pro-max` 的检索脚本用 `.qoder/skills/ui-ux-pro-max/scripts/search.py`；`impeccable` 在 Windows 上用 `.qoder/skills/impeccable/scripts/impeccable.cmd` 启动，首次运行需要联网下载引擎二进制。
+
 本项目页面只使用黑、白、灰及其灰阶和透明度；新增或修改界面时，不引入任何彩色强调色。
