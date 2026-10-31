@@ -133,6 +133,12 @@ class MCPServers:
         """Return the error code of every server whose last attempt failed."""
         return dict(self.failures)
 
+    async def report(self) -> list[dict]:
+        """Describe every configured server: exposed tool count and last error code."""
+        await self.discover()
+        return [{"name": name, "tools": len(self.catalogs.get(name, [])),
+                 "error": self.failures.get(name)} for name in self.servers]
+
     async def _drop(self, server: str):
         self.catalogs.pop(server, None)
         client = self.clients.pop(server, None)

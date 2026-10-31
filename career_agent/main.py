@@ -226,6 +226,12 @@ async def list_mcp_tools():
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
 
 
+@app.get("/api/mcp/servers")
+async def list_mcp_servers():
+    """Report each configured server so operators can see why a tool is missing."""
+    return {"servers": await mcp_servers.report()}
+
+
 @app.get("/api/tools")
 async def list_tools():
     try:

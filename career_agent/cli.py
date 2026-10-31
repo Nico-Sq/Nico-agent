@@ -74,6 +74,14 @@ async def run_chat(args, store: Store, catalog: ModelCatalog, mcp: MCPServers,
         await mcp.close()
 
 
+async def discover_mcp(mcp: MCPServers) -> list[dict]:
+    """Discover MCP tools, then drop the server processes the CLI no longer needs."""
+    try:
+        return await mcp.discover()
+    finally:
+        await mcp.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="nico-agent")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,14 +123,16 @@ def main() -> None:
                 print(f"{item['id']}  {item['content']}")
     else:
         if args.action == "list":
-            for item in plugins.discover() + asyncio.run(mcp.discover()):
+            for item in plugins.discover() + asyncio.run(discover_mcp(mcp)):
                 print(f"{item['name']}: {item['description']}")
+            for name, error in mcp.status().items():
+                print(f"{name}: {error}")
         else:
             if not args.session_id or not store.get(args.session_id, "chat"):
                 parser.error("需要现有聊天会话 ID")
             names = set(store.tool_grants(args.session_id))
             if args.action == "grant":
-                available = {item["name"] for item in plugins.discover() + asyncio.run(mcp.discover())}
+                available = {item["name"] for item in plugins.discover() + asyncio.run(discover_mcp(mcp))}
                 if args.tool_name not in available:
                     parser.error("工具不存在或未启用")
                 names.add(args.tool_name)

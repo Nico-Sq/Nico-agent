@@ -101,10 +101,21 @@ class MCPTests(unittest.TestCase):
             tools = await manager.discover()
             self.assertEqual([item["name"] for item in tools], ["mcp_fixture_echo"])
             self.assertEqual(manager.status(), {"broken": "mcp_server_unavailable"})
+            self.assertEqual(await manager.report(), [
+                {"name": "fixture", "tools": 1, "error": None},
+                {"name": "broken", "tools": 0, "error": "mcp_server_unavailable"},
+            ])
             self.assertEqual((await manager.call(tools[0], {"text": "still"}))["text"], "still")
             await manager.close()
 
         self.run_async(run())
+
+    def test_api_reports_server_status(self):
+        with patch.object(main, "mcp_servers", self.mcp):
+            with TestClient(main.app) as client:
+                self.assertEqual(client.get("/api/mcp/servers").json(), {
+                    "servers": [{"name": "fixture", "tools": 1, "error": None}],
+                })
 
     def test_config_tolerates_a_byte_order_mark(self):
         config = Path(self.temp.name) / "mcp-bom.json"
