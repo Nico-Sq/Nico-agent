@@ -66,13 +66,17 @@ def parse_response(data: dict) -> dict:
     reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(
         data.get("stop_reason"), "content_filter"
     )
-    usage = data.get("usage") or {}
-    if not isinstance(usage, dict):
+    reported_usage = data.get("usage")
+    if reported_usage is not None and not isinstance(reported_usage, dict):
         raise ValueError("invalid usage")
-    prompt = usage.get("input_tokens", 0)
-    completion = usage.get("output_tokens", 0)
-    if not isinstance(prompt, int) or not isinstance(completion, int):
-        raise ValueError("invalid usage")
+    usage = None
+    if reported_usage:
+        prompt = reported_usage.get("input_tokens")
+        completion = reported_usage.get("output_tokens")
+        if (not isinstance(prompt, int) or isinstance(prompt, bool) or prompt < 0
+                or not isinstance(completion, int) or isinstance(completion, bool) or completion < 0):
+            raise ValueError("invalid usage")
+        usage = {"prompt_tokens": prompt, "completion_tokens": completion,
+                 "total_tokens": prompt + completion}
     return {"content": "\n".join(text), "tool_calls": calls, "finish_reason": reason,
-            "usage": {"prompt_tokens": prompt, "completion_tokens": completion,
-                      "total_tokens": prompt + completion}}
+            "usage": usage}

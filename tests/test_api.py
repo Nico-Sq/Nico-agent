@@ -58,6 +58,10 @@ class InterviewApiTests(unittest.TestCase):
             chat = self.client.post("/api/chat/sessions", json={"model_id": "local"})
             self.assertEqual(chat.status_code, 200)
             self.assertEqual(chat.json()["model_id"], "local")
+            claimed = self.client.post(f"/api/chat/sessions/{chat.json()['id']}/messages/claim", json={
+                "text": "固定模型",
+            }).json()
+            self.assertEqual(claimed["model_id"], "local")
             interview = self.client.post("/api/interview/sessions", json={
                 "goal": "后端开发", "model_id": "local",
             })

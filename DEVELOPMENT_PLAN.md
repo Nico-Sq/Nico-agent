@@ -1,6 +1,6 @@
 # Nico-agent 后续开发阶段任务文档
 
-> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1 完成后已运行全套自动化测试，未启动服务或验证真实模型。后续完成一阶段时更新状态和验证记录。
+> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–2 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
 
 ## 目标与边界
 
@@ -36,7 +36,7 @@ flowchart LR
 |---|---|---|---|
 | 聊天与面试双线、状态提交、逐题反馈/复练、材料授权 | 已完成基础闭环 | `career_agent/main.py`、`career_agent/store.py`、`career_agent/runtime.py`；`tests/test_api.py`、`tests/test_core.py` | 反馈正确性未作真实模型验收 |
 | Agent 工具循环、限额、失败保留输入、版本防迟到提交、在途请求取消 | 已完成基础闭环 | `career_agent/runtime.py`、`career_agent/main.py`、`career_agent/store.py`、`career_agent/events.py`；`tests/test_core.py`、`tests/test_api.py`、`tests/test_provider.py` | 已能取消在本进程、同一事件循环中运行的模型请求；同步插件线程与远端副作用仍不能保证停止 |
-| OpenAI Chat Completions、兼容端点、Anthropic、demo 与会话选模型 | 已完成协议适配 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`；`tests/test_provider.py`、`tests/test_core.py` | 真实端点兼容性与效果未验证；目前是非流式 JSON 请求 |
+| OpenAI Chat Completions、兼容端点、Anthropic、demo 与会话选模型 | 已完成协议适配与本地 HTTP 契约 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`；`tests/test_provider.py`、`tests/test_core.py`、`tests/test_model_contracts.py` | 真实端点兼容性与效果未验证；目前是非流式 JSON 请求 |
 | 内置只读工具与资源权限 | 已完成 | `career_agent/tools.py`、`career_agent/store.py`；`tests/test_core.py` 中 permission/material/report 用例 | 授权规则主要针对现有读取范围 |
 | 本地 stdio MCP、白名单、会话授权、连接复用及失败隔离 | 已完成本地基础能力 | `career_agent/mcp.py`、`career_agent/main.py`；`tests/test_mcp.py` | 仅 stdio；授权只记录工具名，不记录操作等级或每次执行确认 |
 | 本地 Python 插件发现、参数校验、调用 | 已完成可信插件基础能力 | `career_agent/plugins.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 插件同进程执行；超时的 `to_thread` 工作不能保证停止，不能视为沙箱 |
@@ -68,6 +68,9 @@ flowchart LR
 | nanobot：`E:/nanobot/nanobot/channels/base.py`、`channels/manager.py`、`agent/tools/mcp.py` | 渠道在入站处检查发送者并路由会话；MCP 有多种连接处理 | **调整后采用**身份到会话映射和入站授权先于模型调用；当前本机优先，暂不复制渠道管理器或远端 MCP 全套支持。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/system-prompt.ts` | 循环区分中断、截断和工具调用，提示词按可见工具构建 | **采用原则**：截断不能执行工具，提示词与实际可调用工具一致；现有实现已部分具备，后续用测试守住。Pi 的通用编码 Agent 提示词**不采用**。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/extensions/mcp/runtime.ts`、`extensions/mcp/tools.ts` | MCP 连接状态/重连及工具命名碰撞有独立处理；副作用调用避免不确定重试 | **调整后采用**故障与工具命名验证；远端 HTTP/OAuth **暂不采用**，无本机需求证据。 |
+| nanobot：`E:/nanobot/nanobot/providers/base.py`、`providers/factory.py`、`providers/registry.py` | 统一响应包含内容、工具调用、结束原因、用量和错误元数据；工厂按配置选择协议 | **调整后采用**统一响应与非致命用量缺失语义；当前目录规模不需要照搬厂商注册表和 fallback 链。 |
+| Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/ai/src/types.ts`、`api/anthropic-messages.ts` | 请求支持取消、供应商原生事件与结构化用量；缺失与异常信息保持区分 | **调整后采用**本地 HTTP 契约和“缺失用量不伪造”的规则；完整流式事件、成本估算和大量兼容开关**暂不采用**。 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/config_models.py`、`agent/config.py` | 配置绑定 provider、model、输出上限和运行时约束 | **调整后采用**会话创建后固定模型 ID，新建会话仍可选择模型；多运行时调度和复杂 profile **不采用**。 |
 
 ## 后续阶段（必须完成）
 
@@ -82,12 +85,13 @@ flowchart LR
 - **验证记录（2026-10-31）**：`.venv/Scripts/python.exe -m unittest discover -s tests -v` 运行 111 个测试，全部通过；`compileall` 通过。未启动服务，未验证真实模型端点。
 - **依赖/风险**：从现有版本认领机制增量实现。网络请求可取消不等于已发出的远端动作可撤销；同步插件线程可能继续运行，非只读工具仍由阶段 3 约束。
 
-### 阶段 2：多模型可用性验证
+### 阶段 2：多模型可用性验证（本地契约已完成，真实端点待验证）
 
 - **具体功能**：基于已有目录和三个协议适配器，用本地假服务覆盖工具调用、截断、错误、用量及非标准兼容端点的差异；明确每个配置模型是否可用。只为实际选定且不兼容的端点加适配，不预建厂商大全。
-- **预期改动**：`career_agent/models.py`、`provider.py`、`providers/`、`tests/test_provider.py`，必要的 README 配置示例。
+- **实际改动**：`career_agent/providers/anthropic.py`；`tests/test_api.py`、`tests/test_model_contracts.py`。无需修改模型目录或新增厂商适配。
 - **对外结果**：用户能在新会话选用已验证模型，并得到可诊断的配置/协议错误。
 - **完成标准与必要测试**：同一聊天和面试工具循环分别用至少一个受测协议完成；模型选择固定于会话；异常 finish reason 不执行工具；密钥不进入列表或错误信息；不返回用量时标记未知。建议 `python -m unittest tests.test_provider tests.test_core -v`。真实服务的手工连通性需要用户提供端点与密钥，不能以假服务测试宣称已通过真实服务。
+- **验证记录（2026-10-31）**：本机 HTTP 假服务已分别完成 OpenAI 兼容聊天和 Anthropic 面试的两轮工具循环；模型 ID 在后续 claim 中保持不变。全套 113 个测试通过。真实端点尚未配置，因此其兼容性和回答质量仍未验证。
 - **依赖/风险**：依赖阶段 1 的运行契约。真实端点差异是待验证推测；流式输出仅在实际需要时扩展。
 
 ### 阶段 3：外部工具权限与本地 MCP 安全闭环
@@ -140,7 +144,7 @@ flowchart LR
 ## 可更新任务清单
 
 - [x] 阶段 1：单次运行与中断契约通过测试；记录验证命令/结果。
-- [ ] 阶段 2：指定模型协议契约通过测试；记录真实端点是否另行验证。
+- [x] 阶段 2：本地模型协议契约通过测试；真实端点尚未另行验证。
 - [ ] 阶段 3：外部工具权限和本地 MCP 读写闭环通过测试。
 - [ ] 阶段 4：长会话摘要/候选记忆可回源、可纠正且隔离。
 - [ ] 阶段 5：CLI 聊天与面试完整闭环可用。
