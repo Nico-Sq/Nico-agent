@@ -11,6 +11,8 @@ function showAuth() {
   $("sessions").replaceChildren();
   renderMessages("chat", []);
   renderMessages("interview", []);
+  renderRunHistory("chat", [], false);
+  renderRunHistory("interview", [], false);
   renderReport(null);
   renderInterviewState(null);
 }
@@ -105,6 +107,53 @@ function renderMessages(kind, messages) {
     box.append(item);
   }
   box.scrollTop = box.scrollHeight;
+}
+
+function renderRunHistory(kind, events, hasSession) {
+  const panel = $(`${kind}-run-history`);
+  const box = $(`${kind}-run-events`);
+  panel.hidden = !hasSession;
+  box.replaceChildren();
+  if (!hasSession) return;
+  const recent = events.filter((event) => ["model_run", "tool"].includes(event.kind)).slice(-30).reverse();
+  panel.querySelector("summary").textContent = `运行记录（最近 ${recent.length} 条）`;
+  if (!recent.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "还没有模型或工具运行记录。";
+    box.append(empty);
+    return;
+  }
+  for (const event of recent) {
+    const detail = JSON.parse(event.detail);
+    const item = document.createElement("div");
+    item.className = "run-event";
+    const title = document.createElement("strong");
+    const lines = [];
+    if (event.kind === "tool") {
+      title.textContent = `工具 ${detail.name || "未知"} · ${detail.result === "ok" ? "成功" : detail.result || "未知"}`;
+    } else {
+      const status = { completed: "完成", failed: "失败", interrupted: "已中断", cancelled: "已取消" };
+      title.textContent = `模型运行 · ${status[detail.status] || detail.status || "未知"}`;
+      lines.push(`${detail.provider || "未知模型"}${detail.model ? ` / ${detail.model}` : ""} · ${detail.elapsed_ms ?? "未知"} 毫秒 · ${detail.usage?.request_count ?? "未知"} 次请求`);
+      if (detail.usage_coverage === "unavailable" || typeof detail.usage?.total_tokens !== "number") {
+        lines.push("令牌用量：不可用");
+      } else {
+        lines.push(`令牌用量：${detail.usage.total_tokens}（输入 ${detail.usage.prompt_tokens}、输出 ${detail.usage.completion_tokens}）${detail.usage_coverage === "partial" ? "；部分请求未返回用量" : ""}`);
+      }
+      lines.push(`初始上下文：${detail.context_chars} 字符 · 提示版本：${detail.prompt_version || "未知"}`);
+      if (detail.error_code) lines.push(`错误码：${detail.error_code}`);
+    }
+    const time = document.createElement("small");
+    time.textContent = new Date(event.created_at).toLocaleString();
+    item.append(title, time);
+    for (const line of lines) {
+      const text = document.createElement("p");
+      text.textContent = line;
+      item.append(text);
+    }
+    box.append(item);
+  }
 }
 
 function renderInterviewState(session) {
@@ -331,6 +380,7 @@ async function selectSession(id) {
     $("chat-retry").disabled = !state.modelReady;
   }
   renderMessages(state.kind, view?.messages || []);
+  renderRunHistory(state.kind, view?.events || [], Boolean(view));
   if (state.kind === "interview") {
     renderInterviewState(view?.session);
     renderSelectedResources(view?.resources);

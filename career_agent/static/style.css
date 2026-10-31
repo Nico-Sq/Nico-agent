@@ -48,6 +48,12 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 .message.user { align-self: flex-end; color: white; background: #2c6752; }
 .message .role { display: block; font-size: 11px; opacity: .65; margin-bottom: 3px; }
 .message .save-claim { display: block; margin-top: 10px; padding: 6px 9px; font-size: 11px; }
+.run-history { border-top: 1px solid #edf0ea; padding: 12px 0; font-size: 13px; }
+.run-history summary { color: #245c4a; cursor: pointer; font-weight: 650; }
+.run-events { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; padding: 12px 2px; }
+.run-event { background: #f4f7f3; border-radius: 9px; padding: 10px 12px; overflow-wrap: anywhere; }
+.run-event small { display: block; color: #718075; margin-top: 3px; }
+.run-event p { margin: 5px 0 0; color: #4e5d53; }
 .composer, .setup { display: grid; gap: 10px; border-top: 1px solid #edf0ea; padding-top: 18px; }
 .setup { border: 0; padding: 26px 0; }
 .setup input[type=number] { width: 100px; padding: 10px 12px; border: 1px solid #d5ded5; border-radius: 10px; background: white; }

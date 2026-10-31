@@ -52,6 +52,10 @@
             <div class="composer-actions"><button type="submit">保存备注</button><span>只在当前聊天中使用；清空后保存可删除。</span></div>
           </form>
           <div id="chat-messages" class="messages" aria-live="polite"></div>
+          <details id="chat-run-history" class="run-history" hidden>
+            <summary>运行记录</summary>
+            <div id="chat-run-events" class="run-events"></div>
+          </details>
           <form id="chat-form" class="composer">
             <label for="chat-text">你的消息</label>
             <textarea id="chat-text" rows="3" maxlength="12000" placeholder="例如：帮我梳理一下这个岗位最看重的能力" required></textarea>
@@ -103,6 +107,10 @@
             <div id="practice-compare" class="report-item" hidden></div>
             <div id="report-items"></div>
           </section>
+          <details id="interview-run-history" class="run-history" hidden>
+            <summary>运行记录</summary>
+            <div id="interview-run-events" class="run-events"></div>
+          </details>
         </div>
         <p id="notice" class="notice" role="status" aria-live="polite"></p>
       </section>
