@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import sqlite3
 import tempfile
 import time
@@ -111,6 +112,23 @@ class AuthApiTests(unittest.TestCase):
                 "username": "alice", "password": "correct-password",
             })
         self.assertEqual(accepted.status_code, 200)
+
+    def test_auth_store_hashes_unknown_users_and_prunes_expired_tokens(self):
+        store = AuthStore(Path(self.temp.name) / "auth-direct.sqlite3")
+        with patch("career_agent.auth.hashlib.pbkdf2_hmac", wraps=hashlib.pbkdf2_hmac) as hashing:
+            self.assertIsNone(store.login("nobody", "whatever-password"))
+        self.assertEqual(hashing.call_count, 1)
+
+        user_id = store.register("carol", "correct-password")
+        token = store.issue_token(user_id)
+        self.assertEqual(store.resolve_token(token), user_id)
+        with closing(sqlite3.connect(store.path)) as db:
+            db.execute("UPDATE login_tokens SET expires_at = ?", (int(time.time()) - 1,))
+            db.commit()
+        self.assertIsNone(store.resolve_token(token))
+        store.issue_token(user_id)
+        with closing(sqlite3.connect(store.path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM login_tokens").fetchone()[0], 1)
 
     def test_parallel_accounts_keep_request_context_separate(self):
         for client, username in ((self.alice, "alice"), (self.bob, "bob")):

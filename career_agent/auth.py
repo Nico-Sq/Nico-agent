@@ -8,6 +8,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+PASSWORD_ITERATIONS = 310_000
+# 未知用户名也执行同代价的哈希，避免通过响应时间枚举账户。
+_DUMMY_SALT = bytes(16)
+
+
 class LoginRateLimited(Exception):
     pass
 
@@ -51,7 +56,7 @@ class AuthStore:
     def register(self, username: str, password: str) -> str | None:
         user_id = uuid.uuid4().hex
         salt = secrets.token_bytes(16)
-        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 310_000)
+        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PASSWORD_ITERATIONS)
         try:
             with self.connect() as db:
                 db.execute(
@@ -71,8 +76,9 @@ class AuthStore:
                 (username,),
             ).fetchone()
         if row is None:
+            hashlib.pbkdf2_hmac("sha256", password.encode(), _DUMMY_SALT, PASSWORD_ITERATIONS)
             return None
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), row[1], 310_000)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), row[1], PASSWORD_ITERATIONS)
         valid = hmac.compare_digest(actual, row[2])
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -99,10 +105,12 @@ class AuthStore:
 
     def issue_token(self, user_id: str) -> str:
         token = secrets.token_urlsafe(32)
+        now = int(time.time())
         with self.connect() as db:
+            db.execute("DELETE FROM login_tokens WHERE expires_at <= ?", (now,))
             db.execute(
                 "INSERT INTO login_tokens(token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-                (self._hash_token(token), user_id, int(time.time()) + 7 * 24 * 3600),
+                (self._hash_token(token), user_id, now + 7 * 24 * 3600),
             )
         return token
 
