@@ -9,9 +9,10 @@ from unittest.mock import patch
 
 import httpx
 
-from career_agent.provider import ModelError, Provider
+from career_agent.context import MAX_CONTEXT_CHARS
 from career_agent.models import ModelCatalog
-from career_agent.runtime import MAX_CONTEXT_CHARS, MAX_MODEL_OUTPUT_CHARS, AgentRuntime
+from career_agent.provider import ModelError, Provider
+from career_agent.runtime import MAX_MODEL_OUTPUT_CHARS, AgentRuntime
 from career_agent.store import Store
 
 
