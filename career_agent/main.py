@@ -123,6 +123,10 @@ class ChatMemoryInput(BaseModel):
     text: str = Field(max_length=2000)
 
 
+class SessionTitleInput(BaseModel):
+    title: str = Field(max_length=80)
+
+
 class InterviewAnswerInput(TextInput):
     question_number: int = Field(ge=1)
 
@@ -320,12 +324,24 @@ def delete_session(kind: str, session_id: str):
     return {"deleted": True}
 
 
+@app.put("/api/{kind}/sessions/{session_id}/title")
+def update_session_title(kind: str, session_id: str, body: SessionTitleInput):
+    if kind not in ("chat", "interview"):
+        raise HTTPException(404)
+    session = active_store().set_session_title(session_id, kind, " ".join(body.title.split()))
+    if session is None:
+        raise HTTPException(404, "会话不存在")
+    return session
+
+
 @app.get("/api/{kind}/sessions/{session_id}/export.md")
 def export_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     session = require_session(session_id, kind)
     lines = ["# 聊天记录" if kind == "chat" else "# 模拟面试记录", ""]
+    if session["title"]:
+        lines.extend([f"会话名称：{session['title']}", ""])
     if kind == "chat":
         if session["chat_memory"]:
             lines.extend(["## 固定备注", "", session["chat_memory"], ""])

@@ -1,4 +1,4 @@
-const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
 
@@ -7,7 +7,11 @@ function showAuth() {
   $("auth-panel").hidden = false;
   for (const kind of ["chat", "interview"]) state.pending[kind]?.controller.abort();
   state.ids = { chat: null, interview: null };
+  state.sessionLists = { chat: [], interview: [] };
+  state.sessionQueries = { chat: "", interview: "" };
   state.username = null;
+  $("session-search").value = "";
+  $("session-title-form").hidden = true;
   $("sessions").replaceChildren();
   renderMessages("chat", []);
   renderMessages("interview", []);
@@ -58,7 +62,7 @@ async function loadChatResources() {
     select.append(option);
   }
   for (const session of sessions.filter((item) => ["finished", "cancelled"].includes(item.status) && item.has_feedback)) {
-    const option = new Option(`面试反馈 · ${session.goal}`, session.id);
+    const option = new Option(`面试反馈 · ${session.title || session.goal}`, session.id);
     option.dataset.kind = "interview";
     select.append(option);
   }
@@ -343,22 +347,37 @@ function startPractice(sourceId, questionNumber) {
 }
 
 async function loadSessions() {
-  const sessions = await api(`/${state.kind}/sessions`);
+  const kind = state.kind;
+  state.sessionLists[kind] = await api(`/${kind}/sessions`);
+  if (state.kind === kind) renderSessionList();
+}
+
+function renderSessionList() {
+  const kind = state.kind;
+  const sessions = state.sessionLists[kind];
+  const query = state.sessionQueries[kind].toLocaleLowerCase();
+  const visible = sessions.filter((session) => {
+    const name = session.title || (kind === "chat" ? `聊天 ${session.id.slice(0, 6)}` : session.goal);
+    return `${name} ${session.goal} ${session.id}`.toLocaleLowerCase().includes(query);
+  });
+  $("session-count").textContent = query ? `找到 ${visible.length} / ${sessions.length} 个会话` : `${sessions.length} 个会话`;
   const box = $("sessions");
   box.replaceChildren();
-  if (!sessions.length) {
+  if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "还没有会话";
+    empty.textContent = query ? "没有匹配的会话，试试其他名称、目标或 ID。"
+      : kind === "chat" ? "还没有聊天会话，发送消息后会显示在这里。" : "还没有面试会话，设置目标后开始一场练习。";
     box.append(empty);
   }
-  for (const session of sessions) {
+  for (const session of visible) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = session.id === state.ids[state.kind] ? "selected" : "";
-    button.textContent = state.kind === "chat" ? `聊天 ${session.id.slice(0, 6)}` : session.goal;
+    button.className = session.id === state.ids[kind] ? "selected" : "";
+    if (session.id === state.ids[kind]) button.setAttribute("aria-current", "true");
+    button.textContent = session.title || (kind === "chat" ? `聊天 ${session.id.slice(0, 6)}` : session.goal);
     const detail = document.createElement("small");
-    detail.textContent = state.kind === "chat" ? new Date(session.created_at).toLocaleString() : `${session.question_count} 题 · ${session.status}`;
+    detail.textContent = kind === "chat" ? new Date(session.created_at).toLocaleString() : `${session.question_count} 题 · ${session.status}`;
     button.append(detail);
     button.onclick = () => selectSession(session.id);
     box.append(button);
@@ -367,6 +386,9 @@ async function loadSessions() {
 
 async function selectSession(id) {
   state.ids[state.kind] = id;
+  $("session-title-form").hidden = true;
+  $("session-title-error").hidden = true;
+  $("rename-session").hidden = !id;
   $("delete-session").hidden = !id;
   if (id) localStorage.setItem(sessionKey(state.kind), id);
   else localStorage.removeItem(sessionKey(state.kind));
@@ -393,6 +415,8 @@ async function selectSession(id) {
 
 async function switchKind(kind) {
   state.kind = kind;
+  const previousId = state.ids[kind];
+  $("session-search").value = state.sessionQueries[kind];
   $("tab-chat").classList.toggle("active", kind === "chat");
   $("tab-interview").classList.toggle("active", kind === "interview");
   $("chat-panel").hidden = kind !== "chat";
@@ -402,7 +426,7 @@ async function switchKind(kind) {
     if (!$("auth-panel").hidden) return;
     state.ids[kind] = null;
     await selectSession(null);
-    notice(error.message);
+    notice(previousId && error.message === "会话不存在" ? "上次的会话已不存在，已打开新建界面。" : error.message);
   }
   if (kind === "chat" && !$("shell").hidden) {
     try { await loadChatResources(); }
@@ -460,6 +484,40 @@ $("chat-insert-resource").onclick = () => {
   $("chat-insert-resource").disabled = true;
 };
 $("new-session").onclick = () => selectSession(null);
+$("session-search").oninput = () => {
+  state.sessionQueries[state.kind] = $("session-search").value.trim();
+  renderSessionList();
+};
+$("rename-session").onclick = () => {
+  const session = state.sessionLists[state.kind].find((item) => item.id === state.ids[state.kind]);
+  if (!session) return;
+  $("session-title").value = session.title;
+  $("session-title-error").hidden = true;
+  $("session-title-form").hidden = false;
+  $("session-title").focus();
+};
+$("cancel-session-title").onclick = () => { $("session-title-form").hidden = true; };
+$("session-title-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const kind = state.kind;
+  const id = state.ids[kind];
+  if (!id) return;
+  const title = $("session-title").value.trim();
+  const submit = $("session-title-form").querySelector("button[type=submit]");
+  submit.disabled = true;
+  $("session-title-error").hidden = true;
+  try {
+    await api(`/${kind}/sessions/${id}/title`, { method: "PUT", body: JSON.stringify({ title }) });
+    if (state.kind === kind && state.ids[kind] === id) {
+      $("session-title-form").hidden = true;
+      await loadSessions();
+      notice(title ? "会话名称已保存。" : "已恢复默认会话名称。");
+    }
+  } catch (error) {
+    $("session-title-error").textContent = error.message;
+    $("session-title-error").hidden = false;
+  } finally { submit.disabled = false; }
+};
 $("chat-retry").onclick = async () => {
   const id = state.ids.chat;
   if (!id) return;

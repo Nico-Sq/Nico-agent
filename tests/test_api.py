@@ -38,6 +38,46 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
         self.assertNotIn("api_key", config)
 
+    def test_session_titles_are_display_only_and_can_be_reset(self):
+        chat = self.client.post("/api/chat/sessions").json()
+        pending = self.client.post(f"/api/chat/sessions/{chat['id']}/messages/claim", json={
+            "text": "讨论后端岗位",
+        }).json()
+        saved = self.client.put(f"/api/chat/sessions/{chat['id']}/title", json={
+            "title": "  后端求职准备  ",
+        })
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["title"], "后端求职准备")
+        self.assertEqual(saved.json()["version"], pending["version"])
+        self.assertEqual(self.client.get("/api/chat/sessions").json()[0]["title"], "后端求职准备")
+        self.assertNotIn("后端求职准备", str(main.runtime.build_context(saved.json())))
+        self.assertIn("会话名称：后端求职准备", self.client.get(
+            f"/api/chat/sessions/{chat['id']}/export.md"
+        ).text)
+        self.assertEqual(self.client.post(f"/api/chat/sessions/{chat['id']}/messages/run", json={
+            "version": pending["version"],
+        }).status_code, 200)
+        self.assertEqual(self.client.put(f"/api/interview/sessions/{chat['id']}/title", json={
+            "title": "错误入口",
+        }).status_code, 404)
+        self.assertEqual(self.client.put(f"/api/chat/sessions/{chat['id']}/title", json={
+            "title": "过长" * 41,
+        }).status_code, 422)
+        reset = self.client.put(f"/api/chat/sessions/{chat['id']}/title", json={"title": "  "})
+        self.assertEqual(reset.json()["title"], "")
+        one_line = self.client.put(f"/api/chat/sessions/{chat['id']}/title", json={
+            "title": "第一行\n第二行",
+        })
+        self.assertEqual(one_line.json()["title"], "第一行 第二行")
+
+        interview = self.client.post("/api/interview/sessions", json={"goal": "算法岗位"}).json()
+        renamed = self.client.put(f"/api/interview/sessions/{interview['id']}/title", json={
+            "title": "第一次模拟",
+        }).json()
+        self.assertEqual(renamed["title"], "第一次模拟")
+        self.assertEqual(renamed["goal"], "算法岗位")
+        self.assertEqual(self.client.get("/api/interview/sessions").json()[0]["title"], "第一次模拟")
+
     def test_chat_memory_is_editable_and_invalidates_old_run(self):
         chat_id = self.client.post("/api/chat/sessions").json()["id"]
         pending = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={

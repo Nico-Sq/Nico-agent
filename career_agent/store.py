@@ -27,6 +27,7 @@ class Store:
                     version INTEGER NOT NULL DEFAULT 0,
                     run_started INTEGER NOT NULL DEFAULT 0,
                     chat_memory TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS messages (
@@ -104,6 +105,8 @@ class Store:
                 db.execute("ALTER TABLE sessions ADD COLUMN run_started INTEGER NOT NULL DEFAULT 0")
             if "chat_memory" not in session_columns:
                 db.execute("ALTER TABLE sessions ADD COLUMN chat_memory TEXT NOT NULL DEFAULT ''")
+            if "title" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
             item_columns = {row["name"] for row in db.execute("PRAGMA table_info(interview_items)")}
             if "skipped" not in item_columns:
                 db.execute("ALTER TABLE interview_items ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
@@ -378,6 +381,14 @@ class Store:
         for session in sessions:
             session.pop("run_started")
         return sessions
+
+    def set_session_title(self, session_id: str, kind: str, title: str) -> dict | None:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE sessions SET title = ? WHERE id = ? AND kind = ?",
+                (title, session_id, kind),
+            ).rowcount
+        return self.get(session_id, kind) if changed else None
 
     def delete_session(self, session_id: str, kind: str) -> bool:
         with self.connect() as db:

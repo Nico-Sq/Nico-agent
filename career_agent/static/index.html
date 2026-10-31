@@ -20,6 +20,7 @@
     </form>
   </section>
   <div id="shell" class="shell" hidden>
+    <a class="skip-link" href="#main-content">跳转到主要内容</a>
     <header class="topbar">
       <div><span class="eyebrow">CAREER STUDIO</span><h1>求职双线 Agent</h1></div>
       <div><span id="provider" class="badge">读取模型配置中</span><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
@@ -31,10 +32,22 @@
       <button type="button" id="tab-chat" class="active">聊天助手</button>
       <button type="button" id="tab-interview">模拟面试</button>
     </nav>
-    <main class="layout">
+    <main id="main-content" class="layout">
       <aside class="sidebar">
         <div class="side-title"><h2>会话记录</h2><button id="new-session" type="button">新建</button></div>
-        <button id="delete-session" type="button" class="secondary" hidden>删除当前会话</button>
+        <label class="session-search-label" for="session-search">查找会话</label>
+        <input id="session-search" type="search" placeholder="名称、目标或 ID" autocomplete="off">
+        <p id="session-count" class="session-count" role="status" aria-live="polite"></p>
+        <div class="session-actions">
+          <button id="rename-session" type="button" class="secondary" hidden>重命名</button>
+          <button id="delete-session" type="button" class="secondary danger" hidden>删除当前会话</button>
+        </div>
+        <form id="session-title-form" class="session-title-form" hidden>
+          <label for="session-title">会话名称（留空恢复默认）</label>
+          <input id="session-title" maxlength="80" aria-describedby="session-title-error">
+          <p id="session-title-error" role="alert" hidden></p>
+          <div><button type="button" id="cancel-session-title" class="secondary">取消</button><button type="submit">保存</button></div>
+        </form>
         <div id="sessions" class="sessions"></div>
       </aside>
       <section class="workspace">

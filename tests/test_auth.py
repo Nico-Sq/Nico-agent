@@ -62,6 +62,9 @@ class AuthApiTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM materials").fetchone()[0], 0)
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name = 'users'").fetchone())
         self.assertEqual(self.bob.get(f"/api/interview/sessions/{interview['id']}").status_code, 404)
+        self.assertEqual(self.bob.put(f"/api/interview/sessions/{interview['id']}/title", json={
+            "title": "其他账户的会话",
+        }).status_code, 404)
         self.assertEqual(self.bob.post("/api/interview/sessions", json={
             "goal": "窃取材料", "material_ids": [material["id"]],
         }).status_code, 422)

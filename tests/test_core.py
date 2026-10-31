@@ -143,6 +143,7 @@ class CoreTests(unittest.TestCase):
         upgraded = Store(legacy_path)
         self.assertEqual(upgraded.get("legacy-chat", "chat")["max_questions"], 3)
         self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "")
+        self.assertEqual(upgraded.get("legacy-chat", "chat")["title"], "")
         upgraded.set_chat_memory("legacy-chat", "迁移后备注")
         self.assertEqual(upgraded.get("legacy-chat", "chat")["chat_memory"], "迁移后备注")
         with closing(sqlite3.connect(legacy_path)) as db:
