@@ -39,6 +39,14 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
         self.assertNotIn("api_key", config)
 
+    def test_api_responses_are_not_cached_or_sniffed(self):
+        response = self.client.get("/api/config")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+        page = self.client.get("/")
+        self.assertNotIn("no-store", page.headers.get("cache-control", ""))
+
     def test_session_selects_configured_model_and_rejects_unknown(self):
         path = Path(self.temp.name) / "models.json"
         path.write_text('[{"id":"local","provider":"openai_compatible","model":"test-model",'

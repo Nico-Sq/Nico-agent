@@ -93,6 +93,17 @@ async def bind_account(request: Request, call_next):
         request_runtime.reset(runtime_token)
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Keep private API payloads out of shared caches and block content sniffing."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=12000)
 

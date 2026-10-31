@@ -66,7 +66,7 @@ python -m career_agent.restore .\nico-agent-backup.sqlite3
 
 应用启动时、运行期间每小时及正常退出时检查本地业务库。在各数据库旁的 `backups/` 目录保留最近 7 份按 UTC 日期命名的每日 SQLite 快照，并在每次检查时原子更新 `career_agent-latest.sqlite3`。每日快照保存当天首次检查时的数据；`latest` 保存最近一次检查时的数据。账户模式按账户分别备份业务数据；自动快照同样不含账户凭据。恢复自动快照时也使用上面的命令，并将快照路径作为第一个参数。异常断电时仍可能丢失最近一次检查之后的改动。
 
-需要账户隔离时，在启动前设置 `$env:AUTH_REQUIRED = "true"`。首次打开页面可注册账户；同一账户连续 5 次登录失败后，15 分钟内的登录会返回 429，锁定期间不再计算密码哈希。登录凭据保存在 `data/auth.sqlite3`，每个账户的业务数据保存在 `data/users/<用户ID>/career_agent.sqlite3`。原来的本地单用户数据不会自动迁入账户目录。
+需要账户隔离时，在启动前设置 `$env:AUTH_REQUIRED = "true"`。首次打开页面可注册账户；同一账户连续 5 次登录失败后，15 分钟内的登录会返回 429，锁定期间不再计算密码哈希。登录凭据保存在 `data/auth.sqlite3`，每个账户的业务数据保存在 `data/users/<用户ID>/career_agent.sqlite3`。原来的本地单用户数据不会自动迁入账户目录。所有 `/api/` 响应附带 `Cache-Control: no-store`，并统一发送 `X-Content-Type-Options: nosniff` 与 `Referrer-Policy: no-referrer`，避免共享浏览器缓存私有数据和跨源嗅探。
 
 ## 开发验证
 
