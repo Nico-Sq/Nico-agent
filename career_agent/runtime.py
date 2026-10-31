@@ -6,7 +6,8 @@ import jsonschema
 
 from .context import (
     ContextBudgetError,
-    build_context as assemble_context,
+    assemble as assemble_context,
+    build_context as context_messages,
     prompt_version as prompt_fingerprint,
 )
 from .events import Usage, run_event
@@ -38,7 +39,7 @@ class AgentRuntime:
 
     def build_context(self, session: dict) -> list[dict]:
         """Delegate prompt assembly to the context module."""
-        return assemble_context(self.store, session)
+        return context_messages(self.store, session)
 
     def _tools(self, kind: str) -> list[dict]:
         return schemas(kind)
@@ -169,13 +170,14 @@ class AgentRuntime:
         outcome = "failed"
         context_chars = 0
         tool_names = []
+        dropped: list[str] = []
         usage = Usage()
         prompt_version = ""
         error_code = None
         try:
             prompt_version = prompt_fingerprint(kind)
             try:
-                context = self.build_context(session)
+                context, dropped = assemble_context(self.store, session)
             except ContextBudgetError as exc:
                 raise ModelError(
                     "context_budget_exceeded",
@@ -282,6 +284,6 @@ class AgentRuntime:
                 provider=getattr(self.provider, "mode", "custom"),
                 model=getattr(self.provider, "model", ""),
                 prompt_version=prompt_version, context_chars=context_chars,
-                tool_names=tool_names, usage=usage,
+                context_dropped=dropped, tool_names=tool_names, usage=usage,
                 elapsed_ms=round((time.perf_counter() - started) * 1000),
             ))

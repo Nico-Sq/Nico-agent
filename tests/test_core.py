@@ -464,6 +464,15 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(kept, [3, 4, 5, 6, 7])
         self.assertEqual(len(self.store.events(other["id"], "interview")), 1)
 
+    def test_run_event_records_dropped_context_blocks(self):
+        chat = self.store.create("chat")
+        self.store.set_chat_memory(chat["id"], "备" * MAX_CONTEXT_CHARS)
+        running = self.store.claim_run(chat["id"], "chat", "active", "LATEST_USER_MESSAGE")
+        run_demo(self.runtime.run(running))
+        event = next(item for item in self.store.events(chat["id"], "chat")
+                     if item["kind"] == "model_run")
+        self.assertEqual(json.loads(event["detail"])["context_dropped"], ["CHAT_MEMORY"])
+
     def test_model_usage_and_prompt_version_are_recorded(self):
         class MeteredProvider:
             async def complete(self, messages, tools):

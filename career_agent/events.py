@@ -41,11 +41,12 @@ class Usage:
 
 
 def run_event(*, version: int, status: str, error_code: str | None, provider, model: str,
-              prompt_version: str, context_chars: int, tool_names: list[str],
-              usage: Usage, elapsed_ms: int) -> dict:
+              prompt_version: str, context_chars: int, context_dropped: list[str],
+              tool_names: list[str], usage: Usage, elapsed_ms: int) -> dict:
     """Describe one finished, failed or interrupted run for the session log."""
     return {"version": version, "status": status, "error_code": error_code,
             "provider": provider or "custom", "model": model,
             "prompt_version": prompt_version, "context_chars": context_chars,
+            "context_dropped": context_dropped,
             "tool_names": tool_names, "usage": usage.as_dict(),
             "usage_coverage": usage.coverage(), "elapsed_ms": elapsed_ms}

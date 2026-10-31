@@ -28,10 +28,11 @@ def prompt_version(kind: str) -> str:
     return hashlib.sha256(PROMPT_POLICY_VERSION.encode() + prompt).hexdigest()[:12]
 
 
-def _fit(blocks: list[tuple[bool, dict]], messages: list[dict]) -> list[dict]:
+def _fit(blocks: list[tuple[bool, str, dict]], messages: list[dict]) -> tuple[list[dict], list[str]]:
     """Keep the newest whole messages; drop the largest optional block until they fit."""
+    dropped = []
     while True:
-        context = [message for _, message in blocks]
+        context = [message for _, _, message in blocks]
         remaining = MAX_CONTEXT_CHARS - sum(len(item["content"]) for item in context)
         selected = []
         for row in reversed(messages):
@@ -40,15 +41,21 @@ def _fit(blocks: list[tuple[bool, dict]], messages: list[dict]) -> list[dict]:
             selected.append({"role": row["role"], "content": row["content"]})
             remaining -= len(row["content"])
         if not messages or selected:
-            return context + list(reversed(selected))
-        optional = [index for index, (required, _) in enumerate(blocks) if not required]
+            return context + list(reversed(selected)), dropped
+        optional = [index for index, (required, _, _) in enumerate(blocks) if not required]
         if not optional:
             raise ContextBudgetError("上下文预算不足以容纳最新消息")
-        blocks.pop(max(optional, key=lambda index: len(blocks[index][1]["content"])))
+        index = max(optional, key=lambda item: len(blocks[item][2]["content"]))
+        dropped.append(blocks.pop(index)[1])
 
 
 def build_context(store, session: dict) -> list[dict]:
-    """Build the system prompt, the resource blocks and the recent messages."""
+    """Return only the messages, for callers that do not record trimming."""
+    return assemble(store, session)[0]
+
+
+def assemble(store, session: dict) -> tuple[list[dict], list[str]]:
+    """Build the message list plus the optional blocks that had to be dropped."""
     kind = session["kind"]
     system = skill_file(kind).read_text(encoding="utf-8")
     if store.tool_grants(session["id"]):
@@ -76,25 +83,25 @@ def build_context(store, session: dict) -> list[dict]:
         if practice:
             system += "这是复练会话。根据原题的薄弱点换一种问法，不让用户复述标准答案。"
     system_message = {"role": "system", "content": system}
-    # 每项是 (是否必需, 消息)。必需块不能为最近消息让位，可选块按体积从大到小让位。
-    blocks: list[tuple[bool, dict]] = [(True, system_message)]
+    # 每项是 (是否必需, 块名, 消息)。必需块不能为最近消息让位，可选块按体积从大到小让位。
+    blocks: list[tuple[bool, str, dict]] = [(True, "SYSTEM", system_message)]
     if kind == "chat" and session["chat_memory"]:
-        blocks.append((False, {"role": "user",
-                               "content": "[CHAT_MEMORY]\n" + session["chat_memory"]}))
+        blocks.append((False, "CHAT_MEMORY", {"role": "user",
+                                               "content": "[CHAT_MEMORY]\n" + session["chat_memory"]}))
     if kind == "interview":
-        blocks.append((True, {"role": "user", "content": "[INTERVIEW_GOAL]\n" + json.dumps(
+        blocks.append((True, "INTERVIEW_GOAL", {"role": "user", "content": "[INTERVIEW_GOAL]\n" + json.dumps(
             {"goal": session["goal"]}, ensure_ascii=False
         )}))
         resources = store.interview_resources(session["id"])
         if resources["materials"] or resources["claims"]:
-            blocks.append((False, {
+            blocks.append((False, "INTERVIEW_RESOURCES", {
                 "role": "user",
                 "content": "[INTERVIEW_RESOURCES]\n" + json.dumps(resources, ensure_ascii=False),
             }))
         if practice:
             practice = {**practice, "answer": (practice["answer"] or "")[:4000],
                         "feedback": (practice["feedback"] or "")[:4000]}
-            blocks.append((False, {
+            blocks.append((False, "PRACTICE_SOURCE", {
                 "role": "user",
                 "content": "[PRACTICE_SOURCE]\n" + json.dumps(practice, ensure_ascii=False),
             }))
@@ -107,6 +114,7 @@ def build_context(store, session: dict) -> list[dict]:
                      "evidence": item["evidence"][0][:120] if item["evidence"] else ""}
                     for item in report["items"] if item["feedback"] or item["skipped"]]
         if progress:
-            blocks.append((False, {"role": "user", "content": "[INTERVIEW_PROGRESS]\n" +
-                                   json.dumps(progress, ensure_ascii=False)}))
+            blocks.append((False, "INTERVIEW_PROGRESS", {
+                "role": "user", "content": "[INTERVIEW_PROGRESS]\n" +
+                                          json.dumps(progress, ensure_ascii=False)}))
     return _fit(blocks, store.messages(session["id"], kind, limit=16))
