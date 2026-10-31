@@ -453,6 +453,17 @@ class CoreTests(unittest.TestCase):
         self.assertGreater(detail["context_chars"], 0)
         self.assertNotIn("PRIVATE_CHAT_TEXT", events[0]["detail"])
 
+    def test_run_events_keep_only_the_newest_per_session(self):
+        chat = self.store.create("chat")
+        other = self.store.create("interview", "后端工程师")
+        with patch("career_agent.store.MAX_EVENTS_PER_SESSION", 5):
+            for number in range(8):
+                self.store.event(chat["id"], "model_run", {"version": number})
+            self.store.event(other["id"], "model_run", {"version": 0})
+        kept = [json.loads(item["detail"])["version"] for item in self.store.events(chat["id"], "chat")]
+        self.assertEqual(kept, [3, 4, 5, 6, 7])
+        self.assertEqual(len(self.store.events(other["id"], "interview")), 1)
+
     def test_model_usage_and_prompt_version_are_recorded(self):
         class MeteredProvider:
             async def complete(self, messages, tools):

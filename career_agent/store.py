@@ -13,6 +13,8 @@ def now() -> str:
 
 # 单个账户数据库的长期记忆上限，超出后要求用户先删除。
 MAX_MEMORIES = 200
+# 单个会话保留的最近运行事件数，避免长期使用后事件表无限增长。
+MAX_EVENTS_PER_SESSION = 500
 
 
 class Store:
@@ -107,6 +109,7 @@ class Store:
                     question_number INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS messages_session_id ON messages(session_id, id);
+                CREATE INDEX IF NOT EXISTS events_session_id ON events(session_id, id);
             """)
             db.execute("BEGIN IMMEDIATE")
             for table in ("materials", "claims"):
@@ -510,6 +513,11 @@ class Store:
                 "INSERT INTO events(session_id, kind, detail, created_at) "
                 "SELECT id, ?, ?, ? FROM sessions WHERE id = ?",
                 (kind, json.dumps(detail, ensure_ascii=False), now(), session_id),
+            )
+            db.execute(
+                "DELETE FROM events WHERE session_id = ? AND id NOT IN ("
+                "SELECT id FROM events WHERE session_id = ? ORDER BY id DESC LIMIT ?)",
+                (session_id, session_id, MAX_EVENTS_PER_SESSION),
             )
 
     def claim_run(self, session_id: str, kind: str, expected: str, user_text: str | None = None,
