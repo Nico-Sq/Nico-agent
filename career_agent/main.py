@@ -55,6 +55,8 @@ async def lifespan(_app: FastAPI):
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        with suppress(Exception):
+            await mcp_servers.close()
         await backup_once()
 
 

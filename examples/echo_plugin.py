@@ -10,5 +10,6 @@ TOOLS = [{
     "description": "原样确认输入文本，用于检查本地插件接入。",
     "parameters": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 200}},
                    "required": ["text"], "additionalProperties": False},
+    "read_only": True,
     "run": echo,
 }]

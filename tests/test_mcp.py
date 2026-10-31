@@ -23,7 +23,7 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}
     elif method == "tools/list":
-        result = {"tools":[{"name":"echo","description":"Echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":False}}]}
+        result = {"tools":[{"name":"echo","description":"Echo text","annotations":{"readOnlyHint":True},"inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":False}}]}
     elif method == "tools/call":
         result = {"content":[{"type":"text","text":request["params"]["arguments"]["text"]}]}
     else:
@@ -43,18 +43,68 @@ class MCPTests(unittest.TestCase):
                                                  "enabled_tools": ["echo"]}}), encoding="utf-8")
         self.mcp = MCPServers(config)
         self.store = Store(root / "agent.sqlite3")
+        self.loop = asyncio.new_event_loop()
+
+    def run_async(self, coro):
+        return self.loop.run_until_complete(coro)
 
     def tearDown(self):
+        self.run_async(self.mcp.close())
+        self.loop.close()
         self.temp.cleanup()
 
     def test_discover_validate_and_call(self):
         async def run():
             tools = await self.mcp.discover()
             self.assertEqual(tools[0]["name"], "mcp_fixture_echo")
+            self.assertIs(tools[0]["read_only"], True)
             self.assertEqual((await self.mcp.call(tools[0], {"text": "hello"}))["text"], "hello")
             with self.assertRaises(Exception):
                 await self.mcp.call(tools[0], {"unexpected": "value"})
-        asyncio.run(run())
+        self.run_async(run())
+
+    def test_discovery_and_calls_share_one_server_connection(self):
+        original = asyncio.create_subprocess_exec
+        spawned = []
+
+        async def counting(*args, **kwargs):
+            spawned.append(args[0])
+            return await original(*args, **kwargs)
+
+        async def run():
+            tools = await self.mcp.discover()
+            client = self.mcp.clients["fixture"]
+            for _ in range(3):
+                self.assertEqual((await self.mcp.call(tools[0], {"text": "hi"}))["text"], "hi")
+                self.assertIs(self.mcp.clients["fixture"], client)
+            self.assertIsNone(client.process.returncode)
+            self.assertEqual(self.mcp.status(), {})
+            await self.mcp.close()
+            self.assertEqual(self.mcp.clients, {})
+            self.assertIsNotNone(client.process.returncode)
+
+        with patch("career_agent.mcp.asyncio.create_subprocess_exec", counting):
+            self.run_async(run())
+        self.assertEqual(len(spawned), 1)
+
+    def test_broken_server_does_not_block_other_servers(self):
+        config = Path(self.temp.name) / "broken.json"
+        config.write_text(json.dumps({
+            "fixture": {"command": [sys.executable, str(Path(self.temp.name) / "server.py")],
+                        "enabled_tools": ["echo"]},
+            "broken": {"command": [sys.executable, "-c", "import sys; sys.exit(3)"],
+                       "enabled_tools": ["echo"]},
+        }), encoding="utf-8")
+        manager = MCPServers(config)
+
+        async def run():
+            tools = await manager.discover()
+            self.assertEqual([item["name"] for item in tools], ["mcp_fixture_echo"])
+            self.assertEqual(manager.status(), {"broken": "mcp_server_unavailable"})
+            self.assertEqual((await manager.call(tools[0], {"text": "still"}))["text"], "still")
+            await manager.close()
+
+        self.run_async(run())
 
     def test_grant_is_required_before_model_sees_tool(self):
         class CallingProvider:
@@ -74,11 +124,11 @@ class MCPTests(unittest.TestCase):
         chat = self.store.create("chat")
         provider = CallingProvider()
         first = self.store.claim_run(chat["id"], "chat", "active", "先检查")
-        result = asyncio.run(AgentRuntime(self.store, provider, self.mcp).run(first))
+        result = self.run_async(AgentRuntime(self.store, provider, self.mcp).run(first))
         self.assertEqual(result["message"], "未授权")
         self.store.set_tool_grants(chat["id"], ["mcp_fixture_echo"])
         second = self.store.claim_run(chat["id"], "chat", "active", "再检查")
-        result = asyncio.run(AgentRuntime(self.store, provider, self.mcp).run(second))
+        result = self.run_async(AgentRuntime(self.store, provider, self.mcp).run(second))
         self.assertEqual(result["message"], "hello")
         self.assertIn("mcp_fixture_echo", provider.tools[-1])
 
@@ -87,15 +137,14 @@ class MCPTests(unittest.TestCase):
         main.store = self.store
         try:
             with patch.object(main, "mcp_servers", self.mcp):
-                client = TestClient(main.app)
-                chat = client.post("/api/chat/sessions").json()
-                self.assertEqual(client.put(f"/api/chat/sessions/{chat['id']}/tools", json={
-                    "names": ["mcp_fixture_missing"],
-                }).status_code, 422)
-                approved = client.put(f"/api/chat/sessions/{chat['id']}/tools", json={
-                    "names": ["mcp_fixture_echo"],
-                })
-                self.assertEqual(approved.json()["names"], ["mcp_fixture_echo"])
-                client.close()
+                with TestClient(main.app) as client:
+                    chat = client.post("/api/chat/sessions").json()
+                    self.assertEqual(client.put(f"/api/chat/sessions/{chat['id']}/tools", json={
+                        "names": ["mcp_fixture_missing"],
+                    }).status_code, 422)
+                    approved = client.put(f"/api/chat/sessions/{chat['id']}/tools", json={
+                        "names": ["mcp_fixture_echo"],
+                    })
+                    self.assertEqual(approved.json()["names"], ["mcp_fixture_echo"])
         finally:
             main.store = original

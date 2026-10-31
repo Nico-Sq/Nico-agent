@@ -21,6 +21,7 @@ class ExtensionTests(unittest.TestCase):
     def test_example_plugin_requires_grant_and_validates_arguments(self):
         item = self.plugins.discover()[0]
         self.assertEqual(item["name"], "plugin_echo_plugin_echo")
+        self.assertIs(item["read_only"], True)
         self.assertEqual(asyncio.run(self.plugins.call(item, {"text": "hello"}))["text"], "收到：hello")
         with self.assertRaises(Exception):
             asyncio.run(self.plugins.call(item, {"bad": 1}))
@@ -38,6 +39,31 @@ class ExtensionTests(unittest.TestCase):
         pending = self.store.claim_run(chat["id"], "chat", "active", "test")
         response = asyncio.run(AgentRuntime(self.store, Provider(), plugins=self.plugins).run(pending))
         self.assertIn("收到：hello", response["message"])
+
+    def test_tool_batches_keep_read_only_calls_parallel_and_side_effects_serial(self):
+        state = {"active": 0, "peak": 0}
+
+        async def fake(session, call, external=None):
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            await asyncio.sleep(0.01)
+            state["active"] -= 1
+            return {"role": "tool", "tool_call_id": call["id"], "content": "{}"}
+
+        runtime = AgentRuntime(self.store, object(), plugins=self.plugins)
+        runtime._execute_tool = fake
+        read = {"id": "a", "function": {"name": "read_material"}}
+        write = {"id": "b", "function": {"name": "plugin_echo_plugin_echo"}}
+        external = {"plugin_echo_plugin_echo": {"name": "plugin_echo_plugin_echo", "read_only": False}}
+
+        parallel = asyncio.run(runtime._execute_tools(None, [read, read], external))
+        self.assertEqual(state["peak"], 2)
+        self.assertEqual([item["tool_call_id"] for item in parallel], ["a", "a"])
+
+        state["peak"] = 0
+        serial = asyncio.run(runtime._execute_tools(None, [read, write, read], external))
+        self.assertEqual(state["peak"], 1)
+        self.assertEqual([item["tool_call_id"] for item in serial], ["a", "b", "a"])
 
     def test_cli_channel_uses_runtime_and_persists_session(self):
         class Channel:

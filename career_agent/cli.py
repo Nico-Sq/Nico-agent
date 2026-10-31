@@ -66,6 +66,14 @@ async def run_channel(channel: TextChannel, store: Store, model_id: str = "defau
             await channel.send(f"运行失败：{exc}")
 
 
+async def run_chat(args, store: Store, catalog: ModelCatalog, mcp: MCPServers,
+                    plugins: LocalPlugins) -> None:
+    try:
+        await run_channel(ConsoleChannel(), store, args.model, args.session, catalog, mcp, plugins)
+    finally:
+        await mcp.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="nico-agent")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -92,7 +100,7 @@ def main() -> None:
         for item in catalog.list():
             print(f"{item['id']}: {item['provider']} {item['model']} {item['config_error'] or ''}")
     elif args.command == "chat":
-        asyncio.run(run_channel(ConsoleChannel(), store, args.model, args.session, catalog, mcp, plugins))
+        asyncio.run(run_chat(args, store, catalog, mcp, plugins))
     elif args.command == "memory":
         if args.action == "add":
             if not args.value or not args.value.strip() or len(args.value) > 2000:

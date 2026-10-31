@@ -46,7 +46,8 @@ class LocalPlugins:
                 if name in self.tools:
                     raise ValueError(f"插件工具名称重复：{name}")
                 self.tools[name] = {"name": name, "source": "plugin", "description": str(item.get("description", ""))[:300],
-                                    "parameters": schema, "run": item["run"]}
+                                    "parameters": schema, "read_only": item.get("read_only") is True,
+                                    "run": item["run"]}
 
     def discover(self) -> list[dict]:
         return [{key: value for key, value in item.items() if key != "run"} for item in self.tools.values()]

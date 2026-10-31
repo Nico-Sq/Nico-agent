@@ -19,6 +19,11 @@ MAX_TOOL_CALLS = 8
 MAX_RUN_SECONDS = 120
 MAX_RUN_TOKENS = 16_000
 MAX_MODEL_OUTPUT_CHARS = 12_000
+# 内置工具均无副作用；外部工具是否可并行由各自元数据声明。
+READ_ONLY_TOOLS = {
+    "read_interview_goal", "read_interview_materials", "read_confirmed_claims",
+    "read_material", "read_interview_feedback", "search_memories",
+}
 # 修改运行时的系统提示拼接规则时同步递增此版本。
 PROMPT_POLICY_VERSION = "4"
 
@@ -142,6 +147,31 @@ class AgentRuntime:
             "description": "读取本场面试明确选择的材料原文和已确认经历。",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         }}]
+
+    def _concurrency_safe(self, call: dict, external: dict[str, dict]) -> bool:
+        name = call["function"]["name"]
+        if external and name in external:
+            return bool(external[name].get("read_only"))
+        return name in READ_ONLY_TOOLS
+
+    async def _execute_tools(self, session: dict, calls: list[dict],
+                             external: dict[str, dict] | None = None) -> list[dict]:
+        """只读工具按连续批次并行，有副作用的工具单独串行执行。"""
+        async def run(batch: list[dict]) -> list[dict]:
+            if not batch:
+                return []
+            return list(await asyncio.gather(*(self._execute_tool(session, call, external) for call in batch)))
+
+        results, batch = [], []
+        for call in calls:
+            if self._concurrency_safe(call, external or {}):
+                batch.append(call)
+                continue
+            results.extend(await run(batch))
+            batch = []
+            results.append(await self._execute_tool(session, call, external))
+        results.extend(await run(batch))
+        return results
 
     async def _execute_tool(self, session: dict, call: dict, external: dict[str, dict] | None = None) -> dict:
         name = call["function"]["name"]
@@ -279,7 +309,7 @@ class AgentRuntime:
                 raise ValueError("本次运行的工具调用超过上限")
             tool_names.extend(call["function"]["name"] for call in calls)
             messages.append({"role": "assistant", "content": reply.get("content"), "tool_calls": calls})
-            messages.extend(await asyncio.gather(*(self._execute_tool(session, call, external) for call in calls)))
+            messages.extend(await self._execute_tools(session, calls, external))
             if sum(len(message.get("content") or "") + len(json.dumps(message.get("tool_calls", []), ensure_ascii=False))
                    for message in messages) > MAX_MODEL_INPUT_CHARS:
                 raise ValueError("工具结果超过模型上下文预算，请减少本次读取的材料或经历")

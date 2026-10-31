@@ -13,9 +13,15 @@ class MCPClient:
     def __init__(self, command: list[str]):
         self.command = command
         self.process = None
+        self.loop = None
         self.next_id = 0
 
-    async def __aenter__(self):
+    async def connect(self) -> "MCPClient":
+        if (self.process is not None and self.process.returncode is None
+                and self.loop is asyncio.get_running_loop()):
+            return self
+        await self.close()
+        self.loop = asyncio.get_running_loop()
         self.process = await asyncio.create_subprocess_exec(
             *self.command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, limit=1_000_000,
@@ -28,17 +34,29 @@ class MCPClient:
             await self.notify("notifications/initialized")
             return self
         except BaseException:
-            await self.__aexit__(None, None, None)
+            await self.close()
             raise
 
+    async def close(self):
+        process = self.process
+        if process is None or process.returncode is not None:
+            return
+        if self.loop is not asyncio.get_running_loop():
+            # 旧事件循环已关闭，只能同步结束子进程。
+            process.kill()
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), 2)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+
+    async def __aenter__(self):
+        return await self.connect()
+
     async def __aexit__(self, *_):
-        if self.process and self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), 2)
-            except asyncio.TimeoutError:
-                self.process.kill()
-                await self.process.wait()
+        await self.close()
 
     async def _send(self, message: dict):
         self.process.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
@@ -85,6 +103,8 @@ class MCPClient:
 
 
 class MCPServers:
+    """按服务器持有常驻连接；单个服务器的故障不影响其他服务器。"""
+
     def __init__(self, path: Path | None = None):
         if path is None:
             configured = os.getenv("MCP_SERVERS_PATH")
@@ -102,37 +122,92 @@ class MCPServers:
                         or not all(isinstance(tool, str) for tool in config["enabled_tools"])):
                     raise ValueError(f"MCP 服务器 {name} 配置无效")
                 self.servers[name] = config
+        # 每个服务器持有常驻连接；同一服务器的请求串行，不同服务器互不影响。
+        self.clients: dict[str, MCPClient] = {}
+        self.catalogs: dict[str, list[dict]] = {}
+        self.failures: dict[str, str] = {}
+        self.locks = {name: asyncio.Lock() for name in self.servers}
+
+    def status(self) -> dict[str, str]:
+        return dict(self.failures)
+
+    async def _drop(self, server: str):
+        self.catalogs.pop(server, None)
+        client = self.clients.pop(server, None)
+        if client is not None:
+            await client.close()
+
+    async def _client(self, server: str) -> MCPClient:
+        client = self.clients.get(server)
+        if (client is None or client.process is None or client.process.returncode is not None
+                or client.loop is not asyncio.get_running_loop()):
+            await self._drop(server)
+            client = MCPClient(self.servers[server]["command"])
+            await client.connect()
+            self.clients[server] = client
+        return client
+
+    async def _tools(self, server: str) -> list[dict]:
+        if server in self.catalogs:
+            return self.catalogs[server]
+        client = await self._client(server)
+        config = self.servers[server]
+        tools = []
+        for item in await client.tools():
+            if not isinstance(item, dict):
+                raise ValueError("MCP 工具定义无效")
+            if item.get("name") not in config["enabled_tools"]:
+                continue
+            name = item["name"]
+            schema = item.get("inputSchema")
+            if (not re.fullmatch(r"[A-Za-z0-9_]{1,32}", name)
+                    or not isinstance(schema, dict) or schema.get("type") != "object"):
+                raise ValueError("MCP 工具定义无效")
+            jsonschema.Draft202012Validator.check_schema(schema)
+            annotations = item.get("annotations")
+            tools.append({"name": f"mcp_{server}_{name}", "server": server,
+                          "remote_name": name, "description": str(item.get("description", ""))[:300],
+                          "parameters": schema,
+                          "read_only": isinstance(annotations, dict) and annotations.get("readOnlyHint") is True})
+        self.catalogs[server] = tools
+        return tools
 
     async def discover(self) -> list[dict]:
         tools = []
-        for server, config in self.servers.items():
-            async with MCPClient(config["command"]) as client:
-                for item in await client.tools():
-                    if item.get("name") not in config["enabled_tools"]:
-                        continue
-                    name = item["name"]
-                    schema = item.get("inputSchema")
-                    if (not re.fullmatch(r"[A-Za-z0-9_]{1,32}", name)
-                            or not isinstance(schema, dict) or schema.get("type") != "object"):
-                        raise ValueError("MCP 工具定义无效")
-                    jsonschema.Draft202012Validator.check_schema(schema)
-                    tools.append({"name": f"mcp_{server}_{name}", "server": server,
-                                  "remote_name": name, "description": str(item.get("description", ""))[:300],
-                                  "parameters": schema})
+        for server in self.servers:
+            async with self.locks[server]:
+                try:
+                    tools.extend(await self._tools(server))
+                    self.failures.pop(server, None)
+                except Exception:
+                    self.failures[server] = "mcp_server_unavailable"
+                    await self._drop(server)
         return tools
 
     async def call(self, tool: dict, arguments: dict) -> dict:
         jsonschema.validate(arguments, tool["parameters"])
-        config = self.servers[tool["server"]]
-        if tool["remote_name"] not in config["enabled_tools"]:
+        server = tool["server"]
+        if tool["remote_name"] not in self.servers[server]["enabled_tools"]:
             raise ValueError("MCP 工具未启用")
-        async with MCPClient(config["command"]) as client:
-            names = {item.get("name") for item in await client.tools()}
-            if tool["remote_name"] not in names:
-                raise ValueError("MCP 工具已不存在")
-            result = await client.call(tool["remote_name"], arguments)
+        catalog = self.catalogs.get(server)
+        if catalog is not None and tool["remote_name"] not in {item["remote_name"] for item in catalog}:
+            raise ValueError("MCP 工具已不存在")
+        async with self.locks[server]:
+            try:
+                client = await self._client(server)
+                result = await client.call(tool["remote_name"], arguments)
+                self.failures.pop(server, None)
+            except Exception:
+                self.failures[server] = "mcp_server_unavailable"
+                await self._drop(server)
+                raise
         content = result.get("content", [])
         if not isinstance(content, list):
             raise ValueError("MCP 工具结果无效")
         text = "\n".join(str(part.get("text", "")) for part in content if part.get("type") == "text")
         return {"error": "mcp_tool_failed"} if result.get("isError") else {"text": text[:8000]}
+
+    async def close(self):
+        for server in list(self.clients):
+            await self._drop(server)
+        self.catalogs.clear()
