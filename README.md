@@ -27,6 +27,33 @@ python -m career_agent
 
 真实模型模式至少要设置 `MODEL_NAME`，`MODEL_API_BASE_URL` 要是有效的 HTTP(S) 地址；本机兼容服务若不要求认证，`MODEL_API_KEY` 可以不设置。配置不完整时页面会显示原因，并暂时禁用聊天发送和开始面试；修改环境变量后重启应用。兼容接口若报告输出截断或其他非正常结束，本轮不会采纳回复或执行其中的工具调用；已提交的聊天消息或面试回答会保留，调整请求后可重试。
 
+`MODEL_PROVIDER` 可选 `demo`、`openai`、`openai_compatible` 和 `anthropic`。`openai` 使用 OpenAI Chat Completions，`openai_compatible` 使用同协议的自定义接口，`anthropic` 使用原生 Anthropic Messages 协议；`openai` 和 `anthropic` 需设置 `MODEL_API_KEY`，本地兼容接口可不设。Anthropic 的默认地址为 `https://api.anthropic.com/v1`。各模式均使用工具调用；具体模型必须具备工具调用能力。
+
+需要在新会话中选择不同模型时，设置 `MODEL_CATALOG_PATH` 指向本地 JSON 文件，例如：
+
+```json
+[
+  {"id":"local","provider":"openai_compatible","model":"your-local-model","base_url":"http://127.0.0.1:1234/v1","supports_tools":true},
+  {"id":"claude","provider":"anthropic","model":"your-claude-model","api_key_env":"MODEL_CLAUDE_KEY","supports_tools":true}
+]
+```
+
+启动前设置 `MODEL_CLAUDE_KEY`。目录中的 `api_key_env` 是环境变量名，不写入密钥；缺少必需密钥、非法地址或未声明工具能力会在启动时报错。`GET /api/models` 列出可选模型，创建聊天会话时提交 `{"model_id":"claude"}`，创建面试会话时在原请求体增加 `model_id`。不传时使用 `default`（上述环境变量配置）。会话创建后固定其模型，复练继承原面试模型。
+
+本地 MCP 服务器可通过 `MCP_SERVERS_PATH` 配置（当前支持 stdio 与 `2025-11-25` 握手协议）：
+
+```json
+{"local":{"command":["python","path/to/server.py"],"enabled_tools":["search"]}}
+```
+
+启动服务后，`GET /api/mcp/tools` 会真正连接服务器并发现白名单工具。`PUT /api/chat/sessions/{id}/tools` 或面试会话对应接口提交 `{"names":["mcp_local_search"]}`，由本机用户确认后该会话才能调用；`GET` 同路径查看授权，提交空列表撤销。只运行自己信任的本地 MCP 命令。MCP 工具的远端文本结果最多进入模型上下文 8000 字；超时、非法参数及服务器失败会记录工具错误，不暴露服务器内部响应。
+
+短期记忆来自本会话最近 16 条消息和聊天会话的固定备注。长期记忆仅在用户通过 `POST /api/memories` 提交 `{"content":"..."}` 时保存，不自动从对话提炼；`GET /api/memories?q=关键词` 检索，`DELETE /api/memories/{id}` 删除。聊天 Agent 可调用 `search_memories` 查找明确保存的记忆，面试 Agent 不读取聊天记忆。启用登录后长期记忆仍按账户数据库隔离。
+
+终端接入与 Web API 共用同一运行时和本地数据库：`python -m career_agent.cli chat`，输入 `/exit` 退出；`--model claude` 可选目录中的模型，`--session <ID>` 恢复已有聊天。`python -m career_agent.cli models` 列出模型；`memory list|add|delete` 管理长期记忆；`tools list|grant|revoke` 查看并按会话授权外部工具。CLI 的 `TextChannel` 接口由 `ConsoleChannel` 实际实现，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
+
+本地插件示例位于 `examples/echo_plugin.py` 和 `examples/plugins.json`。设置 `LOCAL_PLUGINS_PATH=./examples/plugins.json` 后启动服务，`GET /api/tools` 可发现 `plugin_echo_plugin_echo`；按上文的会话工具接口授权，再在聊天中请模型调用该工具。插件需要提供 `TOOLS` 列表，每项包括 `name`、`description`、`parameters`（JSON Schema 对象）和同步 `run(arguments)` 函数；插件代码在启动时执行，只配置自己信任的文件。插件与 MCP 使用相同的会话授权和参数校验入口。测试命令：`python -m unittest discover -s tests -q`。
+
 本地数据库默认位于 `data/career_agent.sqlite3`，可用 `DATA_DIR` 指定其他目录。启动时会为已有数据库自动增加运行认领字段，保留原会话；升级前可先下载业务数据快照。不要将密钥写入项目文件。
 
 恢复页面下载的业务数据时，先停止应用，再运行：
