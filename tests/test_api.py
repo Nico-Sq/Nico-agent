@@ -48,6 +48,18 @@ class InterviewApiTests(unittest.TestCase):
         page = self.client.get("/")
         self.assertNotIn("no-store", page.headers.get("cache-control", ""))
 
+    def test_web_ui_exposes_memory_candidate_review_and_read_only_tool_state(self):
+        page = self.client.get("/").text
+        script = self.client.get("/static/app.js").text
+        self.assertIn('id="settings-memory-candidates"', page)
+        self.assertIn('id="settings-memory-candidate-list"', page)
+        self.assertIn('id="settings-tool-list"', page)
+        self.assertIn("非只读工具当前不可授权", page)
+        self.assertIn("/memory-candidates?session_id=", script)
+        self.assertIn("/confirm`, { method: \"POST\" }", script)
+        self.assertIn("checkbox.disabled = !readOnly", script)
+        self.assertIn("candidate-content-", script)
+
     def test_session_selects_configured_model_and_rejects_unknown(self):
         path = Path(self.temp.name) / "models.json"
         path.write_text('[{"id":"local","provider":"openai_compatible","model":"test-model",'

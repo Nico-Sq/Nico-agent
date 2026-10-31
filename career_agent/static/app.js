@@ -581,6 +581,7 @@ async function performChatRun(id, path, body) {
     if (seq === state.chatSeq && state.kind === "chat" && state.ids.chat === id) {
       await selectSession(id);
       if (errorMessage) notice(errorMessage);
+      if ($("platform-settings").open) await loadMemoryCandidateSettings();
     }
   }
 }
@@ -894,19 +895,24 @@ async function loadToolSettings() {
     const [tools, grants] = await Promise.all([api("/tools"), api(`/${kind}/sessions/${id}/tools`)]);
     if (state.ids[state.kind] !== id || state.kind !== kind) return;
     if (!tools.length) box.textContent = "当前没有配置外部工具。";
-    for (const tool of tools) {
+    for (const [index, tool] of tools.entries()) {
+      const readOnly = tool.read_only === true;
       const label = document.createElement("label");
       label.className = "settings-row";
+      if (!readOnly) label.classList.add("is-disabled");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.value = tool.name;
-      checkbox.checked = grants.names.includes(tool.name);
+      checkbox.checked = readOnly && grants.names.includes(tool.name);
+      checkbox.disabled = !readOnly;
+      checkbox.setAttribute("aria-describedby", `settings-tool-status-${index}`);
       const content = document.createElement("span");
       content.className = "settings-row-content";
       const name = document.createElement("strong");
       name.textContent = tool.name;
       const description = document.createElement("small");
-      description.textContent = tool.description || "无描述";
+      description.id = `settings-tool-status-${index}`;
+      description.textContent = `${tool.description || "无描述"} · ${readOnly ? "只读，可授权" : "非只读，当前不可授权"}`;
       content.append(name, description);
       label.append(checkbox, content);
       box.append(label);
@@ -918,6 +924,155 @@ async function loadToolSettings() {
     settingsNotice(error.message);
   }
 }
+
+let memoryCandidateLoadSeq = 0;
+function setCandidateBusy(form, busy) {
+  form.querySelectorAll("button, textarea").forEach((control) => { control.disabled = busy; });
+  form.setAttribute("aria-busy", String(busy));
+}
+
+async function loadMemoryCandidateSettings() {
+  const box = $("settings-memory-candidate-list");
+  const sequence = ++memoryCandidateLoadSeq;
+  const kind = state.kind;
+  const chatId = state.ids.chat;
+  box.replaceChildren();
+  if (kind !== "chat") {
+    box.textContent = "切换到“新对话”后查看该会话的待确认记忆。";
+    return;
+  }
+  if (!chatId) {
+    box.textContent = "发送第一条聊天消息后，可在这里核对候选记忆。";
+    return;
+  }
+  const loading = document.createElement("p");
+  loading.className = "empty";
+  loading.textContent = "正在读取待确认记忆…";
+  box.append(loading);
+  try {
+    const candidates = await api(`/memory-candidates?session_id=${encodeURIComponent(chatId)}&status=pending`);
+    if (sequence !== memoryCandidateLoadSeq || state.kind !== kind || state.ids.chat !== chatId) return;
+    box.replaceChildren();
+    if (!candidates.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "当前聊天没有待确认记忆。请助手记住某个信息，或稍后再来核对。";
+      box.append(empty);
+      return;
+    }
+    for (const candidate of candidates) {
+      const form = document.createElement("form");
+      form.className = "candidate-card";
+      form.dataset.candidateId = candidate.id;
+      const label = document.createElement("label");
+      label.htmlFor = `candidate-content-${candidate.id}`;
+      label.textContent = "候选内容";
+      const editor = document.createElement("textarea");
+      editor.id = `candidate-content-${candidate.id}`;
+      editor.rows = 3;
+      editor.maxLength = 2000;
+      editor.required = true;
+      editor.value = candidate.content;
+      const sourceDetails = document.createElement("details");
+      sourceDetails.className = "candidate-sources";
+      const sourceSummary = document.createElement("summary");
+      sourceSummary.textContent = `查看来源消息（${candidate.sources.length} 条）`;
+      sourceDetails.append(sourceSummary);
+      for (const source of candidate.sources) {
+        const sourceRow = document.createElement("div");
+        sourceRow.className = "candidate-source";
+        const meta = document.createElement("small");
+        meta.textContent = `${source.role === "user" ? "用户" : "助手"} · 消息 ${source.id} · ${new Date(source.created_at).toLocaleString()}`;
+        const content = document.createElement("p");
+        content.textContent = source.content;
+        sourceRow.append(meta, content);
+        sourceDetails.append(sourceRow);
+      }
+      const errorBox = document.createElement("p");
+      errorBox.className = "candidate-error";
+      errorBox.setAttribute("role", "alert");
+      errorBox.hidden = true;
+      const actions = document.createElement("div");
+      actions.className = "candidate-actions";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary danger";
+      remove.textContent = "删除候选";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "secondary";
+      save.textContent = "保存修改";
+      const confirm = document.createElement("button");
+      confirm.type = "submit";
+      confirm.textContent = "确认写入长期记忆";
+      actions.append(remove, save, confirm);
+      form.append(label, editor, sourceDetails, errorBox, actions);
+
+      const showError = (message) => {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+      };
+      const currentContent = () => editor.value.trim();
+      save.onclick = async () => {
+        if (!currentContent()) { showError("候选内容不能为空。"); editor.focus(); return; }
+        errorBox.hidden = true;
+        setCandidateBusy(form, true);
+        try {
+          await api(`/memory-candidates/${candidate.id}`, {
+            method: "PUT", body: JSON.stringify({ content: currentContent() }),
+          });
+          settingsNotice("候选内容已保存，仍需确认后才会成为长期记忆。");
+          await loadMemoryCandidateSettings();
+        } catch (error) {
+          setCandidateBusy(form, false);
+          showError(error.message);
+        }
+      };
+      remove.onclick = async () => {
+        if (!window.confirm("删除这条待确认记忆？原始聊天消息不会删除。")) return;
+        errorBox.hidden = true;
+        setCandidateBusy(form, true);
+        try {
+          await api(`/memory-candidates/${candidate.id}`, { method: "DELETE" });
+          settingsNotice("候选记忆已删除。");
+          await loadMemoryCandidateSettings();
+        } catch (error) {
+          setCandidateBusy(form, false);
+          showError(error.message);
+        }
+      };
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (!currentContent()) { showError("候选内容不能为空。"); editor.focus(); return; }
+        errorBox.hidden = true;
+        setCandidateBusy(form, true);
+        try {
+          if (currentContent() !== candidate.content) {
+            await api(`/memory-candidates/${candidate.id}`, {
+              method: "PUT", body: JSON.stringify({ content: currentContent() }),
+            });
+          }
+          await api(`/memory-candidates/${candidate.id}/confirm`, { method: "POST" });
+          settingsNotice("候选已确认并写入长期记忆。");
+          await Promise.all([loadMemoryCandidateSettings(), loadMemorySettings()]);
+        } catch (error) {
+          setCandidateBusy(form, false);
+          showError(error.message);
+        }
+      };
+      box.append(form);
+    }
+  } catch (error) {
+    if (sequence !== memoryCandidateLoadSeq || state.kind !== kind || state.ids.chat !== chatId) return;
+    box.replaceChildren();
+    const failed = document.createElement("p");
+    failed.className = "empty";
+    failed.textContent = "候选记忆读取失败。";
+    box.append(failed);
+    settingsNotice(error.message);
+  }
+}
+
 async function loadMemorySettings() {
   const box = $("settings-memory-list");
   const query = $("memory-search").value.trim();
@@ -951,7 +1106,7 @@ $("open-settings").onclick = async () => {
   $("platform-settings").showModal();
   settingsNotice();
   renderModelSettings();
-  await Promise.allSettled([loadToolSettings(), loadMemorySettings()]);
+  await Promise.allSettled([loadToolSettings(), loadMemoryCandidateSettings(), loadMemorySettings()]);
 };
 $("close-settings").onclick = () => $("platform-settings").close();
 $("save-tool-grants").onclick = async () => {

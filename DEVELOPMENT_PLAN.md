@@ -1,6 +1,6 @@
 # Nico-agent 后续开发阶段任务文档
 
-> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–6 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
+> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–7 已完成本地自动化与本机页面验证，未验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
 
 ## 目标与边界
 
@@ -42,7 +42,7 @@ flowchart LR
 | 本地 Python 插件发现、参数校验、调用 | 已完成可信插件只读基础能力 | `career_agent/plugins.py`、`career_agent/runtime.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 只有 `read_only=true` 会提供并执行；超时明确标记后台线程可能仍在运行，插件仍不是沙箱 |
 | 短期上下文、固定备注、可回源记忆候选与确认后长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`、`career_agent/main.py`；`tests/test_core.py`、`tests/test_api.py`、`tests/test_auth.py` | 候选需用户确认；长期记忆仍为 `LIKE` 字面检索，没有自动确认或向量检索 |
 | CLI 聊天、面试闭环、候选记忆、模型与工具授权命令 | 已完成本机入口 | `career_agent/cli.py`、`career_agent/channels.py`；`tests/test_extensions.py` | 账户模式下仍拒绝直连数据库，需使用 Web API |
-| WebUI、登录、业务数据备份/恢复与文本材料提取 | 已有可用实现 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`career_agent/extract.py`；`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py`、`tests/test_restore.py` | 不作为公网部署方案 |
+| WebUI、登录、工具权限、候选记忆与数据备份/恢复 | 已接入当前后端能力 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`career_agent/extract.py`；`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py`、`tests/test_restore.py` | 仅本机使用；不作为公网部署方案 |
 | 通用聊天渠道边界 | 已完成本机契约；尚无第二平台适配 | `career_agent/channels.py`、`career_agent/cli.py`；`tests/test_extensions.py` | 已支持发送者/会话绑定、入站去重和同 delivery ID 重试；身份与幂等账本仅限运行进程 |
 | 自动写入未经确认的记忆、语义检索、远端 MCP、插件隔离、流式输出 | 尚未实现 | 现有入口见 `career_agent/context.py`、`career_agent/store.py`、`career_agent/mcp.py`、`career_agent/plugins.py`、`career_agent/provider.py`；这些文件没有对应执行路径 | 均不是当前阶段自动承诺的功能；按下方触发条件扩展 |
 
@@ -83,6 +83,9 @@ flowchart LR
 | nanobot：`E:/nanobot/nanobot/channels/base.py`、`channels/manager.py` | 渠道入站先校验发送者；发送实现抛错，由管理器统一重试 | **调整后采用**发送者/会话绑定、集中去重和稳定 delivery ID；当前只需单渠道进程，不复制多平台 manager 与配对码体系。 |
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/plugins/base.py`、`plugins/manager.py`、`dashboard_host.py` | 插件有显式加载/生命周期和关闭回调 | **调整后采用**“加载时验证、调用异常/超时稳定分类”的最小边界；当前可信单文件插件无需重载和 dashboard 生命周期框架。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/core/extensions/loader.ts`、`runner.ts` | 扩展注册、活动状态和工具声明有生命周期约束 | **调整后采用**加载后工具定义不可变的约束；完整扩展热重载、命令/UI 注册**不采用**，当前没有需求。 |
+| nanobot：`E:/nanobot/webui/src/components/settings/SettingsView.tsx`、`components/thread/ThreadShell.tsx` | 设置与聊天主界面分离，状态按可用/禁用/错误显示 | **调整后采用**在现有设置弹窗增加候选记忆区和明确禁用态；当前原生页面不引入 React/第三方组件体系。 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/frontend/chat/src/settings-app.tsx`、`settings.css` | 设置页提供明确分组、内联加载/错误状态和响应式布局 | **调整后采用**分组标题、折叠来源、就地错误和窄屏单列按钮；其 Material/主题体系不采用，项目继续保持黑白灰。 |
+| Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/modes/interactive/components/settings-selector.ts` | 设置项展示当前值并区分选择状态 | **调整后采用**权限与记忆状态的明确文字标签；TUI 交互模式不适用于当前 WebUI。 |
 
 ## 后续阶段（必须完成）
 
@@ -142,13 +145,14 @@ flowchart LR
 - **验证记录（2026-10-31）**：插件异常返回 `plugin_tool_failed`，超时返回 `plugin_timeout` 与 `may_still_be_running=true`；渠道路由拒绝未允许发送者，并阻止其他允许用户接管已绑定会话；同一消息 ID 只运行一次；投递失败后复用同一 delivery ID 重试且不重复运行模型。全套 132 个测试通过。
 - **依赖/风险**：依赖阶段 3 的写工具政策与阶段 5 的对话入口。**待决**：第二渠道选哪一种；若没有实际渠道需求，不提前实现平台适配。绑定与幂等状态仅保存在进程内，跨进程去重需平台消息账本或后续持久化；进程隔离只用于不可信插件。
 
-### 阶段 7：现有 WebUI 收尾
+### 阶段 7：现有 WebUI 收尾（已完成）
 
 - **具体功能**：在后端契约稳定后，把阶段 3–6 新增的权限确认、记忆核对、运行/投递状态接入现有页面；核查聊天与面试主要流程、窄屏和键盘操作。只改确实缺失的界面，不重做现有页面。
-- **预期改动**：`career_agent/static/index.html`、`app.js`、`style.css` 与必要的 `career_agent/main.py`；`tests/test_api.py`，另加针对新增交互的浏览器检查记录。
+- **实际改动**：`career_agent/static/index.html`、`app.js`、`style.css`；`tests/test_api.py`、`README.md`、项目定义。无需修改后端 API。
 - **对外结果**：本机浏览器可操作新增后端能力，并能看清错误、来源和授权状态。
 - **完成标准与必要测试**：新权限不被页面静默授予；摘要来源、确认/删除可见；失败可重试且不会重复提交；关键入口在窄屏和键盘下可用。建议 `python -m unittest tests.test_api -v`、全套测试和本机浏览器手工检查。
-- **依赖/风险**：依赖阶段 3、4 的对外契约；插件状态界面部分依赖阶段 6，实际第二渠道不阻塞 WebUI。不为尚未实现的渠道或模型选项画空 UI。前端修改时遵守项目 `AGENTS.md` 指定的两个界面 Skill 与黑白灰配色约束。
+- **验证记录（2026-10-31）**：平台设置可读取当前聊天候选、展开来源、编辑保存、确认入库并刷新长期记忆；非只读工具复选框禁用；确认和删除均有明确反馈。桌面和同源 375px iframe 实测无横向溢出，窄屏候选按钮改为单列。Impeccable detector 返回空列表，`node --check` 与全套 133 个测试通过。
+- **依赖/风险**：依赖阶段 3、4、6 的对外契约。实际第二渠道未选定，因此只展示“当前仅终端渠道”，未绘制不存在的渠道控制。前端保持既有黑白灰和原生 HTML/CSS/JavaScript 技术栈。
 
 ## 可后续扩展（有需求再立项）
 
@@ -165,7 +169,7 @@ flowchart LR
 - [x] 阶段 4：记忆候选可回源、可修改和确认，确认后进入长期记忆且保持账户/面试隔离。
 - [x] 阶段 5：CLI 聊天、面试完整闭环和候选记忆管理可用。
 - [x] 阶段 6：插件与渠道边界通过本地契约测试；第二文字入口等待明确目标。
-- [ ] 阶段 7：现有 WebUI 接入新增能力并完成本机检查。
+- [x] 阶段 7：现有 WebUI 接入工具权限与候选记忆并完成本机桌面/窄屏检查。
 
 ## 待用户决定
 
