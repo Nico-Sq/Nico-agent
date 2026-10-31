@@ -2,20 +2,25 @@
 
 import json
 
+from nico_contracts.messages import AgentMessage
+from nico_contracts.models import ModelReply
+from nico_contracts.tools import ToolDefinition
+
 PROTOCOL_VERSION = "2026-10-21"
 
 
-def request(model: str, messages: list[dict], tools: list[dict],
+def request(model: str, messages: list[AgentMessage], tools: list[ToolDefinition],
             max_tokens: int) -> tuple[str, dict, dict]:
     return "messages", {"anthropic-version": PROTOCOL_VERSION}, request_payload(
         model, messages, tools, max_tokens)
 
 
-def parse(data: dict) -> dict:
+def parse(data: dict) -> ModelReply:
     return parse_response(data)
 
 
-def request_payload(model: str, messages: list[dict], tools: list[dict], max_tokens: int) -> dict:
+def request_payload(model: str, messages: list[AgentMessage],
+                    tools: list[ToolDefinition], max_tokens: int) -> dict:
     system = "\n\n".join(message["content"] for message in messages if message["role"] == "system")
     converted = []
     for message in messages:
@@ -49,7 +54,7 @@ def request_payload(model: str, messages: list[dict], tools: list[dict], max_tok
     return payload
 
 
-def parse_response(data: dict) -> dict:
+def parse_response(data: dict) -> ModelReply:
     if not isinstance(data, dict) or not isinstance(data.get("content"), list):
         raise ValueError("invalid content")
     text = []

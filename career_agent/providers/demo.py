@@ -3,6 +3,10 @@
 import json
 import re
 
+from nico_contracts.messages import AgentMessage
+from nico_contracts.models import ModelReply
+from nico_contracts.tools import ToolDefinition
+
 QUESTIONS = (
     "请用两分钟介绍你自己，并说明你为什么申请这个岗位。",
     "挑选一个最能体现岗位能力的项目，说明你的具体职责和结果。",
@@ -10,7 +14,7 @@ QUESTIONS = (
 )
 
 
-def complete(messages: list[dict], tools: list[dict]) -> dict:
+def complete(messages: list[AgentMessage], tools: list[ToolDefinition]) -> ModelReply:
     system = messages[0]["content"]
     if "INTERVIEW_MODE" in system:
         count = int(system.split("QUESTION_COUNT=")[1].splitlines()[0])

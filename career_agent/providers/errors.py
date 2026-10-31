@@ -1,8 +1,5 @@
-﻿"""Stable model error codes shared by every adapter."""
+"""Compatibility import for the model error moved to ``nico_contracts``."""
 
+from nico_contracts.errors import ModelError
 
-class ModelError(Exception):
-    def __init__(self, code: str, message: str, status_code: int = 502):
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
+__all__ = ["ModelError"]

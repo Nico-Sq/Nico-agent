@@ -87,7 +87,7 @@ flowchart LR
 |---|---|---|---|
 | 聊天与面试双线、材料/经历确认、逐题反馈、报告与复练 | 已完成本机基础闭环 | `career_agent/main.py`、`career_agent/store.py`、`career_agent/runtime.py`、`tests/test_api.py`、`tests/test_core.py` | 真实模型效果未验收；业务规则仍分散在入口、Store 和 Runtime |
 | Agent 工具循环、取消、会话版本防迟到提交、上下文与调用限额 | 已完成基础能力，通用边界未建立 | `career_agent/runtime.py`、`career_agent/events.py`、`career_agent/context.py`、`tests/test_core.py`、`tests/test_provider.py` | Runtime 耦合面试协议；`_ACTIVE_RUNS` 仅进程内；同步插件线程不可可靠取消 |
-| OpenAI Chat Completions、OpenAI 兼容端点、Anthropic、demo 与会话模型选择 | 已完成本地协议适配；首个真实端点已选定 DeepSeek `deepseek-flash` | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`、`tests/test_provider.py`、`tests/test_model_contracts.py` | 真实端点调用尚未验收；非流式；HTTP 客户端尚未在长生命周期内复用 |
+| OpenAI Chat Completions、OpenAI 兼容端点、Anthropic、demo 与会话模型选择 | 已完成本地协议适配；本地真实端点验收路径已定，商业服务待选 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`、`tests/test_provider.py`、`tests/test_model_contracts.py` | 先用本地 OpenAI 兼容端点验证工具调用；商业端点尚未验收；非流式；HTTP 客户端尚未在长生命周期内复用 |
 | 内置只读工具、会话授权与只读并行 | 已完成当前只读安全闭环 | `career_agent/tools.py`、`career_agent/runtime.py`、`career_agent/store.py`、`tests/test_core.py` | 没有通用工具目录快照和独立权限策略包；写工具未开放 |
 | 本地 stdio MCP、白名单、连接复用、失败隔离 | 已完成只读基础能力 | `career_agent/mcp.py`、`career_agent/runtime.py`、`tests/test_mcp.py` | 仅 stdio；无远端 MCP；不确定副作用调用不重试的规则需继续由契约测试守住 |
 | 短期上下文、固定备注、可回源候选和确认后长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`、`career_agent/skills/chat.md`、`tests/test_core.py`、`tests/test_api.py` | 固定 16 条消息窗口；长期记忆为 SQLite 字面检索；无自动注入或自动确认 |
@@ -107,7 +107,7 @@ flowchart LR
 - HTTP 路由、状态码和错误码，包括聊天、面试、材料、经历、记忆、工具、备份和认证 API。
 - CLI 命令 `chat`、`models`、`memory`、`candidate`、`interview`、`tools` 及 `python -m career_agent`、`python -m career_agent.cli`、`python -m career_agent.restore`。
 - 现有公开导入路径，迁移期至少包括 `career_agent.main`、`career_agent.cli`、`career_agent.store`、`career_agent.runtime`、`career_agent.provider`、`career_agent.models` 及测试使用的其他符号。
-- `DATA_DIR` 显式指定时必须精确使用原目录；源码/editable 启动的默认 `data/` 目录保持不变，单用户库 `career_agent.sqlite3`、认证库 `auth.sqlite3`、账户业务库 `users/<用户ID>/career_agent.sqlite3` 的语义不变。独立 wheel 的默认目录由第 14 节待决，不能静默换库。
+- `DATA_DIR` 显式指定时必须精确使用原目录；源码/editable 启动的默认 `data/` 目录保持不变，单用户库 `career_agent.sqlite3`、认证库 `auth.sqlite3`、账户业务库 `users/<用户ID>/career_agent.sqlite3` 的语义不变。安装后的 wheel 在 Windows 默认使用 `%LOCALAPPDATA%\Nico-agent`；不能静默换库。
 - 会话、消息、材料、经历、候选记忆、运行事件等数据库 ID、创建时间、状态值和外键关系。
 - 账户隔离、登录限流、提交前数据快照、原子替换恢复、每日/最新自动备份。
 - 聊天与面试分离、面试不读取聊天消息或聊天记忆、只读外部工具默认策略。
@@ -126,7 +126,7 @@ flowchart LR
 8. **取消和渠道账本只在当前进程。** `career_agent/runtime.py` 的 `_ACTIVE_RUNS` 与 `career_agent/channels.py` 的 bindings/events 都是进程内存；多 worker 或重启后语义失效。
 9. **插件超时不等于副作用停止。** `career_agent/plugins.py` 通过 `asyncio.to_thread` 执行同步插件；超时只停止等待，线程可能继续。当前 README 和测试明确保留该语义。
 10. **会话搜索可能随数据量退化。** `career_agent/store.py` 的 `list_sessions` 对消息正文执行相关子查询式 `LIKE`/`instr`，且列表无分页；大数据量影响尚未测量。
-11. **DeepSeek 思考模式尚未完成协议回传。** 当前 `career_agent/runtime.py:189` 的 assistant 工具消息只保留 `role/content/tool_calls`；DeepSeek 官方接口在携带 `tools` 时要求后续请求完整回传 `reasoning_content`。因此选定端点若使用默认思考模式，当前工具循环会因缺少该字段而收到 400；阶段 4 必须在真实验收前显式关闭首验思考模式，或实现并测试 `reasoning_content` 回传。
+11. **部分兼容端点的思考模式需要额外协议字段。** 当前 `career_agent/runtime.py:189` 的 assistant 工具消息只保留 `role/content/tool_calls`。选择真实商业端点时，须先确认其带工具的后续请求要求；供应商字段留在适配器，不写入 Agent 循环。
 12. **包资源依赖文件位置。** `career_agent/context.py:11`、`career_agent/main.py` 末尾静态目录以及迁移前尚无的迁移文件都通过 `Path` 定位包内资源；迁移时需改为 `importlib.resources`，避免 wheel/zip 安装和工作目录差异。
 13. **发布单位单一且易漂移。** 根 `pyproject.toml` 显式列出包，`nico_agent.egg-info/SOURCES.txt` 已出现与当前文件树不一致的旧条目；该目录被忽略，但说明 editable 元数据不能作为发布完整性证据。
 
@@ -202,7 +202,7 @@ Nico-agent/
 
 | 发行包 / 导入包 | 职责 | 允许依赖的仓库内包 | 禁止事项 |
 |---|---|---|---|
-| `nico-contracts` / `nico_contracts` | 跨边界稳定协议和不可变 DTO：消息、工具调用/声明、模型响应、用量、运行事件、渠道消息、错误分类、取消标记 | 无 | 禁止导入任何其他仓库内包；禁止 FastAPI、SQLite、argparse 和厂商 SDK |
+| `nico-contracts` / `nico_contracts` | 跨边界稳定协议和数据类型：消息、工具调用/声明、模型响应、用量、运行事件、渠道消息、错误分类、取消标记 | 无 | 禁止导入任何其他仓库内包；禁止 FastAPI、SQLite、argparse 和厂商 SDK |
 | `nico-domain` / `nico_domain` | 求职领域值对象与规则：会话状态转换、面试题/证据规则、材料/经历确认、记忆候选规则 | 无 | 禁止框架、SQLite、文件系统、模型/平台 SDK；不得直接产生业务副作用 |
 | `nico-agent-core` / `nico_agent_core` | 通用 Agent 循环、上下文预算执行、工具批次、模型端口、运行事件、取消/终止 | `nico-contracts` | 禁止知道 chat/interview 数据结构；禁止导入 `nico-application`、适配器、存储或入口 |
 | `nico-application` / `nico_application` | 聊天、面试、材料、记忆、工具授权、渠道处理用例；定义仓储、UoW、工具、提示资源和运行端口 | `nico-contracts`、`nico-domain` | 禁止 FastAPI、argparse、SQLite、具体模型/MCP/渠道 SDK；禁止导入 core、适配器、存储、CLI、Web、App |
@@ -416,22 +416,7 @@ git status --short --branch
 - 保留可取消的请求；模型/工具结束原因、用量缺失和截断规则不得改变。
 - 引入可复用 HTTP transport 的时机由阶段 8 的基准触发；若本阶段实现，必须用并发与取消测试证明不改变语义。
 
-**首个真实端点配置（已决定）**：
-
-| 配置 | 值 |
-|---|---|
-| 服务 / 当前模型 | DeepSeek / `deepseek-flash` |
-| 协议 | OpenAI 兼容 Chat Completions；现有源码会请求 `{MODEL_API_BASE_URL}/chat/completions` |
-| `MODEL_PROVIDER` | `openai_compatible` |
-| `MODEL_API_BASE_URL` | `https://api.deepseek.com` |
-| `MODEL_NAME` | `deepseek-flash` |
-| `MODEL_MAX_OUTPUT_TOKENS` | `2048`（首验沿用当前默认值） |
-| 凭证 | 只由执行环境中本地 `MODEL_API_KEY` 提供，不进入仓库、文档、日志或测试夹具 |
-| 首验输出方式 | 非流式；流式不作为阶段 4 完成门槛 |
-
-首验必须覆盖普通文本回复和至少一轮真实工具调用。当前 `openai_compatible` 包只实现通用 Chat Completions 线协议，不能把 DeepSeek 的思考模式差异塞进 Agent 循环或 application。首验可在 `nico-adapters.models` 的可移除 DeepSeek profile 中显式发送 `{"thinking":{"type":"disabled"}}`；若以后启用思考模式，则必须在不泄漏 `reasoning_content` 到普通事件/日志的前提下完整回传该字段，并针对“带 tools 的后续请求”建立契约测试。DeepSeek 默认的思考模式不能作为首验成功假设。
-
-决策核对时间：2026-10-31。依据 DeepSeek 官方“Thinking Mode”“Tool Calls”和“Models & Pricing”页面；其文档写明 OpenAI 格式 Base URL 为 `https://api.deepseek.com`，当前首验模型名为 `deepseek-flash`，并说明带 `tools` 的思考模式必须回传 `reasoning_content`。
+**首个端点验收路径（已决定）**：先用本地、支持工具调用的 OpenAI 兼容 Chat Completions 端点，配置 `MODEL_PROVIDER=openai_compatible`、本地 `MODEL_API_BASE_URL` 和 `MODEL_NAME`，覆盖普通文本回复和至少一轮工具调用。Anthropic 作为第二协议验证。未指定商业服务时，真实商业端点是条件任务，不阻塞阶段 1；商业端点的凭证只由运行环境提供。若以后选择需要 Responses API 才能完成工具调用的 OpenAI GPT-6 系列模型，新增独立 `openai_responses` 适配器。
 
 **对外结果**：现有聊天/面试可用；模型配置和会话 model_id 行为不变；新增假模型适配器只需修改 adapter 注册与组合配置。
 
@@ -441,11 +426,11 @@ git status --short --branch
 - 截断输出不执行工具；取消关闭请求；迟到输出不提交；预算和稳定错误码不变。
 - 删除非默认模型适配器不会改变循环和业务用例源码。
 - `nico-agent-core`、`nico-adapters` 各自构建和安装验证通过。
-- 使用本地 `MODEL_API_KEY` 对 DeepSeek `deepseek-flash` 完成一次非流式普通回复和至少一轮工具调用；密钥、完整上游响应和思考内容不写入仓库或日志。自动测试继续使用假 HTTP 服务，不把联网与真实密钥设为 CI 前置条件。
+- 使用本地 OpenAI 兼容端点完成一次非流式普通回复和至少一轮工具调用；真实商业端点验收在选定服务与凭证后执行。自动测试继续使用假 HTTP 服务。
 
-**必要测试**：`tests/test_provider.py`、`tests/test_model_contracts.py`、`tests/test_core.py`；新增 core 假模型、适配器注册、无供应商分支、安装隔离测试，以及 DeepSeek profile 首验请求包含非思考开关的协议测试。若启用思考模式，再增加 `reasoning_content` 在带工具后续请求中完整回传的契约测试。
+**必要测试**：`tests/test_provider.py`、`tests/test_model_contracts.py`、`tests/test_core.py`；新增 core 假模型、适配器注册、无供应商分支、安装隔离测试及本地兼容端点的工具调用测试。若选定端点启用思考模式，再增加对应后续请求字段的契约测试。
 
-**兼容与风险**：模型目录格式、环境变量、请求参数上限和无用量语义保持。真实端点验收是阶段 4 的手动完成门禁；无本地密钥时应记录阻塞，不得以假服务通过宣称真实服务通过。DeepSeek 首验失败只调整适配器或配置，不得在 Agent 循环、聊天或面试用例中加入供应商分支。
+**兼容与风险**：模型目录格式、环境变量、请求参数上限和无用量语义保持。无可用本地兼容端点时记录未验收，不得以假服务通过宣称真实端点通过。端点差异只调整适配器或配置，不得在 Agent 循环、聊天或面试用例中加入供应商分支。
 
 ### 阶段 5：SQLite 存储边界、schema 版本与旧库迁移（必须）
 
@@ -717,7 +702,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [ ] 阶段 1：workspace、契约、依赖图和兼容护栏。
 - [ ] 阶段 2：聊天、材料、记忆 application 用例。
 - [ ] 阶段 3：面试 application 用例和结果校验。
-- [ ] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及 DeepSeek `deepseek-flash` 非流式普通回复和工具循环的真实验收。
+- [ ] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
 - [ ] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
 - [ ] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
 - [ ] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
@@ -738,15 +723,17 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 多进程/独立数据库服务 | 阶段 8 证明单进程 SQLite 成为实际瓶颈 | 共享租约、取消、渠道幂等和锁策略先通过测试 |
 | 公网部署 | 用户显式改变产品范围 | 独立安全、认证、运维和威胁模型评审 |
 
-## 14. 待用户决定
+## 14. 已锁定的产品与运行决策
 
-已决定：首个真实端点使用 DeepSeek 当前 `deepseek-flash`；首验为非流式，流式延后。以下问题仍需用户决定：
+以下决策用于解除阶段 1 和后续依赖中的歧义。它们不表示条件任务已经实现。
 
-1. **第二文字渠道**：目标平台、身份/授权规则、消息 ID 和投递确认能力。
-2. **写工具政策**：是否开放；采用逐次确认还是会话短时授权；首批允许清单。
-3. **默认数据位置**：独立 wheel 在没有 `DATA_DIR` 时应继续指向哪个仓库/用户目录；无论答案如何，显式 `DATA_DIR` 路径必须保持不变，禁止静默生成空库。
-4. **插件信任边界**：现有可信本地插件是否足够；出现哪类插件后要求进程隔离。
-5. **记忆检索升级门槛**：哪些查询失败率/用户规模触发 FTS、语义检索或自动候选生成。
+1. **首个真实模型端点**：先验收一个支持工具调用的本地 OpenAI 兼容 Chat Completions 端点，覆盖普通回复和至少一轮工具调用；Anthropic 为第二协议验证。未指定商业服务时，真实商业端点为条件任务，不阻塞阶段 1。若以后选择需要 Responses API 才能进行工具调用的 OpenAI GPT-6 系列模型，应新增独立 `openai_responses` 适配器，不把协议差异写入 Agent 循环或业务用例。
+2. **流式输出**：不是阶段 1 的完成门槛，也不阻塞后端闭环；阶段 4 必须保留可扩展的运行事件边界，真实端点和阶段 8 基准证明需要改善首段响应后再实现 Provider、SSE/WebSocket、取消和前端更新。流式最终只展示可公开的最终文本、工具进度和状态，不暴露隐藏推理。实现时参考 OpenAI 官方 Streaming API 文档。
+3. **第二文字渠道**：当前暂缓具体平台，Console 与 WebUI 继续作为渠道基线。若后续必须接入第一个外部文字平台，默认选择 Telegram Bot long polling，因为它不要求公网 webhook 且具备稳定消息 ID；若主要使用场景明确迁移到飞书或企业工作流，再单独改变该决策。任何平台都不得以接入为理由复制聊天业务用例。
+4. **写工具**：继续默认拒绝。首次开放时只允许一个明确白名单工具，并采用逐次确认；必须记录最终参数和结果，为有副作用的调用提供幂等键，远端结果不确定时不得自动重试。会话级宽泛写入授权不作为默认能力。
+5. **数据目录**：显式 `DATA_DIR` 永远优先且必须精确使用；源码/可信 editable 启动继续默认仓库 `data/`；安装后的 wheel 在 Windows 默认使用 `%LOCALAPPDATA%\Nico-agent`，其他平台使用 `$XDG_DATA_HOME/nico-agent` 或用户主目录下的 `.nico-agent`。不得静默搬迁旧库或生成空库替代旧数据；启动和 README 必须显示实际数据目录。
+6. **插件信任边界**：当前只加载用户逐一配置的可信本地插件，可信插件可以在应用进程内运行。来源不受信任、从网络下载或需要独立升级的插件必须迁移到独立子进程，带清单、权限声明、资源限制和可靠终止；在该隔离实现前不宣称插件是沙箱。
+7. **记忆检索升级**：当前保留 SQLite 字面检索，长期记忆上限仍为 200 条。阶段 8 在 50/200 条记忆及 10,000 条会话消息规模上测量；若检索 P95 超过 300 ms，或固定查询集 Top-10 召回明显不足，先升级 SQLite FTS5。只有标注查询集仍证明 FTS5 不足时再评估语义检索；自动候选生成仍要求用户明确触发并确认。
 
 ## 15. 可更新任务清单
 
@@ -755,7 +742,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 阶段 | 状态 | 提交 | 关键验证 | 未验证/遗留 |
 |---|---|---|---|---|
 | 0 现有本地能力基线 | 历史记录，当前需回归 | `40de88c` 之前 | 旧文档记录 133 测试；本次未复跑 | 当前提交、真实模型、浏览器 |
-| 1 workspace/契约/护栏 | 待做 | — | — | — |
+| 1 workspace/契约/护栏 | 已完成（2026-10-31） | 本阶段独立提交 | 136 项现有测试、4 项契约测试；依赖图无环；`python -m build --wheel packages/nico-contracts --outdir dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | 本地/商业真实模型调用按阶段 4 决策执行；未改变 Store 或数据库 schema |
 | 2 聊天/材料/记忆用例 | 待做 | — | — | — |
 | 3 面试用例/校验 | 待做 | — | — | — |
 | 4 Agent core/多模型 | 待做 | — | — | — |

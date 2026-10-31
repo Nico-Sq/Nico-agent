@@ -3,6 +3,8 @@ import json
 import time
 
 import jsonschema
+from nico_contracts.messages import AgentMessage
+from nico_contracts.tools import ToolDefinition
 
 from .context import (
     ContextBudgetError,
@@ -62,11 +64,11 @@ class AgentRuntime:
                 cancelled += 1
         return cancelled
 
-    def build_context(self, session: dict) -> list[dict]:
+    def build_context(self, session: dict) -> list[AgentMessage]:
         """Delegate prompt assembly to the context module."""
         return context_messages(self.store, session)
 
-    def _tools(self, kind: str) -> list[dict]:
+    def _tools(self, kind: str) -> list[ToolDefinition]:
         return list(schemas(kind))
 
     def _concurrency_safe(self, call: dict, external: dict[str, dict]) -> bool:
@@ -130,7 +132,7 @@ class AgentRuntime:
     def _execute_tool_sync(self, session: dict, call: dict) -> dict:
         return run_internal(self.store, session, call)
 
-    async def _model_loop(self, session: dict, messages: list[dict], tool_names: list[str],
+    async def _model_loop(self, session: dict, messages: list[AgentMessage], tool_names: list[str],
                           usage: Usage) -> str:
         tools = self._tools(session["kind"])
         external = {}

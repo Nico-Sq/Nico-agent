@@ -4,42 +4,11 @@ import asyncio
 import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Protocol
+
+from nico_contracts.channels import ChannelResult, TextChannel, TextMessage
+from nico_contracts.errors import ChannelAccessError, ChannelDeliveryError
 
 from .store import Store
-
-
-@dataclass(frozen=True)
-class TextMessage:
-    sender_id: str
-    conversation_id: str
-    message_id: str
-    text: str
-
-
-class TextChannel(Protocol):
-    async def receive(self) -> TextMessage | None: ...
-    async def send(self, conversation_id: str, text: str, delivery_id: str) -> None: ...
-
-
-class ChannelAccessError(ValueError):
-    pass
-
-
-class ChannelDeliveryError(RuntimeError):
-    def __init__(self, message_id: str, delivery_id: str):
-        super().__init__("渠道投递失败，可以使用同一消息 ID 重试")
-        self.message_id = message_id
-        self.delivery_id = delivery_id
-
-
-@dataclass(frozen=True)
-class ChannelResult:
-    session_id: str
-    response: str
-    duplicate: bool = False
-    delivered: bool = True
 
 
 class ChannelRouter:

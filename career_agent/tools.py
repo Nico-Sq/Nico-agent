@@ -8,6 +8,8 @@ import hashlib
 import json
 
 import jsonschema
+from nico_contracts.messages import AgentMessage
+from nico_contracts.tools import ToolDefinition
 
 MAX_EXTERNAL_TOOL_NAME_LENGTH = 64
 
@@ -77,12 +79,12 @@ def resolve_external_tool_name(base: str, identity: str, force_hash: bool = Fals
     return f"{base[:MAX_EXTERNAL_TOOL_NAME_LENGTH - len(suffix) - 1]}_{suffix}"
 
 
-def schemas(kind: str) -> list[dict]:
+def schemas(kind: str) -> list[ToolDefinition]:
     """Return the tool schemas offered to one session kind."""
     return CHAT_TOOLS if kind == "chat" else INTERVIEW_TOOLS
 
 
-def tool_message(request: dict, result: dict) -> dict:
+def tool_message(request: dict, result: dict) -> AgentMessage:
     """Wrap a tool result as the message every provider adapter understands."""
     return {"role": "tool", "tool_call_id": request["id"],
             "content": json.dumps(result, ensure_ascii=False)}

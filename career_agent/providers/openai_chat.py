@@ -1,7 +1,11 @@
 ﻿"""OpenAI Chat Completions, shared by `openai` and `openai_compatible`."""
 
+from nico_contracts.messages import AgentMessage
+from nico_contracts.models import ModelReply
+from nico_contracts.tools import ToolDefinition
 
-def request(model: str, messages: list[dict], tools: list[dict],
+
+def request(model: str, messages: list[AgentMessage], tools: list[ToolDefinition],
             max_tokens: int) -> tuple[str, dict, dict]:
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
     if tools:
@@ -9,7 +13,7 @@ def request(model: str, messages: list[dict], tools: list[dict],
     return "chat/completions", {}, payload
 
 
-def parse(data: dict) -> dict:
+def parse(data: dict) -> ModelReply:
     choice = data["choices"][0]
     message = choice["message"]
     if not isinstance(message, dict):

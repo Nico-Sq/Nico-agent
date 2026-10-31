@@ -8,6 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from nico_contracts.messages import AgentMessage
+
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 MAX_CONTEXT_CHARS = 32_000
 # 修改系统提示拼接规则时同步递增此版本。
@@ -49,12 +51,12 @@ def _fit(blocks: list[tuple[bool, str, dict]], messages: list[dict]) -> tuple[li
         dropped.append(blocks.pop(index)[1])
 
 
-def build_context(store, session: dict) -> list[dict]:
+def build_context(store, session: dict) -> list[AgentMessage]:
     """Return only the messages, for callers that do not record trimming."""
     return assemble(store, session)[0]
 
 
-def assemble(store, session: dict) -> tuple[list[dict], list[str]]:
+def assemble(store, session: dict) -> tuple[list[AgentMessage], list[str]]:
     """Build the message list plus the optional blocks that had to be dropped."""
     kind = session["kind"]
     system = skill_file(kind).read_text(encoding="utf-8")

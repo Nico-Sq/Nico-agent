@@ -7,6 +7,7 @@
 需要 Python 3.11+。在此目录执行：
 
 ```powershell
+python -m pip install -e packages/nico-contracts
 python -m pip install -e .
 python -m career_agent
 ```
@@ -85,7 +86,9 @@ python -m career_agent.restore .\nico-agent-backup.sqlite3
 ## 开发验证
 
 ```powershell
+python -m unittest discover -s packages/nico-contracts/tests -v
 python -m unittest discover -s tests -v
+python scripts/check_dependency_graph.py
 ```
 
 GitHub Actions 会在 Python 3.11 和 3.13 上运行同一套测试；真实模型的回答质量仍需在配置好兼容端点后用真实场景评估。

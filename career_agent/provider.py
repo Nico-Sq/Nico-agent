@@ -3,6 +3,10 @@
 import os
 from urllib.parse import urlsplit
 
+from nico_contracts.messages import AgentMessage
+from nico_contracts.models import ModelReply
+from nico_contracts.tools import ToolDefinition
+
 from .providers import ADAPTERS, ModelError, demo, transport
 
 DEFAULT_MAX_OUTPUT_TOKENS = 2048
@@ -52,7 +56,8 @@ class Provider:
             return "MODEL_API_BASE_URL 必须是 http:// 或 https:// 地址"
         return None
 
-    async def complete(self, messages: list[dict], tools: list[dict]) -> dict:
+    async def complete(self, messages: list[AgentMessage],
+                       tools: list[ToolDefinition]) -> ModelReply:
         config_error = self.configuration_error()
         if config_error:
             raise ModelError("model_config_invalid", config_error)
