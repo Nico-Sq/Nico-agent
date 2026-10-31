@@ -1,20 +1,43 @@
-const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, selectionSeq: 0, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
 let sessionSearchTimer;
 
 function showAuth() {
   clearTimeout(sessionSearchTimer);
+  state.selectionSeq++;
   $("shell").hidden = true;
   $("auth-panel").hidden = false;
   for (const kind of ["chat", "interview"]) state.pending[kind]?.controller.abort();
+  state.pending = { chat: null, interview: null };
+  state.chatSeq++;
+  state.interviewSeq++;
+  setBusy("chat", false);
+  setBusy("interview", false);
   state.ids = { chat: null, interview: null };
   state.sessionLists = { chat: [], interview: [] };
   state.sessionQueries = { chat: "", interview: "" };
   state.sessionSearchSeq.chat++;
   state.sessionSearchSeq.interview++;
   state.username = null;
+  for (const id of ["chat-form", "answer-form", "material-form", "claim-form", "interview-setup", "chat-memory-form"]) $(id).reset();
+  if ($("resource-editor").open) $("resource-editor").close();
+  $("chat-resource").replaceChildren(new Option("选择要讨论的内容", ""));
+  $("material-list").replaceChildren();
+  $("claim-list").replaceChildren();
+  $("claim-source").replaceChildren(new Option("无关联材料", ""));
+  renderSelectedResources(null);
   $("session-search").value = "";
+  $("session-count").textContent = "";
+  $("workspace-title").textContent = "新对话";
+  $("chat-notes").hidden = true;
+  $("chat-notes").open = false;
+  $("chat-export").hidden = true;
+  $("chat-retry").hidden = true;
+  $("chat-interrupt").hidden = true;
+  $("rename-session").hidden = true;
+  $("delete-session").hidden = true;
+  notice();
   $("session-title-form").hidden = true;
   setHistoryOpen(false);
   $("sessions").replaceChildren();
@@ -63,7 +86,9 @@ function setBusy(kind, value) {
   });
 }
 async function loadChatResources() {
+  const sequence = state.selectionSeq;
   const [materials, sessions] = await Promise.all([api("/materials"), api("/interview/sessions")]);
+  if (sequence !== state.selectionSeq || state.kind !== "chat") return;
   const select = $("chat-resource");
   select.replaceChildren(new Option("选择要讨论的内容", ""));
   for (const material of materials) {
@@ -231,7 +256,9 @@ function openResourceEditor(kind, resource) {
 }
 
 async function loadPreparation() {
+  const sequence = state.selectionSeq;
   const [materials, claims] = await Promise.all([api("/materials"), api("/claims")]);
+  if (sequence !== state.selectionSeq || state.kind !== "interview") return;
   const materialBox = $("material-list");
   const claimBox = $("claim-list");
   const selectedMaterials = new Set([...materialBox.querySelectorAll("input:checked")].map((item) => item.value));
@@ -426,17 +453,21 @@ function renderSessionList() {
 }
 
 async function selectSession(id) {
-  state.ids[state.kind] = id;
+  const kind = state.kind;
+  const sequence = ++state.selectionSeq;
+  state.ids[kind] = id;
   $("session-title-form").hidden = true;
   $("session-title-error").hidden = true;
   $("rename-session").hidden = !id;
   $("delete-session").hidden = !id;
-  if (id) localStorage.setItem(sessionKey(state.kind), id);
-  else localStorage.removeItem(sessionKey(state.kind));
-  const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
-  $("workspace-title").textContent = view?.session.title || (state.kind === "chat" ? "新对话" : "AI 面试");
-  $("workspace-subtitle").textContent = state.kind === "chat" ? "聊聊岗位、经历或下一步准备" : "每次聚焦一题，保留完整练习记录";
-  if (state.kind === "chat") {
+  if (id) localStorage.setItem(sessionKey(kind), id);
+  else localStorage.removeItem(sessionKey(kind));
+  const view = id ? await api(`/${kind}/sessions/${id}`) : null;
+  const current = () => sequence === state.selectionSeq && state.kind === kind && state.ids[kind] === id;
+  if (!current()) return;
+  $("workspace-title").textContent = view?.session.title || (kind === "chat" ? "新对话" : "AI 面试");
+  $("workspace-subtitle").textContent = kind === "chat" ? "聊聊岗位、经历或下一步准备" : "每次聚焦一题，保留完整练习记录";
+  if (kind === "chat") {
     $("chat-export").hidden = !view;
     if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
     $("chat-notes").hidden = !view;
@@ -446,22 +477,26 @@ async function selectSession(id) {
     $("chat-retry").disabled = !state.modelReady;
     $("chat-interrupt").hidden = !view || view.session.status !== "running";
   }
-  renderMessages(state.kind, view?.messages || []);
-  renderRunHistory(state.kind, view?.events || [], Boolean(view));
-  if (state.kind === "interview") {
+  renderMessages(kind, view?.messages || []);
+  renderRunHistory(kind, view?.events || [], Boolean(view));
+  if (kind === "interview") {
     renderInterviewState(view?.session);
     renderSelectedResources(view?.resources);
-    renderReport(["finished", "cancelled"].includes(view?.session.status) ? await api(`/interview/sessions/${id}/report`) : null);
+    const report = ["finished", "cancelled"].includes(view?.session.status) ? await api(`/interview/sessions/${id}/report`) : null;
+    if (!current()) return;
+    renderReport(report);
     if (!view) await loadPreparation();
   }
+  if (!current()) return;
   await loadSessions();
-  notice();
+  if (current()) notice();
 }
 
 async function switchKind(kind, fresh = false) {
   clearTimeout(sessionSearchTimer);
   state.kind = kind;
   const previousId = state.ids[kind];
+  const id = fresh ? null : previousId;
   $("session-search").value = state.sessionQueries[kind];
   setHistoryOpen(false);
   $("history-heading").textContent = kind === "chat" ? "历史对话" : "历史面试";
@@ -472,14 +507,14 @@ async function switchKind(kind, fresh = false) {
   else { $("tab-interview").setAttribute("aria-current", "page"); $("tab-chat").removeAttribute("aria-current"); }
   $("chat-panel").hidden = kind !== "chat";
   $("interview-panel").hidden = kind !== "interview";
-  try { await selectSession(fresh ? null : state.ids[kind]); }
+  try { await selectSession(id); }
   catch (error) {
-    if (!$("auth-panel").hidden) return;
+    if (!$("auth-panel").hidden || state.kind !== kind || state.ids[kind] !== id) return;
     state.ids[kind] = null;
     await selectSession(null);
     notice(previousId && error.message === "会话不存在" ? "上次的会话已不存在，已打开新建界面。" : error.message);
   }
-  if (kind === "chat" && !$("shell").hidden) {
+  if (kind === "chat" && state.kind === kind && !$("shell").hidden) {
     try { await loadChatResources(); }
     catch (error) { notice(error.message); }
   }
