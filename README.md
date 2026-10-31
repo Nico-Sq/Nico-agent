@@ -50,7 +50,19 @@ python -m career_agent
 
 短期记忆来自本会话最近 16 条消息和聊天会话的固定备注。超过窗口且值得保留的信息可由聊天 Agent 在用户明确要求记住时通过 `propose_memory` 生成候选，也可通过 `POST /api/chat/sessions/{id}/memory-candidates` 手动创建；候选带有原始消息 ID，可用 `GET /api/memory-candidates` 查看、`PUT /api/memory-candidates/{id}` 修改、`DELETE` 删除，并只能用 `POST /api/memory-candidates/{id}/confirm` 在用户确认后写入长期记忆。候选不会进入模型上下文，也不等于已保存事实。确认后仍可通过 `GET /api/memories?q=关键词` 查找和 `DELETE /api/memories/{id}` 删除。长期记忆和候选保存前会折叠连续空白；内容完全相同时不新增副本。每个账户最多保存 200 条长期记忆和 200 条待确认候选，超出后返回 422 并提示先处理；`python -m career_agent.cli memory add` 遇到重复会输出已有 ID 并注明“已存在”。聊天 Agent 可调用 `search_memories` 查找已确认记忆，面试 Agent 不读取聊天候选或记忆。启用登录后两者仍按账户数据库隔离。
 
-终端接入与 Web API 共用同一运行时和本地数据库：`python -m career_agent.cli chat`，输入 `/exit` 退出；`--model claude` 可选目录中的模型，`--session <ID>` 恢复已有聊天。`python -m career_agent.cli models` 列出模型；`memory list|add|delete` 管理长期记忆；`tools list|grant|revoke` 查看并按会话授权外部工具。CLI 的 `TextChannel` 接口与 `ConsoleChannel` 实现位于 `career_agent/channels.py`，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
+终端接入与 Web API 共用同一运行时和本地数据库。聊天输入 `/retry` 会重试最后一条未回复消息，`/exit` 退出；`--model` 选择模型，`--session` 恢复会话。面试可逐条执行以下命令：
+
+```powershell
+python -m career_agent.cli interview create "后端开发" --questions 3
+python -m career_agent.cli interview start <SESSION_ID>
+python -m career_agent.cli interview answer <SESSION_ID> "回答内容"
+python -m career_agent.cli interview skip <SESSION_ID> <题号>
+python -m career_agent.cli interview pause|resume|cancel <SESSION_ID>
+python -m career_agent.cli interview report <SESSION_ID>
+python -m career_agent.cli interview practice <SESSION_ID> <题号>
+```
+
+`candidate list|show|create|edit|confirm|delete` 管理记忆候选；`memory list|add|delete` 管理已确认长期记忆；`tools list|grant|revoke` 查看并按聊天或面试会话授权只读外部工具，授权时可指定 `--kind interview`。命令输出包含会话 ID、状态、模型和工具授权，模型错误使用稳定错误码。CLI 的 `TextChannel` 接口与 `ConsoleChannel` 实现位于 `career_agent/channels.py`，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
 
 本地插件示例位于 `examples/echo_plugin.py` 和 `examples/plugins.json`。设置 `LOCAL_PLUGINS_PATH=./examples/plugins.json` 后启动服务，`GET /api/tools` 可发现 `plugin_echo_plugin_echo`；按上文的会话工具接口授权，再在聊天中请模型调用该工具。插件需要提供 `TOOLS` 列表，每项包括 `name`、`description`、`parameters`（JSON Schema 对象）、可选的 `read_only` 和同步 `run(arguments)` 函数；插件代码在启动时执行，只配置自己信任的文件。插件与 MCP 使用相同的会话授权、非只读拒绝和参数校验入口。只有 `read_only` 为 true 的工具（MCP 工具由服务端的 `readOnlyHint` 标注）会提供给模型；连续只读调用可并行，其他调用按出现顺序单独串行执行。内置读取工具均为只读。测试命令：`python -m unittest discover -s tests -q`。
 

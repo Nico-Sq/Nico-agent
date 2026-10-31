@@ -1,14 +1,28 @@
 import asyncio
+import argparse
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from career_agent.channels import ConsoleChannel
-from career_agent.cli import run_channel
+from career_agent.cli import (
+    build_parser,
+    cli_error_text,
+    main as cli_main,
+    run_channel,
+    run_interview_action,
+    run_memory_candidate_action,
+    session_banner,
+)
 from career_agent.events import Usage
+from career_agent.mcp import MCPServers
+from career_agent.models import ModelCatalog
 from career_agent.plugins import LocalPlugins
+from career_agent.providers import ModelError
 from career_agent.runtime import AgentRuntime
 from career_agent.store import Store
 from career_agent.tools import READ_ONLY_TOOLS, schemas
@@ -154,3 +168,135 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         session_id = asyncio.run(run_channel(channel, self.store))
         self.assertIn("演示模式已收到：你好", channel.outputs[-1])
         self.assertEqual(len(self.store.messages(session_id, "chat")), 2)
+
+    def test_cli_channel_retry_reuses_unanswered_message(self):
+        class Channel:
+            def __init__(self):
+                self.inputs = iter(["/retry", None])
+                self.outputs = []
+
+            async def receive(self):
+                return next(self.inputs)
+
+            async def send(self, text):
+                self.outputs.append(text)
+
+        chat = self.store.create("chat")
+        pending = self.store.claim_run(chat["id"], "chat", "active", "只保存一次")
+        self.store.fail_run(chat["id"], pending["version"], "chat", "model_unavailable")
+        channel = Channel()
+        session_id = asyncio.run(run_channel(channel, self.store, session_id=chat["id"]))
+        self.assertEqual(session_id, chat["id"])
+        messages = self.store.messages(chat["id"], "chat")
+        self.assertEqual([item["role"] for item in messages], ["user", "assistant"])
+        self.assertEqual(messages[0]["content"], "只保存一次")
+
+    def test_cli_interview_flow_reuses_store_and_runtime(self):
+        catalog = ModelCatalog()
+        mcp = MCPServers()
+        plugins = LocalPlugins()
+
+        async def scenario():
+            created = await run_interview_action(argparse.Namespace(
+                action="create", goal="后端开发", questions=1, model="default",
+                material=[], claim=[],
+            ), self.store, catalog, mcp, plugins)
+            interview = created["session"]
+            with self.assertRaisesRegex(ValueError, "无法跳过"):
+                await run_interview_action(argparse.Namespace(
+                    action="skip", session_id=interview["id"], question_number=1,
+                ), self.store, catalog, mcp, plugins)
+            self.assertEqual(self.store.get(interview["id"], "interview")["status"], "new")
+
+            started = await run_interview_action(argparse.Namespace(
+                action="start", session_id=interview["id"],
+            ), self.store, catalog, mcp, plugins)
+            self.assertIn("第 1 题", started["message"])
+            answered = await run_interview_action(argparse.Namespace(
+                action="answer", session_id=interview["id"], text="我负责后端接口优化",
+            ), self.store, catalog, mcp, plugins)
+            self.assertEqual(answered["session"]["status"], "finished")
+            report = await run_interview_action(argparse.Namespace(
+                action="report", session_id=interview["id"],
+            ), self.store, catalog, mcp, plugins)
+            self.assertEqual(report["report"]["status"], "finished")
+
+            practice = await run_interview_action(argparse.Namespace(
+                action="practice", session_id=interview["id"], question_number=1,
+            ), self.store, catalog, mcp, plugins)
+            practice_id = practice["session"]["id"]
+            paused = await run_interview_action(argparse.Namespace(
+                action="pause", session_id=practice_id,
+            ), self.store, catalog, mcp, plugins)
+            self.assertEqual(paused["session"]["status"], "paused")
+            resumed = await run_interview_action(argparse.Namespace(
+                action="resume", session_id=practice_id,
+            ), self.store, catalog, mcp, plugins)
+            self.assertEqual(resumed["session"]["status"], "awaiting_answer")
+            cancelled = await run_interview_action(argparse.Namespace(
+                action="cancel", session_id=practice_id,
+            ), self.store, catalog, mcp, plugins)
+            self.assertEqual(cancelled["session"]["status"], "cancelled")
+            return interview
+
+        interview = asyncio.run(scenario())
+        self.assertIn("模型 default", session_banner(self.store, interview))
+        self.assertIn("model_invalid_output", cli_error_text(
+            ModelError("model_invalid_output", "bad")
+        ))
+
+    def test_cli_memory_candidate_actions(self):
+        chat = self.store.create("chat")
+        self.store.claim_run(chat["id"], "chat", "active", "我偏好后端")
+        message_id = self.store.messages(chat["id"], "chat")[0]["id"]
+        created = run_memory_candidate_action(argparse.Namespace(
+            action="create", session_id=chat["id"], content="偏好后端", source=[message_id],
+        ), self.store)["candidate"]
+        edited = run_memory_candidate_action(argparse.Namespace(
+            action="edit", candidate_id=created["id"], content="长期偏好后端",
+        ), self.store)["candidate"]
+        self.assertEqual(edited["content"], "长期偏好后端")
+        confirmed = run_memory_candidate_action(argparse.Namespace(
+            action="confirm", candidate_id=created["id"],
+        ), self.store)["candidate"]
+        self.assertEqual(confirmed["status"], "confirmed")
+        listed = run_memory_candidate_action(argparse.Namespace(
+            action="list", session_id=chat["id"], status="confirmed",
+        ), self.store)["candidates"]
+        self.assertEqual([item["id"] for item in listed], [created["id"]])
+        with self.assertRaisesRegex(ValueError, "不能删除"):
+            run_memory_candidate_action(argparse.Namespace(
+                action="delete", candidate_id=created["id"],
+            ), self.store)
+
+    def test_cli_parser_exposes_interview_and_candidate_workflows(self):
+        parser = build_parser()
+        interview = parser.parse_args([
+            "interview", "create", "后端开发", "--questions", "2",
+            "--material", "m1", "--claim", "c1",
+        ])
+        self.assertEqual((interview.action, interview.questions), ("create", 2))
+        self.assertEqual(interview.material, ["m1"])
+        self.assertEqual(interview.claim, ["c1"])
+        answer = parser.parse_args(["interview", "answer", "session-1", "回答内容"])
+        self.assertEqual(answer.text, "回答内容")
+        candidate = parser.parse_args([
+            "candidate", "create", "chat-1", "偏好后端", "--source", "7",
+        ])
+        self.assertEqual(candidate.candidate_action, "create")
+        self.assertEqual(candidate.source, [7])
+
+    def test_cli_main_creates_interview_in_selected_data_dir(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent / ".tmp") as directory:
+            environment = {
+                "DATA_DIR": directory,
+                "AUTH_REQUIRED": "false",
+                "MODEL_PROVIDER": "demo",
+            }
+            with patch.dict(os.environ, environment), patch.object(sys, "argv", [
+                "nico-agent", "interview", "create", "后端开发", "--questions", "1",
+            ]), patch("builtins.print"):
+                cli_main()
+            sessions = Store(Path(directory) / "career_agent.sqlite3").list_sessions("interview")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["status"], "new")
