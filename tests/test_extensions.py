@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from career_agent.cli import run_channel
+from career_agent.events import Usage
 from career_agent.plugins import LocalPlugins
 from career_agent.runtime import AgentRuntime
 from career_agent.store import Store
@@ -65,6 +66,20 @@ class ExtensionTests(unittest.TestCase):
         serial = asyncio.run(runtime._execute_tools(None, [read, write, read], external))
         self.assertEqual(state["peak"], 1)
         self.assertEqual([item["tool_call_id"] for item in serial], ["a", "b", "a"])
+
+    def test_usage_accounting_ignores_malformed_reports(self):
+        usage = Usage()
+        usage.request_count = 1
+        usage.add(None)
+        usage.add({"total_tokens": True, "prompt_tokens": -1})
+        self.assertEqual((usage.total_tokens, usage.coverage()), (0, "unavailable"))
+        usage.add({"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7})
+        self.assertEqual(usage.as_dict(), {"request_count": 1, "covered_requests": 1,
+                                          "prompt_tokens": 5, "completion_tokens": 2,
+                                          "total_tokens": 7})
+        self.assertEqual(usage.coverage(), "exact")
+        usage.request_count = 2
+        self.assertEqual(usage.coverage(), "partial")
 
     def test_builtin_tool_schemas_are_shared_and_read_only(self):
         chat = [item["function"]["name"] for item in schemas("chat")]

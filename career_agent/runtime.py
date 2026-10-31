@@ -5,6 +5,7 @@ import time
 import jsonschema
 
 from .context import build_context as assemble_context, prompt_version as prompt_fingerprint
+from .events import Usage, run_event
 from .mcp import MCPServers
 from .plugins import LocalPlugins
 from .provider import Provider
@@ -16,7 +17,6 @@ from .tools import READ_ONLY_TOOLS, call as run_internal, record, schemas, tool_
 MAX_MODEL_INPUT_CHARS = 64_000
 MAX_TOOL_CALLS = 8
 MAX_RUN_SECONDS = 120
-MAX_RUN_TOKENS = 16_000
 MAX_MODEL_OUTPUT_CHARS = 12_000
 
 
@@ -90,7 +90,8 @@ class AgentRuntime:
     def _execute_tool_sync(self, session: dict, call: dict) -> dict:
         return run_internal(self.store, session, call)
 
-    async def _model_loop(self, session: dict, messages: list[dict], tool_names: list[str], usage: dict) -> str:
+    async def _model_loop(self, session: dict, messages: list[dict], tool_names: list[str],
+                          usage: Usage) -> str:
         tools = self._tools(session["kind"])
         external = {}
         grants = set(self.store.tool_grants(session["id"]))
@@ -113,16 +114,9 @@ class AgentRuntime:
         for _ in range(4):
             if not self.store.run_current(session["id"], session["version"]):
                 raise RunSuperseded()
-            usage["request_count"] += 1
+            usage.request_count += 1
             reply = await self.provider.complete(messages, tools)
-            reported = reply.get("usage")
-            if isinstance(reported, dict):
-                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                    value = reported.get(key)
-                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                        usage[key] += value
-                        if key == "total_tokens":
-                            usage["covered_requests"] += 1
+            usage.add(reply.get("usage"))
             if not self.store.run_current(session["id"], session["version"]):
                 raise RunSuperseded()
             finish_reason = reply.get("finish_reason")
@@ -145,7 +139,7 @@ class AgentRuntime:
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("模型未返回有效内容")
                 return content.strip()
-            if usage["total_tokens"] >= MAX_RUN_TOKENS:
+            if usage.exceeded:
                 raise ModelError("run_token_limit", "本次模型运行已达到用量上限")
             if len(tool_names) + len(calls) > MAX_TOOL_CALLS:
                 raise ValueError("本次运行的工具调用超过上限")
@@ -168,8 +162,7 @@ class AgentRuntime:
         outcome = "failed"
         context_chars = 0
         tool_names = []
-        usage = {"request_count": 0, "covered_requests": 0,
-                 "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage = Usage()
         prompt_version = ""
         error_code = None
         try:
@@ -271,15 +264,11 @@ class AgentRuntime:
             self.store.fail_run(session["id"], session["version"], kind, error_code)
             raise
         finally:
-            self.store.event(session["id"], "model_run", {
-                "version": session["version"], "status": outcome,
-                "error_code": error_code,
-                "provider": getattr(self.provider, "mode", "custom"),
-                "model": getattr(self.provider, "model", ""),
-                "prompt_version": prompt_version,
-                "context_chars": context_chars, "tool_names": tool_names,
-                "usage": usage,
-                "usage_coverage": ("exact" if usage["request_count"] and usage["covered_requests"] == usage["request_count"]
-                                   else "partial" if usage["covered_requests"] else "unavailable"),
-                "elapsed_ms": round((time.perf_counter() - started) * 1000),
-            })
+            self.store.event(session["id"], "model_run", run_event(
+                version=session["version"], status=outcome, error_code=error_code,
+                provider=getattr(self.provider, "mode", "custom"),
+                model=getattr(self.provider, "model", ""),
+                prompt_version=prompt_version, context_chars=context_chars,
+                tool_names=tool_names, usage=usage,
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+            ))
