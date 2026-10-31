@@ -156,7 +156,7 @@ flowchart LR
 
 ## 下一阶段：可维护架构与升级能力（待实施）
 
-按 [架构演进方案](docs/ARCHITECTURE_EVOLUTION.md) 的 A→B→C→D 顺序实施。首先提取应用服务，让 API、CLI 和未来渠道复用完整业务用例；随后拆持久化职责并建立 schema 前向迁移；再稳固 Agent/工具/模型契约并建立性能基线；选定平台后接入渠道。每步保持现有 API、CLI、数据库行为与账户隔离，完成一组可实际使用并验证的能力后更新本文。建议先运行 `.venv/Scripts/python.exe -m unittest discover -s tests -q` 建立回归基线；性能测试始终使用临时 `DATA_DIR` 和假模型，不使用用户业务库。
+按 [架构演进方案](docs/ARCHITECTURE_EVOLUTION.md) 的 A→B→C→D 顺序实施；供 AI 逐阶段执行的范围、验收和停止条件见 [后续阶段任务说明](AI_EXECUTION_PLAN.md)。首先提取应用服务，让 API、CLI 和未来渠道复用完整业务用例；随后拆持久化职责并建立 schema 前向迁移；再稳固 Agent/工具/模型契约并建立性能基线；选定平台后接入渠道。每步保持现有 API、CLI、数据库行为与账户隔离，完成一组可实际使用并验证的能力后更新本文。建议先运行 `.venv/Scripts/python.exe -m unittest discover -s tests -q` 建立回归基线；性能测试始终使用临时 `DATA_DIR` 和假模型，不使用用户业务库。
 
 ## 可后续扩展（有需求再立项）
 
