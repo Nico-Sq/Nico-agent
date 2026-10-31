@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,34 @@ class ExtensionTests(unittest.TestCase):
         config = Path(self.temp.name) / "plugins-bom.json"
         config.write_text('[{"path": "%s"}]' % plugin, encoding="utf-8-sig")
         self.assertEqual(LocalPlugins(config).discover()[0]["name"], "plugin_echo_plugin_echo")
+
+    def test_plugin_tool_names_are_bounded_and_collision_free(self):
+        source = '''def run(arguments):
+    return arguments["text"]
+
+TOOLS = [{"name": %r, "description": "test", "read_only": True,
+          "parameters": {"type": "object", "properties": {"text": {"type": "string"}},
+                         "required": ["text"], "additionalProperties": False},
+          "run": run}]
+'''
+        root = Path(self.temp.name)
+        first = root / "a_b.py"
+        second = root / "a.py"
+        long_name = root / ("n" * 32 + ".py")
+        first.write_text(source % "c", encoding="utf-8")
+        second.write_text(source % "b_c", encoding="utf-8")
+        long_name.write_text(source % ("t" * 32), encoding="utf-8")
+        config = root / "names.json"
+        config.write_text(json.dumps([
+            {"path": first.name}, {"path": second.name}, {"path": long_name.name},
+        ]), encoding="utf-8")
+
+        names = [item["name"] for item in LocalPlugins(config).discover()]
+
+        self.assertEqual(len(names), 3)
+        self.assertEqual(len(set(names)), 3)
+        self.assertTrue(all(len(name) <= 64 for name in names))
+        self.assertNotIn("plugin_a_b_c", names)
 
     def test_console_channel_ends_on_exit_and_end_of_input(self):
         channel = ConsoleChannel()

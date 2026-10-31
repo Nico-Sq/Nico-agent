@@ -4,9 +4,12 @@ import asyncio
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 import jsonschema
+
+from .tools import resolve_external_tool_name
 
 
 class MCPClient:
@@ -161,6 +164,7 @@ class MCPServers:
         client = await self._client(server)
         config = self.servers[server]
         tools = []
+        enabled_names = set()
         for item in await client.tools():
             if not isinstance(item, dict):
                 raise ValueError("MCP 工具定义无效")
@@ -171,6 +175,9 @@ class MCPServers:
             if (not re.fullmatch(r"[A-Za-z0-9_]{1,32}", name)
                     or not isinstance(schema, dict) or schema.get("type") != "object"):
                 raise ValueError("MCP 工具定义无效")
+            if name in enabled_names:
+                raise ValueError("MCP 工具定义重复")
+            enabled_names.add(name)
             jsonschema.Draft202012Validator.check_schema(schema)
             annotations = item.get("annotations")
             tools.append({"name": f"mcp_{server}_{name}", "server": server,
@@ -190,7 +197,15 @@ class MCPServers:
                 except Exception:
                     self.failures[server] = "mcp_server_unavailable"
                     await self._drop(server)
-        return tools
+        counts = Counter(item["name"] for item in tools)
+        resolved = []
+        for item in tools:
+            name = resolve_external_tool_name(
+                item["name"], f"{item['server']}\0{item['remote_name']}",
+                force_hash=counts[item["name"]] > 1,
+            )
+            resolved.append({**item, "name": name})
+        return resolved
 
     async def call(self, tool: dict, arguments: dict) -> dict:
         jsonschema.validate(arguments, tool["parameters"])

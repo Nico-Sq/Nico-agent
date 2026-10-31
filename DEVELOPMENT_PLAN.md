@@ -1,6 +1,6 @@
 # Nico-agent 后续开发阶段任务文档
 
-> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–2 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
+> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–3 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
 
 ## 目标与边界
 
@@ -38,8 +38,8 @@ flowchart LR
 | Agent 工具循环、限额、失败保留输入、版本防迟到提交、在途请求取消 | 已完成基础闭环 | `career_agent/runtime.py`、`career_agent/main.py`、`career_agent/store.py`、`career_agent/events.py`；`tests/test_core.py`、`tests/test_api.py`、`tests/test_provider.py` | 已能取消在本进程、同一事件循环中运行的模型请求；同步插件线程与远端副作用仍不能保证停止 |
 | OpenAI Chat Completions、兼容端点、Anthropic、demo 与会话选模型 | 已完成协议适配与本地 HTTP 契约 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`；`tests/test_provider.py`、`tests/test_core.py`、`tests/test_model_contracts.py` | 真实端点兼容性与效果未验证；目前是非流式 JSON 请求 |
 | 内置只读工具与资源权限 | 已完成 | `career_agent/tools.py`、`career_agent/store.py`；`tests/test_core.py` 中 permission/material/report 用例 | 授权规则主要针对现有读取范围 |
-| 本地 stdio MCP、白名单、会话授权、连接复用及失败隔离 | 已完成本地基础能力 | `career_agent/mcp.py`、`career_agent/main.py`；`tests/test_mcp.py` | 仅 stdio；授权只记录工具名，不记录操作等级或每次执行确认 |
-| 本地 Python 插件发现、参数校验、调用 | 已完成可信插件基础能力 | `career_agent/plugins.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 插件同进程执行；超时的 `to_thread` 工作不能保证停止，不能视为沙箱 |
+| 本地 stdio MCP、白名单、会话授权、连接复用及失败隔离 | 已完成只读安全闭环 | `career_agent/mcp.py`、`career_agent/runtime.py`、`career_agent/main.py`；`tests/test_mcp.py` | 仅 stdio；非只读工具默认不可授权和调用；工具名有长度与碰撞处理 |
+| 本地 Python 插件发现、参数校验、调用 | 已完成可信插件只读基础能力 | `career_agent/plugins.py`、`career_agent/runtime.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 只有 `read_only=true` 会提供并执行；插件同进程运行，超时线程不能保证停止，不能视为沙箱 |
 | 短期上下文、聊天固定备注、手动长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`；`tests/test_core.py`、`tests/test_api.py` | 长期记忆需用户主动保存，`LIKE` 字面检索；无自动摘要/提炼 |
 | CLI 文字聊天、模型/记忆/工具命令 | 已完成基础入口 | `career_agent/cli.py`、`career_agent/channels.py`；`tests/test_extensions.py` | CLI 无面试工作流；账户模式下拒绝直连数据库 |
 | WebUI、登录、业务数据备份/恢复与文本材料提取 | 已有可用实现 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`career_agent/extract.py`；`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py`、`tests/test_restore.py` | 不作为公网部署方案 |
@@ -51,7 +51,7 @@ flowchart LR
 **源码已证实：**
 
 1. `career_agent/runtime.py` 已登记当前运行 Task，控制入口会取消本进程中的旧模型请求；`career_agent/providers/transport.py` 的 HTTP 上下文会随 Task 取消关闭。`career_agent/plugins.py` 仍用 `asyncio.to_thread` 调用同步插件，已经进入线程的工作不能保证停止；已发出的 MCP 远端操作也不能保证撤销。
-2. `career_agent/store.py:set_tool_grants` 只存工具名；`career_agent/main.py:set_session_tools` 只校验工具是否存在。MCP 的 `readOnlyHint` 与插件 `read_only` 只决定并行方式（`career_agent/runtime.py`），不是执行许可等级。增加写工具前必须明确授权与确认语义。`career_agent/mcp.py` 分别允许 32 字符的服务器名和工具名，再直接拼成 `mcp_{server}_{name}`，可能超过模型工具名长度限制；带下划线的不同组合也可能生成同名。
+2. `career_agent/store.py:set_tool_grants` 仍只存工具名；当前由 API/CLI 授权检查和 `career_agent/runtime.py` 执行检查共同强制“只有只读工具可用”。增加写工具前必须增加操作等级与确认语义，不能只放宽 `readOnlyHint`。
 3. `career_agent/context.py` 仅取最近 16 条完整消息、可选固定备注；`career_agent/store.py:search_memories` 是 SQLite `LIKE`。跨长会话信息会掉出模型输入，检索同义表述也无保证。
 4. `career_agent/channels.py` 只有 `receive/send` 与终端实现；`career_agent/cli.py` 只有聊天运行入口。新增渠道需要先处理发送者身份、会话归属和授权上下文，不能仅转发文本。
 
@@ -71,6 +71,9 @@ flowchart LR
 | nanobot：`E:/nanobot/nanobot/providers/base.py`、`providers/factory.py`、`providers/registry.py` | 统一响应包含内容、工具调用、结束原因、用量和错误元数据；工厂按配置选择协议 | **调整后采用**统一响应与非致命用量缺失语义；当前目录规模不需要照搬厂商注册表和 fallback 链。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/ai/src/types.ts`、`api/anthropic-messages.ts` | 请求支持取消、供应商原生事件与结构化用量；缺失与异常信息保持区分 | **调整后采用**本地 HTTP 契约和“缺失用量不伪造”的规则；完整流式事件、成本估算和大量兼容开关**暂不采用**。 |
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/config_models.py`、`agent/config.py` | 配置绑定 provider、model、输出上限和运行时约束 | **调整后采用**会话创建后固定模型 ID，新建会话仍可选择模型；多运行时调度和复杂 profile **不采用**。 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/tool_hooks/executor.py`、`tool_hooks/base.py` | pre hook 可拒绝或改参，只有通过后才进入真实工具；结果区分 denied、success、error | **调整后采用**“执行前拒绝后才调用工具”的顺序和可记录错误；当前只有每会话只读策略，不引入可插拔 hook 框架。 |
+| nanobot：`E:/nanobot/nanobot/agent/tools/mcp.py` | MCP 白名单、工具包装、连接管理与调用错误处理较完整 | **只采用**白名单和失败隔离原则；其工具调用重试**不采用**，因为调用可能已经产生远端副作用。 |
+| Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/extensions/mcp/tools.ts`、`extensions/mcp/runtime.ts` | MCP 名称冲突或过长时追加哈希；工具调用避免不确定重试 | **采用**稳定哈希命名和“调用不自动重试”；远端 HTTP/OAuth 仍暂不采用。 |
 
 ## 后续阶段（必须完成）
 
@@ -94,13 +97,14 @@ flowchart LR
 - **验证记录（2026-10-31）**：本机 HTTP 假服务已分别完成 OpenAI 兼容聊天和 Anthropic 面试的两轮工具循环；模型 ID 在后续 claim 中保持不变。全套 113 个测试通过。真实端点尚未配置，因此其兼容性和回答质量仍未验证。
 - **依赖/风险**：依赖阶段 1 的运行契约。真实端点差异是待验证推测；流式输出仅在实际需要时扩展。
 
-### 阶段 3：外部工具权限与本地 MCP 安全闭环
+### 阶段 3：外部工具权限与本地 MCP 安全闭环（只读策略已完成）
 
 - **具体功能**：保留已有 stdio 发现、白名单和会话授权；为非只读调用增加本轮可审查确认或默认拒绝的清晰策略，执行前再次核验会话、工具、参数和权限；记录执行结果状态。验证掉线后发现/调用和工具名碰撞。用本地测试 MCP 验证只读调用与写调用被拒；若决定开放写工具，再验证确认后执行。
-- **预期改动**：`career_agent/main.py`、`runtime.py`、`mcp.py`、`store.py`、`tools.py`、`tests/test_mcp.py`/`test_core.py`。
+- **实际改动**：`career_agent/main.py`、`runtime.py`、`mcp.py`、`plugins.py`、`tools.py`、`cli.py`、`README.md`；`tests/test_mcp.py`、`tests/test_extensions.py`。
 - **对外结果**：本机用户能看见工具与权限，授予读取；有副作用的工具默认被拒，若开放则只有明确确认后执行。
 - **完成标准与必要测试**：未授权工具不可见且不可执行；撤销后的新运行不能使用；写工具不能仅靠 `readOnlyHint=false` 与名称授权自动执行；参数错误和服务器失败不泄露内部内容；断线不重复不确定的副作用调用；超长或碰撞的工具名有确定处理。建议 `python -m unittest tests.test_mcp tests.test_core -v`。
-- **依赖/风险**：依赖阶段 1；阶段 2 可并行验证但对外开放写工具前必须完成本阶段。**待决**：首版是否允许写工具，若允许采用“每次调用确认”还是更窄的会话内短时授权。
+- **验证记录（2026-10-31）**：非只读工具不会提供给模型，API/CLI 不接受其授权，执行层仍返回 `tool_write_disabled`；撤销后新运行不可见；参数错误不会调用 MCP；断线调用只执行一次；跨服务器和插件超长名称使用稳定哈希。全套 119 个测试通过。
+- **依赖/风险**：依赖阶段 1；只读安全闭环已完成。**待决**：未来若开放写工具，采用“每次调用确认”还是会话短时授权。
 
 ### 阶段 4：可回源的长会话记忆
 
@@ -145,7 +149,7 @@ flowchart LR
 
 - [x] 阶段 1：单次运行与中断契约通过测试；记录验证命令/结果。
 - [x] 阶段 2：本地模型协议契约通过测试；真实端点尚未另行验证。
-- [ ] 阶段 3：外部工具权限和本地 MCP 读写闭环通过测试。
+- [x] 阶段 3：外部工具只读权限和本地 MCP 安全闭环通过测试；写工具仍关闭。
 - [ ] 阶段 4：长会话摘要/候选记忆可回源、可纠正且隔离。
 - [ ] 阶段 5：CLI 聊天与面试完整闭环可用。
 - [ ] 阶段 6：插件与渠道边界通过测试；有明确渠道时再接第二文字入口。

@@ -4,9 +4,12 @@ Tools only read: every implementation below answers a question about the data
 the session is already allowed to see, which is why they can run in parallel.
 """
 
+import hashlib
 import json
 
 import jsonschema
+
+MAX_EXTERNAL_TOOL_NAME_LENGTH = 64
 
 READ_ONLY_TOOLS = {
     "read_interview_goal", "read_interview_materials", "read_confirmed_claims",
@@ -57,6 +60,14 @@ INTERVIEW_TOOLS = [
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     }},
 ]
+
+
+def resolve_external_tool_name(base: str, identity: str, force_hash: bool = False) -> str:
+    """Keep a readable external name when unique, otherwise add a stable hash."""
+    if len(base) <= MAX_EXTERNAL_TOOL_NAME_LENGTH and not force_hash:
+        return base
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:8]
+    return f"{base[:MAX_EXTERNAL_TOOL_NAME_LENGTH - len(suffix) - 1]}_{suffix}"
 
 
 def schemas(kind: str) -> list[dict]:

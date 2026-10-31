@@ -119,9 +119,12 @@ def main() -> None:
                 parser.error("需要现有聊天会话 ID")
             names = set(store.tool_grants(args.session_id))
             if args.action == "grant":
-                available = {item["name"] for item in plugins.discover() + asyncio.run(discover_mcp(mcp))}
+                available = {item["name"]: item
+                             for item in plugins.discover() + asyncio.run(discover_mcp(mcp))}
                 if args.tool_name not in available:
                     parser.error("工具不存在或未启用")
+                if available[args.tool_name].get("read_only") is not True:
+                    parser.error("非只读工具尚未开放")
                 names.add(args.tool_name)
             else:
                 names.discard(args.tool_name)

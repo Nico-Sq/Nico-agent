@@ -270,11 +270,14 @@ async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
     if session["status"] == "running":
         raise HTTPException(409, "运行中不能修改工具授权")
     try:
-        available = {item["name"] for item in local_plugins.discover() + await mcp_servers.discover()}
+        available = {item["name"]: item
+                     for item in local_plugins.discover() + await mcp_servers.discover()}
     except Exception as exc:
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
-    if not set(body.names) <= available:
-        raise HTTPException(422, "包含未配置的 MCP 工具")
+    if not set(body.names) <= available.keys():
+        raise HTTPException(422, "包含未配置的外部工具")
+    if any(available[name].get("read_only") is not True for name in body.names):
+        raise HTTPException(422, "非只读工具尚未开放")
     return {"names": active_store().set_tool_grants(session_id, body.names)}
 
 

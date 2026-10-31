@@ -67,7 +67,7 @@ class AgentRuntime:
         return context_messages(self.store, session)
 
     def _tools(self, kind: str) -> list[dict]:
-        return schemas(kind)
+        return list(schemas(kind))
 
     def _concurrency_safe(self, call: dict, external: dict[str, dict]) -> bool:
         name = call["function"]["name"]
@@ -96,23 +96,29 @@ class AgentRuntime:
 
     async def _execute_tool(self, session: dict, call: dict, external: dict[str, dict] | None = None) -> dict:
         name = call["function"]["name"]
-        if external and name in external:
+        tool = external.get(name) if external else None
+        if tool is not None:
+            failure = "plugin_tool_failed" if tool.get("source") == "plugin" else "mcp_tool_failed"
             try:
                 if name not in self.store.tool_grants(session["id"]):
                     result = {"error": "tool_not_authorized"}
                 elif not self.store.run_current(session["id"], session["version"]):
                     raise RunSuperseded()
+                elif tool.get("read_only") is not True:
+                    result = {"error": "tool_write_disabled"}
                 else:
-                    args = json.loads(call["function"].get("arguments") or "{}")
-                    tool = external[name]
-                    result = (await self.plugins.call(tool, args) if tool.get("source") == "plugin"
-                              else await self.mcp.call(tool, args))
+                    try:
+                        args = json.loads(call["function"].get("arguments") or "{}")
+                        jsonschema.validate(args, tool["parameters"])
+                    except (ValueError, TypeError, KeyError, jsonschema.ValidationError):
+                        result = {"error": "invalid_arguments"}
+                    else:
+                        result = (await self.plugins.call(tool, args) if tool.get("source") == "plugin"
+                                  else await self.mcp.call(tool, args))
             except RunSuperseded:
                 raise
-            except (ValueError, TypeError, KeyError, jsonschema.ValidationError):
-                result = {"error": "invalid_arguments"}
             except Exception:
-                result = {"error": "mcp_tool_failed"}
+                result = {"error": failure}
             record(self.store, session, name, result)
             return tool_message(call, result)
         return await asyncio.to_thread(run_internal, self.store, session, call)
@@ -129,18 +135,20 @@ class AgentRuntime:
             for item in await self.mcp.discover():
                 if item["name"] in grants:
                     external[item["name"]] = item
-                    tools.append({"type": "function", "function": {
-                        "name": item["name"], "description": item["description"],
-                        "parameters": item["parameters"],
-                    }})
+                    if item.get("read_only") is True:
+                        tools.append({"type": "function", "function": {
+                            "name": item["name"], "description": item["description"],
+                            "parameters": item["parameters"],
+                        }})
         if grants and self.plugins:
             for item in self.plugins.discover():
                 if item["name"] in grants:
                     external[item["name"]] = item
-                    tools.append({"type": "function", "function": {
-                        "name": item["name"], "description": item["description"],
-                        "parameters": item["parameters"],
-                    }})
+                    if item.get("read_only") is True:
+                        tools.append({"type": "function", "function": {
+                            "name": item["name"], "description": item["description"],
+                            "parameters": item["parameters"],
+                        }})
         for _ in range(4):
             if not self.store.run_current(session["id"], session["version"]):
                 raise RunSuperseded()
