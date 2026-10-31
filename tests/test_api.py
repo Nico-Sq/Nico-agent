@@ -68,6 +68,21 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/memories").json(), [])
         self.assertEqual(self.client.delete(f"/api/memories/{memory_id}").status_code, 404)
 
+    def test_long_term_memory_ignores_repeats_and_respects_the_cap(self):
+        first = self.client.post("/api/memories", json={"content": "熟悉  Python   和 SQL"}).json()
+        self.assertIs(first["created"], True)
+        self.assertEqual(first["content"], "熟悉 Python 和 SQL")
+        repeat = self.client.post("/api/memories", json={"content": "熟悉 Python 和 SQL"})
+        self.assertEqual(repeat.json()["id"], first["id"])
+        self.assertIs(repeat.json()["created"], False)
+        self.assertEqual(len(self.client.get("/api/memories").json()), 1)
+
+        with patch("career_agent.store.MAX_MEMORIES", 1):
+            over = self.client.post("/api/memories", json={"content": "另一条记忆"})
+        self.assertEqual(over.status_code, 422)
+        self.assertIn("上限", over.json()["detail"])
+        self.assertEqual(len(self.client.get("/api/memories").json()), 1)
+
     def test_session_titles_are_display_only_and_can_be_reset(self):
         chat = self.client.post("/api/chat/sessions").json()
         pending = self.client.post(f"/api/chat/sessions/{chat['id']}/messages/claim", json={

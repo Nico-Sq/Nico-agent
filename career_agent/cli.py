@@ -114,7 +114,11 @@ def main() -> None:
         if args.action == "add":
             if not args.value or not args.value.strip() or len(args.value) > 2000:
                 parser.error("记忆内容需为 1–2000 字")
-            print(store.add_memory(args.value.strip())["id"])
+            try:
+                saved = store.add_memory(args.value.strip())
+            except ValueError as exc:
+                parser.error(str(exc))
+            print(saved["id"] + ("" if saved["created"] else "（已存在）"))
         elif args.action == "delete":
             if not args.value or not store.delete_memory(args.value):
                 parser.error("记忆不存在")

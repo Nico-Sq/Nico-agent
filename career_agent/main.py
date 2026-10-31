@@ -208,7 +208,10 @@ def list_memories(q: str = Query(default="", max_length=100)):
 
 @app.post("/api/memories")
 def add_memory(body: LongMemoryInput):
-    return active_store().add_memory(nonempty(body.content))
+    try:
+        return active_store().add_memory(nonempty(body.content))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.delete("/api/memories/{memory_id}")

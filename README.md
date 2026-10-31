@@ -48,7 +48,7 @@ python -m career_agent
 
 启动服务后，`GET /api/mcp/tools` 会真正连接服务器并发现白名单工具。`PUT /api/chat/sessions/{id}/tools` 或面试会话对应接口提交 `{"names":["mcp_local_search"]}`，由本机用户确认后该会话才能调用；`GET` 同路径查看授权，提交空列表撤销。只运行自己信任的本地 MCP 命令。每个服务器只保留一条常驻 stdio 连接并缓存工具清单，同一服务器的请求串行执行；某个服务器连接失败只影响它自己，其余服务器仍可继续使用。`GET /api/mcp/servers` 返回每个已配置服务器的名称、已暴露工具数和最近一次错误码（`mcp_server_unavailable`），`python -m career_agent.cli tools list` 也会在工具列表后打印失败服务器。MCP 工具的远端文本结果最多进入模型上下文 8000 字；超时、非法参数及服务器失败会记录工具错误，不暴露服务器内部响应。
 
-短期记忆来自本会话最近 16 条消息和聊天会话的固定备注。长期记忆仅在用户通过 `POST /api/memories` 提交 `{"content":"..."}` 时保存，不自动从对话提炼；`GET /api/memories?q=关键词` 检索，`DELETE /api/memories/{id}` 删除。聊天 Agent 可调用 `search_memories` 查找明确保存的记忆，面试 Agent 不读取聊天记忆。启用登录后长期记忆仍按账户数据库隔离。
+短期记忆来自本会话最近 16 条消息和聊天会话的固定备注。长期记忆仅在用户通过 `POST /api/memories` 提交 `{"content":"..."}` 时保存，不自动从对话提炼；`GET /api/memories?q=关键词` 检索，`DELETE /api/memories/{id}` 删除。保存前会折叠连续空白；内容完全相同时不新增副本，直接返回已有记录的 `id` 并标记 `"created": false`。每个账户最多保存 200 条，超出后返回 422 并提示先删除；`python -m career_agent.cli memory add` 遇到重复会输出已有 ID 并注明“已存在”。聊天 Agent 可调用 `search_memories` 查找明确保存的记忆，面试 Agent 不读取聊天记忆。启用登录后长期记忆仍按账户数据库隔离。
 
 终端接入与 Web API 共用同一运行时和本地数据库：`python -m career_agent.cli chat`，输入 `/exit` 退出；`--model claude` 可选目录中的模型，`--session <ID>` 恢复已有聊天。`python -m career_agent.cli models` 列出模型；`memory list|add|delete` 管理长期记忆；`tools list|grant|revoke` 查看并按会话授权外部工具。CLI 的 `TextChannel` 接口由 `ConsoleChannel` 实际实现，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
 

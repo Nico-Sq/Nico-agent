@@ -11,6 +11,10 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 单个账户数据库的长期记忆上限，超出后要求用户先删除。
+MAX_MEMORIES = 200
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
@@ -430,11 +434,20 @@ class Store:
         return [row["tool_name"] for row in rows]
 
     def add_memory(self, content: str) -> dict:
-        memory_id = uuid.uuid4().hex
+        """Save one memory; repeated text returns the existing row instead of a copy."""
+        content = " ".join(content.split())
         with self.connect() as db:
+            existing = db.execute("SELECT id, content FROM memories WHERE content = ?",
+                                  (content,)).fetchone()
+            if existing:
+                return {"id": existing["id"], "content": existing["content"], "created": False}
+            count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            if count >= MAX_MEMORIES:
+                raise ValueError(f"长期记忆已达 {MAX_MEMORIES} 条上限，请先删除不再需要的记忆")
+            memory_id = uuid.uuid4().hex
             db.execute("INSERT INTO memories(id, content, created_at) VALUES (?, ?, ?)",
                        (memory_id, content, now()))
-        return {"id": memory_id, "content": content}
+        return {"id": memory_id, "content": content, "created": True}
 
     def search_memories(self, query: str = "") -> list[dict]:
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
