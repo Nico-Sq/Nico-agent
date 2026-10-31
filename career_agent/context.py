@@ -14,6 +14,10 @@ MAX_CONTEXT_CHARS = 32_000
 PROMPT_POLICY_VERSION = "4"
 
 
+class ContextBudgetError(ValueError):
+    """最新消息本身已超出本轮上下文预算。"""
+
+
 def skill_file(kind: str) -> Path:
     return SKILL_ROOT / f"{kind}.md"
 
@@ -39,7 +43,7 @@ def _fit(blocks: list[tuple[bool, dict]], messages: list[dict]) -> list[dict]:
             return context + list(reversed(selected))
         optional = [index for index, (required, _) in enumerate(blocks) if not required]
         if not optional:
-            raise ValueError("上下文预算不足以容纳最新消息")
+            raise ContextBudgetError("上下文预算不足以容纳最新消息")
         blocks.pop(max(optional, key=lambda index: len(blocks[index][1]["content"])))
 
 

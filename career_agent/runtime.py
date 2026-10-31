@@ -4,7 +4,11 @@ import time
 
 import jsonschema
 
-from .context import build_context as assemble_context, prompt_version as prompt_fingerprint
+from .context import (
+    ContextBudgetError,
+    build_context as assemble_context,
+    prompt_version as prompt_fingerprint,
+)
 from .events import Usage, run_event
 from .mcp import MCPServers
 from .plugins import LocalPlugins
@@ -148,7 +152,10 @@ class AgentRuntime:
             messages.extend(await self._execute_tools(session, calls, external))
             if sum(len(message.get("content") or "") + len(json.dumps(message.get("tool_calls", []), ensure_ascii=False))
                    for message in messages) > MAX_MODEL_INPUT_CHARS:
-                raise ValueError("工具结果超过模型上下文预算，请减少本次读取的材料或经历")
+                raise ModelError(
+                    "context_budget_exceeded",
+                    "工具结果超过模型上下文预算，请减少本次读取的材料或经历", 413,
+                )
         raise ValueError("模型工具调用超过 4 轮")
 
     async def run(self, session: dict) -> dict:
@@ -167,7 +174,13 @@ class AgentRuntime:
         error_code = None
         try:
             prompt_version = prompt_fingerprint(kind)
-            context = self.build_context(session)
+            try:
+                context = self.build_context(session)
+            except ContextBudgetError as exc:
+                raise ModelError(
+                    "context_budget_exceeded",
+                    "最新消息超出本轮上下文预算，请缩短内容或清空会话固定备注后重试", 413,
+                ) from exc
             context_chars = sum(len(item["content"]) for item in context)
             try:
                 async with asyncio.timeout(MAX_RUN_SECONDS):

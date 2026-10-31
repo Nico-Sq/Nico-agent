@@ -433,8 +433,14 @@ class CoreTests(unittest.TestCase):
     def test_run_without_room_for_the_latest_message_reports_a_budget_error(self):
         chat = self.store.create("chat")
         latest = self.store.claim_run(chat["id"], "chat", "active", "问" * (MAX_CONTEXT_CHARS + 1))
-        with self.assertRaisesRegex(ValueError, "上下文预算不足以容纳最新消息"):
-            self.runtime.build_context(latest)
+        with self.assertRaises(ModelError) as caught:
+            run_demo(self.runtime.run(latest))
+        self.assertEqual(caught.exception.code, "context_budget_exceeded")
+        self.assertEqual(caught.exception.status_code, 413)
+        self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
+        events = [event for event in self.store.events(chat["id"], "chat")
+                  if event["kind"] == "model_run"]
+        self.assertEqual(json.loads(events[-1]["detail"])["error_code"], "context_budget_exceeded")
 
     def test_run_event_records_metadata_without_message_content(self):
         chat = self.store.create("chat")
@@ -529,8 +535,9 @@ class CoreTests(unittest.TestCase):
         chat = self.store.create("chat")
         running = self.store.claim_run(chat["id"], "chat", "active", "请整理经历")
         provider = RepeatingToolProvider()
-        with self.assertRaisesRegex(ValueError, "工具结果超过模型上下文预算"):
+        with self.assertRaises(ModelError) as caught:
             asyncio.run(AgentRuntime(self.store, provider).run(running))
+        self.assertEqual(caught.exception.code, "context_budget_exceeded")
         self.assertEqual(provider.calls, 1)
         self.assertEqual(self.store.messages(chat["id"], "chat")[-1]["content"], "请整理经历")
 
