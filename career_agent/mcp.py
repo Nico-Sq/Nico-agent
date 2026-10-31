@@ -111,7 +111,8 @@ class MCPServers:
             path = Path(configured) if configured else None
         self.servers = {}
         if path:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            # 配置文件可能带 Windows 编辑器写入的 BOM，utf-8-sig 一并处理。
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
             if not isinstance(data, dict):
                 raise ValueError("MCP 配置必须是对象")
             for name, config in data.items():
@@ -129,6 +130,7 @@ class MCPServers:
         self.locks = {name: asyncio.Lock() for name in self.servers}
 
     def status(self) -> dict[str, str]:
+        """Return the error code of every server whose last attempt failed."""
         return dict(self.failures)
 
     async def _drop(self, server: str):

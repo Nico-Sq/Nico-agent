@@ -65,6 +65,12 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(state["peak"], 1)
         self.assertEqual([item["tool_call_id"] for item in serial], ["a", "b", "a"])
 
+    def test_plugin_config_tolerates_a_byte_order_mark(self):
+        plugin = (Path(__file__).resolve().parent.parent / "examples" / "echo_plugin.py").as_posix()
+        config = Path(self.temp.name) / "plugins-bom.json"
+        config.write_text('[{"path": "%s"}]' % plugin, encoding="utf-8-sig")
+        self.assertEqual(LocalPlugins(config).discover()[0]["name"], "plugin_echo_plugin_echo")
+
     def test_cli_channel_uses_runtime_and_persists_session(self):
         class Channel:
             def __init__(self):

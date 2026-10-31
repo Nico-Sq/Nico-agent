@@ -106,6 +106,21 @@ class MCPTests(unittest.TestCase):
 
         self.run_async(run())
 
+    def test_config_tolerates_a_byte_order_mark(self):
+        config = Path(self.temp.name) / "mcp-bom.json"
+        config.write_text(json.dumps({"fixture": {
+            "command": [sys.executable, str(Path(self.temp.name) / "server.py")],
+            "enabled_tools": ["echo"]}}), encoding="utf-8-sig")
+        manager = MCPServers(config)
+
+        async def run():
+            try:
+                return await manager.discover()
+            finally:
+                await manager.close()
+
+        self.assertEqual([item["name"] for item in self.run_async(run())], ["mcp_fixture_echo"])
+
     def test_grant_is_required_before_model_sees_tool(self):
         class CallingProvider:
             def __init__(self):

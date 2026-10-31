@@ -164,5 +164,14 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertEqual(catalog.list()[0]["max_output_tokens"], 2048)
 
 
+    def test_catalog_tolerates_a_byte_order_mark(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "models.json"
+            path.write_text(json.dumps([{"id": "local", "provider": "openai_compatible",
+                                         "model": "local-model", "base_url": "http://127.0.0.1:1234/v1",
+                                         "supports_tools": True}]), encoding="utf-8-sig")
+            self.assertIsInstance(ModelCatalog(path).get("local"), Provider)
+
+
 if __name__ == "__main__":
     unittest.main()

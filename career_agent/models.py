@@ -14,7 +14,8 @@ class ModelCatalog:
             configured = os.getenv("MODEL_CATALOG_PATH")
             path = Path(configured) if configured else None
         if path:
-            entries = json.loads(path.read_text(encoding="utf-8"))
+            # 配置文件可能带 Windows 编辑器写入的 BOM，utf-8-sig 一并处理。
+            entries = json.loads(path.read_text(encoding="utf-8-sig"))
             if not isinstance(entries, list):
                 raise ValueError("模型目录必须是 JSON 数组")
             for entry in entries:

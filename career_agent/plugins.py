@@ -18,7 +18,8 @@ class LocalPlugins:
         self.tools = {}
         if not path:
             return
-        entries = json.loads(path.read_text(encoding="utf-8"))
+        # 配置文件可能带 Windows 编辑器写入的 BOM，utf-8-sig 一并处理。
+        entries = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(entries, list):
             raise ValueError("插件配置必须是 JSON 数组")
         for entry in entries:
