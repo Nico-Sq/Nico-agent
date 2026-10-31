@@ -12,7 +12,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from career_agent import main
-from career_agent.auth import AuthStore
+from career_agent.auth import AuthStore, LoginRateLimited
 
 
 class AuthApiTests(unittest.TestCase):
@@ -129,6 +129,19 @@ class AuthApiTests(unittest.TestCase):
         store.issue_token(user_id)
         with closing(sqlite3.connect(store.path)) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM login_tokens").fetchone()[0], 1)
+
+    def test_locked_login_skips_password_hashing(self):
+        store = AuthStore(Path(self.temp.name) / "auth-locked.sqlite3")
+        store.register("dave", "correct-password")
+        now = int(time.time())
+        with patch("career_agent.auth.time.time", return_value=now):
+            for _ in range(5):
+                self.assertIsNone(store.login("dave", "wrong-password"))
+            with patch("career_agent.auth.hashlib.pbkdf2_hmac", wraps=hashlib.pbkdf2_hmac) as hashing:
+                with self.assertRaises(LoginRateLimited):
+                    store.login("dave", "correct-password")
+                self.assertEqual(hashing.call_count, 0)
+            self.assertIsNone(store.login("nobody", "wrong-password"))
 
     def test_parallel_accounts_keep_request_context_separate(self):
         for client, username in ((self.alice, "alice"), (self.bob, "bob")):

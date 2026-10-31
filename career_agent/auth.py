@@ -11,6 +11,8 @@ from pathlib import Path
 PASSWORD_ITERATIONS = 310_000
 # 未知用户名也执行同代价的哈希，避免通过响应时间枚举账户。
 _DUMMY_SALT = bytes(16)
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
 
 
 class LoginRateLimited(Exception):
@@ -70,37 +72,36 @@ class AuthStore:
 
     def login(self, username: str, password: str) -> str | None:
         username = username.lower()
+        now = int(time.time())
         with self.connect() as db:
             row = db.execute(
                 "SELECT id, salt, password_hash FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-        if row is None:
-            hashlib.pbkdf2_hmac("sha256", password.encode(), _DUMMY_SALT, PASSWORD_ITERATIONS)
-            return None
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), row[1], PASSWORD_ITERATIONS)
-        valid = hmac.compare_digest(actual, row[2])
-        with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            now = int(time.time())
             attempt = db.execute(
                 "SELECT failures, first_failed_at FROM login_attempts WHERE username = ?", (username,)
             ).fetchone()
-            if attempt and now - attempt[1] >= 15 * 60:
+            if attempt and now - attempt[1] >= LOGIN_WINDOW_SECONDS:
                 db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
                 attempt = None
-            if attempt and attempt[0] >= 5:
-                raise LoginRateLimited()
+        # 已锁定时不再计算密码哈希，避免攻击者靠重复请求持续消耗 CPU。
+        if attempt and attempt[0] >= LOGIN_MAX_FAILURES:
+            raise LoginRateLimited()
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), row[1] if row else _DUMMY_SALT,
+                                     PASSWORD_ITERATIONS)
+        if row is None:
+            return None
+        valid = hmac.compare_digest(actual, row[2])
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             if valid:
                 db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
                 return row[0]
-            if attempt:
-                db.execute("UPDATE login_attempts SET failures = failures + 1 WHERE username = ?", (username,))
-            else:
-                db.execute(
-                    "INSERT INTO login_attempts(username, failures, first_failed_at) VALUES (?, 1, ?)",
-                    (username, now),
-                )
+            db.execute(
+                "INSERT INTO login_attempts(username, failures, first_failed_at) VALUES (?, 1, ?) "
+                "ON CONFLICT(username) DO UPDATE SET failures = failures + 1",
+                (username, now),
+            )
         return None
 
     def issue_token(self, user_id: str) -> str:
