@@ -4,3 +4,20 @@ __pycache__/
 .env
 data/
 tests/.tmp/
+
+# 编辑器与 IDE
+.idea/
+.vscode/
+
+# Python 打包与构建产物
+*.egg-info/
+build/
+dist/
+
+# 工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv 生成的锁文件（本项目以 pyproject.toml 声明依赖）
+uv.lock
