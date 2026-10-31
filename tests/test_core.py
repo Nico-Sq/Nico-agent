@@ -98,6 +98,49 @@ class CoreTests(unittest.TestCase):
         detail = json.loads(next(item["detail"] for item in events if item["kind"] == "model_run"))
         self.assertEqual(detail["usage"]["total_tokens"], 6)
 
+    def test_incomplete_model_reply_keeps_input_and_skips_tools(self):
+        class FilteredProvider:
+            async def complete(self, messages, tools):
+                return {"content": "不完整的回复", "finish_reason": "content_filter", "tool_calls": [{
+                    "id": "filtered", "function": {"name": "read_confirmed_claims", "arguments": "{}"},
+                }]}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请整理我的经历")
+        with self.assertRaises(ModelError) as caught:
+            run_demo(AgentRuntime(self.store, FilteredProvider()).run(running))
+        self.assertEqual(caught.exception.code, "model_incomplete")
+        self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
+        self.assertEqual([item["role"] for item in self.store.messages(chat["id"], "chat")], ["user"])
+        events = self.store.events(chat["id"], "chat")
+        self.assertFalse(any(item["kind"] == "tool" for item in events))
+        detail = json.loads(next(item["detail"] for item in events if item["kind"] == "model_run"))
+        self.assertEqual(detail["error_code"], "model_incomplete")
+
+    def test_tool_finish_without_calls_is_rejected(self):
+        class BrokenProvider:
+            async def complete(self, messages, tools):
+                return {"content": "看似完整", "finish_reason": "tool_calls"}
+
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "请整理我的经历")
+        with self.assertRaises(ModelError) as caught:
+            run_demo(AgentRuntime(self.store, BrokenProvider()).run(running))
+        self.assertEqual(caught.exception.code, "model_invalid_response")
+        self.assertEqual([item["role"] for item in self.store.messages(chat["id"], "chat")], ["user"])
+
+    def test_interview_accepts_fenced_json_with_valid_schema(self):
+        class FencedProvider:
+            async def complete(self, messages, tools):
+                content = json.dumps({"feedback": "", "question": "请介绍一个项目", "finished": False,
+                                      "evidence": [], "summary": ""}, ensure_ascii=False)
+                return {"content": f"```json\n{content}\n```", "finish_reason": "stop"}
+
+        interview = self.store.create("interview", "开发岗位")
+        running = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(AgentRuntime(self.store, FencedProvider()).run(running))
+        self.assertEqual(self.store.interview_report(interview["id"])["items"][0]["question"], "请介绍一个项目")
+
     def test_provider_error_does_not_expose_upstream_response(self):
         class Client:
             async def __aenter__(self):
@@ -378,6 +421,34 @@ class CoreTests(unittest.TestCase):
             asyncio.run(AgentRuntime(self.store, provider).run(running))
         self.assertEqual(provider.calls, 1)
         self.assertEqual(self.store.messages(chat["id"], "chat")[-1]["content"], "请整理经历")
+
+    def test_confirmed_claim_tool_pages_and_filters_results(self):
+        for number in range(25):
+            claim = self.store.create_claim(f"经历 {number:02d}")
+            self.store.confirm_claim(claim["id"])
+        self.store.create_claim("未确认经历")
+        revoked = self.store.create_claim("已撤回经历")
+        self.store.confirm_claim(revoked["id"])
+        self.store.revoke_claim(revoked["id"])
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "整理经历")
+
+        def read(arguments):
+            call = {"id": "claim-page", "function": {
+                "name": "read_confirmed_claims", "arguments": json.dumps(arguments),
+            }}
+            return json.loads(self.runtime._execute_tool_sync(running, call)["content"])
+
+        first = read({})
+        second = read({"offset": first["next_offset"]})
+        self.assertEqual(len(first["claims"]), 20)
+        self.assertEqual(len(second["claims"]), 5)
+        self.assertEqual(second["next_offset"], None)
+        self.assertEqual(len({item["id"] for item in first["claims"] + second["claims"]}), 25)
+        self.assertEqual([item["text"] for item in read({"query": "经历 03"})["claims"]], ["经历 03"])
+        for arguments in ({"offset": -1}, {"offset": True}, {"query": "x" * 101}, {"extra": "x"}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(read(arguments)["error"], "invalid_arguments")
 
     def test_tool_permission_and_explicit_report_selection(self):
         interview = self.store.create("interview", "开发岗位")

@@ -106,8 +106,11 @@ class AgentRuntime:
                 }, "required": ["interview_session_id"], "additionalProperties": False},
             }}, {"type": "function", "function": {
                 "name": "read_confirmed_claims",
-                "description": "读取用户已确认的经历主张，用于整理求职表达。",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                "description": "分批读取用户已确认的经历主张；可按关键词查找，next_offset 非空时继续读取。",
+                "parameters": {"type": "object", "properties": {
+                    "query": {"type": "string", "maxLength": 100},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
+                }, "additionalProperties": False},
             }}, {"type": "function", "function": {
                 "name": "read_material",
                 "description": "读取当前用户消息明确指定 ID 的一份简历、岗位描述或项目材料。",
@@ -137,16 +140,27 @@ class AgentRuntime:
         else:
             try:
                 args = json.loads(call["function"].get("arguments") or "{}")
-                required = set(allowed[name].get("required", []))
-                if (not isinstance(args, dict) or set(args) != required
-                        or any(not isinstance(args[key], str) or not args[key] for key in required)):
+                schema = allowed[name]
+                required = set(schema.get("required", []))
+                properties = schema["properties"]
+                if not isinstance(args, dict) or not required <= set(args) or not set(args) <= set(properties):
                     raise ValueError("工具参数格式错误")
+                for key, value in args.items():
+                    spec = properties[key]
+                    if spec["type"] == "string":
+                        if not isinstance(value, str) or (key in required and not value) or len(value) > spec.get("maxLength", 1000):
+                            raise ValueError("工具参数格式错误")
+                    elif (not isinstance(value, int) or isinstance(value, bool)
+                          or not spec["minimum"] <= value <= spec["maximum"]):
+                        raise ValueError("工具参数格式错误")
                 if name == "read_interview_goal":
                     result = {"goal": session["goal"]}
                 elif name == "read_interview_materials":
                     result = self.store.interview_resources(session["id"], include_content=True)
                 elif name == "read_confirmed_claims":
-                    result = {"claims": self.store.confirmed_claims()}
+                    offset = args.get("offset", 0)
+                    claims = self.store.confirmed_claims(args.get("query", ""), offset, 21)
+                    result = {"claims": claims[:20], "next_offset": offset + 20 if len(claims) > 20 else None}
                 elif name == "read_material":
                     target = args["material_id"]
                     if not self.store.chat_authorizes(session["id"], session["version"], target):
@@ -193,8 +207,11 @@ class AgentRuntime:
                             usage["covered_requests"] += 1
             if not self.store.run_current(session["id"], session["version"]):
                 raise RunSuperseded()
-            if reply.get("finish_reason") == "length":
+            finish_reason = reply.get("finish_reason")
+            if finish_reason == "length":
                 raise ModelError("model_output_truncated", "模型输出达到上限，请缩短本轮材料或请求后重试")
+            if finish_reason not in (None, "stop", "tool_calls"):
+                raise ModelError("model_incomplete", "模型未正常完成本轮回复，请检查服务状态后重试")
             calls = reply.get("tool_calls") or []
             if (not isinstance(calls, list) or any(
                 not isinstance(call, dict) or not isinstance(call.get("id"), str)
@@ -204,6 +221,8 @@ class AgentRuntime:
             )):
                 raise ValueError("模型工具调用格式错误")
             if not calls:
+                if finish_reason == "tool_calls":
+                    raise ModelError("model_invalid_response", "模型服务返回了无效的工具调用结果")
                 content = reply.get("content")
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("模型未返回有效内容")
@@ -250,7 +269,12 @@ class AgentRuntime:
             if kind == "chat":
                 content, status, count = raw, "active", 0
             else:
-                data = json.loads(raw)
+                payload = raw.strip()
+                if payload.startswith("```") and payload.endswith("```"):
+                    language, separator, fenced = payload.partition("\n")
+                    if separator and language.lower() in ("```", "```json"):
+                        payload = fenced[:-3].strip()
+                data = json.loads(payload)
                 if not isinstance(data, dict):
                     raise ValueError("面试模型必须返回 JSON 对象")
                 if not {"feedback", "question", "finished", "evidence"}.issubset(data):

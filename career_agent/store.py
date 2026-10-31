@@ -234,11 +234,17 @@ class Store:
             rows = db.execute("SELECT * FROM claims WHERE revoked_at IS NULL ORDER BY created_at DESC").fetchall()
         return [dict(row) for row in rows]
 
-    def confirmed_claims(self) -> list[dict]:
+    def confirmed_claims(self, query: str = "", offset: int = 0, limit: int = 20) -> list[dict]:
+        where = "status = 'confirmed' AND revoked_at IS NULL"
+        params: list[object] = []
+        if query:
+            where += " AND instr(lower(text), lower(?)) > 0"
+            params.append(query)
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, text, material_id FROM claims WHERE status = 'confirmed' "
-                "AND revoked_at IS NULL ORDER BY created_at DESC"
+                f"SELECT id, text, material_id FROM claims WHERE {where} "
+                "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ).fetchall()
         return [dict(row) for row in rows]
 
