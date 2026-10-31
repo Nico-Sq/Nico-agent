@@ -6,7 +6,13 @@ import json
 import os
 from pathlib import Path
 
-from .channels import ConsoleChannel, TextChannel
+from .channels import (
+    ChannelDeliveryError,
+    ChannelRouter,
+    ConsoleChannel,
+    TextChannel,
+    TextMessage,
+)
 from .mcp import MCPServers
 from .models import ModelCatalog
 from .plugins import LocalPlugins
@@ -52,25 +58,44 @@ async def run_channel(channel: TextChannel, store: Store, model_id: str = "defau
     if provider.configuration_error():
         raise ValueError(provider.configuration_error())
     runtime = AgentRuntime(store, provider, mcp, plugins)
-    await channel.send(f"{session_banner(store, session)}，输入 /retry 重试失败轮次，/exit 结束。")
+    sender_id = getattr(channel, "sender_id", "local")
+    conversation_id = getattr(channel, "conversation_id", "console")
+    allowed_senders = set(getattr(channel, "allowed_senders", {sender_id}))
+    router = ChannelRouter(
+        store, getattr(channel, "name", "local"), allowed_senders, model_id
+    )
+    session = (router.bind(sender_id, conversation_id, session_id) if session_id
+               else router.ensure_session(sender_id, conversation_id))
+    banner = f"{session_banner(store, session)}，输入 /retry 重试失败轮次，/exit 结束。"
+    await channel.send(
+        conversation_id, banner, f"{router.channel_name}:banner:{session['id']}"
+    )
     while True:
-        message = await channel.receive()
-        if message is None:
-            return session_id
-        if not message.strip():
+        incoming = await channel.receive()
+        if incoming is None:
+            return router.session_id(sender_id, conversation_id)
+        if not incoming.text.strip():
             continue
-        if message.strip() == "/retry":
-            running = store.retry_chat(session_id)
-        else:
-            running = store.claim_run(session_id, "chat", "active", message.strip())
-        if running is None:
-            await channel.send("当前没有可重试消息，或会话正在运行。")
-            continue
+
+        async def handle(current_session: dict, message: TextMessage) -> str:
+            if message.text.strip() == "/retry":
+                running = store.retry_chat(current_session["id"])
+            else:
+                running = store.claim_run(
+                    current_session["id"], "chat", "active", message.text.strip()
+                )
+            if running is None:
+                return "当前没有可重试消息，或会话正在运行。"
+            try:
+                result = await runtime.run(running)
+                return result.get("message", "本轮已中断")
+            except (ModelError, ValueError) as exc:
+                return f"运行失败：{cli_error_text(exc)}"
+
         try:
-            result = await runtime.run(running)
-            await channel.send(result.get("message", "本轮已中断"))
-        except (ModelError, ValueError) as exc:
-            await channel.send(f"运行失败：{cli_error_text(exc)}")
+            await router.process(incoming, handle, channel.send)
+        except ChannelDeliveryError as exc:
+            print(f"渠道投递失败：message_id={exc.message_id} delivery_id={exc.delivery_id}")
 
 
 async def run_chat(args, store: Store, catalog: ModelCatalog, mcp: MCPServers,

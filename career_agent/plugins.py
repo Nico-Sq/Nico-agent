@@ -12,6 +12,12 @@ import jsonschema
 
 from .tools import resolve_external_tool_name
 
+PLUGIN_TIMEOUT_SECONDS = 10.0
+
+
+class PluginTimeout(RuntimeError):
+    pass
+
 
 class LocalPlugins:
     def __init__(self, path: Path | None = None):
@@ -66,5 +72,11 @@ class LocalPlugins:
 
     async def call(self, item: dict, arguments: dict) -> dict:
         jsonschema.validate(arguments, item["parameters"])
-        result = await asyncio.wait_for(asyncio.to_thread(self.tools[item["name"]]["run"], arguments), 10)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self.tools[item["name"]]["run"], arguments),
+                PLUGIN_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise PluginTimeout("插件调用超时，后台线程可能仍在运行") from exc
         return {"text": str(result)[:8000]}

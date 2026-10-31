@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from career_agent.channels import ConsoleChannel
+from career_agent.channels import (
+    ChannelAccessError,
+    ChannelDeliveryError,
+    ChannelRouter,
+    ConsoleChannel,
+    TextMessage,
+)
 from career_agent.cli import (
     build_parser,
     cli_error_text,
@@ -21,7 +27,7 @@ from career_agent.cli import (
 from career_agent.events import Usage
 from career_agent.mcp import MCPServers
 from career_agent.models import ModelCatalog
-from career_agent.plugins import LocalPlugins
+from career_agent.plugins import LocalPlugins, PluginTimeout
 from career_agent.providers import ModelError
 from career_agent.runtime import AgentRuntime
 from career_agent.store import Store
@@ -141,27 +147,165 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         self.assertTrue(all(len(name) <= 64 for name in names))
         self.assertNotIn("plugin_a_b_c", names)
 
+    def test_channel_router_rejects_unknown_sender_and_deduplicates_messages(self):
+        router = ChannelRouter(self.store, "test", {"alice", "bob"})
+        message = TextMessage("alice", "conversation", "message-1", "你好")
+        handled = []
+        delivered = []
+
+        async def handler(session, incoming):
+            handled.append((session["id"], incoming.message_id))
+            return "收到"
+
+        async def send(conversation_id, text, delivery_id):
+            delivered.append((conversation_id, text, delivery_id))
+
+        async def scenario():
+            first = await router.process(message, handler, send)
+            duplicate = await router.process(message, handler, send)
+            with self.assertRaisesRegex(ChannelAccessError, "其他用户"):
+                router.ensure_session("bob", "conversation")
+            with self.assertRaisesRegex(ChannelAccessError, "接入权限"):
+                router.ensure_session("charlie", "new-conversation")
+            return first, duplicate
+
+        first, duplicate = asyncio.run(scenario())
+        self.assertEqual(first.response, "收到")
+        self.assertTrue(duplicate.duplicate)
+        self.assertEqual(len(handled), 1)
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(len(self.store.list_sessions("chat")), 1)
+
+    def test_channel_delivery_failure_retries_without_rerunning_handler(self):
+        router = ChannelRouter(self.store, "test", {"alice"})
+        message = TextMessage("alice", "conversation", "message-2", "你好")
+        handled = []
+        sends = []
+
+        async def handler(session, incoming):
+            handled.append(incoming.message_id)
+            return "只生成一次"
+
+        async def failing_send(conversation_id, text, delivery_id):
+            sends.append(delivery_id)
+            raise ConnectionError("down")
+
+        async def successful_send(conversation_id, text, delivery_id):
+            sends.append(delivery_id)
+
+        async def scenario():
+            with self.assertRaises(ChannelDeliveryError):
+                await router.process(message, handler, failing_send)
+            retried = await router.retry_delivery(message.message_id, "conversation", successful_send)
+            duplicate = await router.process(message, handler, successful_send)
+            return retried, duplicate
+
+        retried, duplicate = asyncio.run(scenario())
+        self.assertTrue(retried.duplicate)
+        self.assertTrue(duplicate.duplicate)
+        self.assertEqual(handled, ["message-2"])
+        self.assertEqual(sends[0], sends[1])
+
+    def test_plugin_timeout_is_reported_as_possibly_still_running(self):
+        root = Path(self.temp.name)
+        plugin = root / "slow_plugin.py"
+        plugin.write_text(
+            "import time\n"
+            "def slow(arguments):\n"
+            "    time.sleep(0.05)\n"
+            "    return arguments['text']\n"
+            "TOOLS = [{'name':'slow','description':'slow','read_only':True,"
+            "'parameters':{'type':'object','properties':{'text':{'type':'string'}},"
+            "'required':['text'],'additionalProperties':False},'run':slow}]\n",
+            encoding="utf-8",
+        )
+        config = root / "slow.json"
+        config.write_text(json.dumps([{"path": plugin.name}]), encoding="utf-8")
+        plugins = LocalPlugins(config)
+        item = plugins.discover()[0]
+        with patch("career_agent.plugins.PLUGIN_TIMEOUT_SECONDS", 0.01):
+            with self.assertRaises(PluginTimeout):
+                asyncio.run(plugins.call(item, {"text": "hello"}))
+
+            class Provider:
+                def __init__(self):
+                    self.turn = 0
+
+                async def complete(self, messages, tools):
+                    self.turn += 1
+                    if self.turn == 1:
+                        return {"tool_calls": [{"id": "slow-1", "function": {
+                            "name": item["name"], "arguments": '{"text":"hello"}',
+                        }}]}
+                    return {"content": messages[-1]["content"]}
+
+            chat = self.store.create("chat")
+            self.store.set_tool_grants(chat["id"], [item["name"]])
+            running = self.store.claim_run(chat["id"], "chat", "active", "调用插件")
+            result = asyncio.run(AgentRuntime(self.store, Provider(), plugins=plugins).run(running))
+        self.assertIn('"error": "plugin_timeout"', result["message"])
+        self.assertIn('"may_still_be_running": true', result["message"])
+
+    def test_plugin_exception_has_stable_error_code(self):
+        root = Path(self.temp.name)
+        plugin = root / "broken_plugin.py"
+        plugin.write_text(
+            "def broken(arguments):\n"
+            "    raise RuntimeError('private detail')\n"
+            "TOOLS = [{'name':'broken','description':'broken','read_only':True,"
+            "'parameters':{'type':'object','properties':{},'additionalProperties':False},"
+            "'run':broken}]\n",
+            encoding="utf-8",
+        )
+        config = root / "broken.json"
+        config.write_text(json.dumps([{"path": plugin.name}]), encoding="utf-8")
+        plugins = LocalPlugins(config)
+        item = plugins.discover()[0]
+
+        class Provider:
+            def __init__(self):
+                self.turn = 0
+
+            async def complete(self, messages, tools):
+                self.turn += 1
+                if self.turn == 1:
+                    return {"tool_calls": [{"id": "broken-1", "function": {
+                        "name": item["name"], "arguments": "{}",
+                    }}]}
+                return {"content": messages[-1]["content"]}
+
+        chat = self.store.create("chat")
+        self.store.set_tool_grants(chat["id"], [item["name"]])
+        running = self.store.claim_run(chat["id"], "chat", "active", "调用故障插件")
+        result = asyncio.run(AgentRuntime(self.store, Provider(), plugins=plugins).run(running))
+        self.assertIn('"error": "plugin_tool_failed"', result["message"])
+        self.assertNotIn("private detail", result["message"])
+
     def test_console_channel_ends_on_exit_and_end_of_input(self):
         channel = ConsoleChannel()
         with patch("builtins.input", side_effect=["你好", "  /exit  "]):
-            self.assertEqual(asyncio.run(channel.receive()), "你好")
+            self.assertEqual(asyncio.run(channel.receive()).text, "你好")
             self.assertIsNone(asyncio.run(channel.receive()))
         with patch("builtins.input", side_effect=EOFError):
             self.assertIsNone(asyncio.run(channel.receive()))
         with patch("builtins.print") as output:
-            asyncio.run(channel.send("文本"))
+            asyncio.run(channel.send("console", "文本", "delivery-1"))
         output.assert_called_once_with("文本")
 
     def test_cli_channel_uses_runtime_and_persists_session(self):
         class Channel:
             def __init__(self):
-                self.inputs = iter(["你好", None])
+                self.inputs = iter([TextMessage("local", "test", "message-1", "你好"), None])
                 self.outputs = []
+                self.sender_id = "local"
+                self.conversation_id = "test"
+                self.allowed_senders = {"local"}
+                self.name = "test"
 
             async def receive(self):
                 return next(self.inputs)
 
-            async def send(self, text):
+            async def send(self, conversation_id, text, delivery_id):
                 self.outputs.append(text)
 
         channel = Channel()
@@ -172,13 +316,17 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
     def test_cli_channel_retry_reuses_unanswered_message(self):
         class Channel:
             def __init__(self):
-                self.inputs = iter(["/retry", None])
+                self.inputs = iter([TextMessage("local", "test", "message-2", "/retry"), None])
                 self.outputs = []
+                self.sender_id = "local"
+                self.conversation_id = "test"
+                self.allowed_senders = {"local"}
+                self.name = "test"
 
             async def receive(self):
                 return next(self.inputs)
 
-            async def send(self, text):
+            async def send(self, conversation_id, text, delivery_id):
                 self.outputs.append(text)
 
         chat = self.store.create("chat")

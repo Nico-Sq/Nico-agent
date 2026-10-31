@@ -12,7 +12,7 @@ from .context import (
 )
 from .events import Usage, run_event
 from .mcp import MCPServers
-from .plugins import LocalPlugins
+from .plugins import LocalPlugins, PluginTimeout
 from .provider import Provider
 from .providers import ModelError
 from .store import Store
@@ -117,6 +117,8 @@ class AgentRuntime:
                                   else await self.mcp.call(tool, args))
             except RunSuperseded:
                 raise
+            except PluginTimeout:
+                result = {"error": "plugin_timeout", "may_still_be_running": True}
             except Exception:
                 result = {"error": failure}
             record(self.store, session, name, result)

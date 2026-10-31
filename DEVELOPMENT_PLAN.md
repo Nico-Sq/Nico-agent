@@ -1,6 +1,6 @@
 # Nico-agent 后续开发阶段任务文档
 
-> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–5 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
+> 盘点日期：2026-10-31。依据当前源码和测试阅读；阶段 1–6 已完成本地自动化验证，未启动长期服务或验证真实商业模型端点。后续完成一阶段时更新状态和验证记录。
 
 ## 目标与边界
 
@@ -39,11 +39,11 @@ flowchart LR
 | OpenAI Chat Completions、兼容端点、Anthropic、demo 与会话选模型 | 已完成协议适配与本地 HTTP 契约 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`；`tests/test_provider.py`、`tests/test_core.py`、`tests/test_model_contracts.py` | 真实端点兼容性与效果未验证；目前是非流式 JSON 请求 |
 | 内置只读工具与资源权限 | 已完成 | `career_agent/tools.py`、`career_agent/store.py`；`tests/test_core.py` 中 permission/material/report 用例 | 授权规则主要针对现有读取范围 |
 | 本地 stdio MCP、白名单、会话授权、连接复用及失败隔离 | 已完成只读安全闭环 | `career_agent/mcp.py`、`career_agent/runtime.py`、`career_agent/main.py`；`tests/test_mcp.py` | 仅 stdio；非只读工具默认不可授权和调用；工具名有长度与碰撞处理 |
-| 本地 Python 插件发现、参数校验、调用 | 已完成可信插件只读基础能力 | `career_agent/plugins.py`、`career_agent/runtime.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 只有 `read_only=true` 会提供并执行；插件同进程运行，超时线程不能保证停止，不能视为沙箱 |
+| 本地 Python 插件发现、参数校验、调用 | 已完成可信插件只读基础能力 | `career_agent/plugins.py`、`career_agent/runtime.py`、`examples/echo_plugin.py`；`tests/test_extensions.py` | 只有 `read_only=true` 会提供并执行；超时明确标记后台线程可能仍在运行，插件仍不是沙箱 |
 | 短期上下文、固定备注、可回源记忆候选与确认后长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`、`career_agent/main.py`；`tests/test_core.py`、`tests/test_api.py`、`tests/test_auth.py` | 候选需用户确认；长期记忆仍为 `LIKE` 字面检索，没有自动确认或向量检索 |
 | CLI 聊天、面试闭环、候选记忆、模型与工具授权命令 | 已完成本机入口 | `career_agent/cli.py`、`career_agent/channels.py`；`tests/test_extensions.py` | 账户模式下仍拒绝直连数据库，需使用 Web API |
 | WebUI、登录、业务数据备份/恢复与文本材料提取 | 已有可用实现 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`career_agent/extract.py`；`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py`、`tests/test_restore.py` | 不作为公网部署方案 |
-| 通用聊天渠道接入 | 部分：仅接口与终端实例 | `career_agent/channels.py`、`career_agent/cli.py`；`tests/test_extensions.py` | 没有其他渠道适配、身份映射、入站路由或投递失败处理 |
+| 通用聊天渠道边界 | 已完成本机契约；尚无第二平台适配 | `career_agent/channels.py`、`career_agent/cli.py`；`tests/test_extensions.py` | 已支持发送者/会话绑定、入站去重和同 delivery ID 重试；身份与幂等账本仅限运行进程 |
 | 自动写入未经确认的记忆、语义检索、远端 MCP、插件隔离、流式输出 | 尚未实现 | 现有入口见 `career_agent/context.py`、`career_agent/store.py`、`career_agent/mcp.py`、`career_agent/plugins.py`、`career_agent/provider.py`；这些文件没有对应执行路径 | 均不是当前阶段自动承诺的功能；按下方触发条件扩展 |
 
 ## 影响后续开发的缺口与风险
@@ -53,7 +53,7 @@ flowchart LR
 1. `career_agent/runtime.py` 已登记当前运行 Task，控制入口会取消本进程中的旧模型请求；`career_agent/providers/transport.py` 的 HTTP 上下文会随 Task 取消关闭。`career_agent/plugins.py` 仍用 `asyncio.to_thread` 调用同步插件，已经进入线程的工作不能保证停止；已发出的 MCP 远端操作也不能保证撤销。
 2. `career_agent/store.py:set_tool_grants` 仍只存工具名；当前由 API/CLI 授权检查和 `career_agent/runtime.py` 执行检查共同强制“只有只读工具可用”。增加写工具前必须增加操作等级与确认语义，不能只放宽 `readOnlyHint`。
 3. `career_agent/context.py` 仍只取最近 16 条完整消息、可选固定备注和按需工具结果；`career_agent/store.py:search_memories` 是 SQLite `LIKE`。超出窗口的信息现在可经带来源候选转为长期记忆，但不会自动注入上下文，检索同义表述仍无保证。
-4. `career_agent/channels.py` 只有 `receive/send` 与终端实现；聊天、面试、候选记忆和工具命令已经在本机 CLI 可用。新增渠道仍需先处理发送者身份、会话归属和授权上下文，不能仅转发文本。
+4. `career_agent/channels.py` 已有发送者、渠道会话、消息 ID、绑定、去重和投递重试边界；当前只有终端适配，绑定与幂等状态仍保存在进程内。接入真实第二渠道前需要确认平台消息 ID 稳定性、身份来源和投递幂等语义。
 
 **需要验证的推测：**真实 OpenAI 兼容服务对工具参数、finish reason、用量字段和超时行为可能有差异；当前单例 MCP 连接在频繁掉线时的恢复可能影响体验；`LIKE` 检索是否足够取决于用户长期记忆规模和查询习惯。先用指定端点的契约测试或使用记录验证，再决定是否扩展协议或检索技术。当前自动化测试结果如下，真实端点效果仍未验证。
 
@@ -80,6 +80,9 @@ flowchart LR
 | nanobot：`E:/nanobot/nanobot/apps/cli/service.py`、`apps/cli/utils.py` | CLI 服务层复用会话/运行时服务，命令行输出状态化结果 | **调整后采用**薄命令层复用业务服务；当前无需常驻服务进程或完整 TUI。 |
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/tests/test_main_lightweight_commands.py` | 管理命令独立分发并验证退出码、帮助和副作用 | **调整后采用**可测试的命令函数、明确退出码和无效状态不写库；不复制其多阶段初始化框架。 |
 | Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/cli/args.ts`、`cli/session-picker.ts` | CLI 明确参数、会话恢复与模型选择 | **调整后采用**显式子命令、会话 ID 和模型显示；当前规模不需要交互式 session picker/TUI。 |
+| nanobot：`E:/nanobot/nanobot/channels/base.py`、`channels/manager.py` | 渠道入站先校验发送者；发送实现抛错，由管理器统一重试 | **调整后采用**发送者/会话绑定、集中去重和稳定 delivery ID；当前只需单渠道进程，不复制多平台 manager 与配对码体系。 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/plugins/base.py`、`plugins/manager.py`、`dashboard_host.py` | 插件有显式加载/生命周期和关闭回调 | **调整后采用**“加载时验证、调用异常/超时稳定分类”的最小边界；当前可信单文件插件无需重载和 dashboard 生命周期框架。 |
+| Pi-agent/pi：`E:/Agent/Pi-agent/pi/packages/coding-agent/src/core/extensions/loader.ts`、`runner.ts` | 扩展注册、活动状态和工具声明有生命周期约束 | **调整后采用**加载后工具定义不可变的约束；完整扩展热重载、命令/UI 注册**不采用**，当前没有需求。 |
 
 ## 后续阶段（必须完成）
 
@@ -130,13 +133,14 @@ flowchart LR
 - **验证记录（2026-10-31）**：聊天支持 `/retry` 复用未回复消息；面试创建、开始、回答、跳题、暂停、恢复、结束、报告和复练均通过共享 Store/Runtime；无效状态不产生新消息；`candidate` 子命令覆盖候选查看、创建、编辑、确认和删除。CLI 输出包含会话状态、模型和工具授权。全套 128 个测试通过。
 - **依赖/风险**：依赖阶段 1 的运行契约、阶段 2 的模型配置、阶段 3 的工具授权语义和阶段 4 的候选记忆。账户模式仍要求使用 Web API；真实模型端点未验证。
 
-### 阶段 6：插件与渠道边界
+### 阶段 6：插件与渠道边界（本机契约已完成）
 
 - **具体功能**：在可信本地插件机制上固定生命周期、非只读执行确认、超时后的状态报告；把当前 `TextChannel` 所缺的发送者身份、会话归属和投递结果约束落到一个可复用的入口。使用现有终端入口和测试渠道验证，不预装多平台 SDK。有明确目标渠道时，再接一个实际的本机文字渠道。
-- **预期改动**：`career_agent/plugins.py`、`channels.py`、`runtime.py`、`cli.py`；`tests/test_extensions.py` 与渠道契约测试。实际渠道适配模块仅在渠道确定后增加。
+- **实际改动**：`career_agent/plugins.py`、`channels.py`、`runtime.py`、`cli.py`、`README.md`；`tests/test_extensions.py`。没有增加平台 SDK。
 - **对外结果**：可信插件在授权后可用；终端仍可进入同一后端，新增渠道有明确的身份与会话接入规则。选定目标渠道后可从该渠道使用聊天。
 - **完成标准与必要测试**：插件参数、名称冲突、异常、超时有稳定结果；不能把 `to_thread` 超时说成副作用已取消；测试渠道的陌生发送者不能进入已有会话，重复入站不重复运行，投递失败可观察并安全重试。建议 `python -m unittest tests.test_extensions -v` 与新增渠道契约测试，再运行全套测试。实际渠道的端到端验证留给选定渠道后的扩展任务。
-- **依赖/风险**：依赖阶段 3 的写工具政策与阶段 5 的对话入口。**待决**：第二渠道选哪一种；若没有实际渠道需求，不提前实现平台适配。进程隔离/沙箱只在需要不可信插件时另立任务。
+- **验证记录（2026-10-31）**：插件异常返回 `plugin_tool_failed`，超时返回 `plugin_timeout` 与 `may_still_be_running=true`；渠道路由拒绝未允许发送者，并阻止其他允许用户接管已绑定会话；同一消息 ID 只运行一次；投递失败后复用同一 delivery ID 重试且不重复运行模型。全套 132 个测试通过。
+- **依赖/风险**：依赖阶段 3 的写工具政策与阶段 5 的对话入口。**待决**：第二渠道选哪一种；若没有实际渠道需求，不提前实现平台适配。绑定与幂等状态仅保存在进程内，跨进程去重需平台消息账本或后续持久化；进程隔离只用于不可信插件。
 
 ### 阶段 7：现有 WebUI 收尾
 
@@ -160,7 +164,7 @@ flowchart LR
 - [x] 阶段 3：外部工具只读权限和本地 MCP 安全闭环通过测试；写工具仍关闭。
 - [x] 阶段 4：记忆候选可回源、可修改和确认，确认后进入长期记忆且保持账户/面试隔离。
 - [x] 阶段 5：CLI 聊天、面试完整闭环和候选记忆管理可用。
-- [ ] 阶段 6：插件与渠道边界通过测试；有明确渠道时再接第二文字入口。
+- [x] 阶段 6：插件与渠道边界通过本地契约测试；第二文字入口等待明确目标。
 - [ ] 阶段 7：现有 WebUI 接入新增能力并完成本机检查。
 
 ## 待用户决定
