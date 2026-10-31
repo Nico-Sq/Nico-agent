@@ -50,7 +50,7 @@ python -m career_agent
 
 短期记忆来自本会话最近 16 条消息和聊天会话的固定备注。长期记忆仅在用户通过 `POST /api/memories` 提交 `{"content":"..."}` 时保存，不自动从对话提炼；`GET /api/memories?q=关键词` 检索，`DELETE /api/memories/{id}` 删除。保存前会折叠连续空白；内容完全相同时不新增副本，直接返回已有记录的 `id` 并标记 `"created": false`。每个账户最多保存 200 条，超出后返回 422 并提示先删除；`python -m career_agent.cli memory add` 遇到重复会输出已有 ID 并注明“已存在”。聊天 Agent 可调用 `search_memories` 查找明确保存的记忆，面试 Agent 不读取聊天记忆。启用登录后长期记忆仍按账户数据库隔离。
 
-终端接入与 Web API 共用同一运行时和本地数据库：`python -m career_agent.cli chat`，输入 `/exit` 退出；`--model claude` 可选目录中的模型，`--session <ID>` 恢复已有聊天。`python -m career_agent.cli models` 列出模型；`memory list|add|delete` 管理长期记忆；`tools list|grant|revoke` 查看并按会话授权外部工具。CLI 的 `TextChannel` 接口由 `ConsoleChannel` 实际实现，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
+终端接入与 Web API 共用同一运行时和本地数据库：`python -m career_agent.cli chat`，输入 `/exit` 退出；`--model claude` 可选目录中的模型，`--session <ID>` 恢复已有聊天。`python -m career_agent.cli models` 列出模型；`memory list|add|delete` 管理长期记忆；`tools list|grant|revoke` 查看并按会话授权外部工具。CLI 的 `TextChannel` 接口与 `ConsoleChannel` 实现位于 `career_agent/channels.py`，可作为以后接入其他本地渠道的边界。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
 
 本地插件示例位于 `examples/echo_plugin.py` 和 `examples/plugins.json`。设置 `LOCAL_PLUGINS_PATH=./examples/plugins.json` 后启动服务，`GET /api/tools` 可发现 `plugin_echo_plugin_echo`；按上文的会话工具接口授权，再在聊天中请模型调用该工具。插件需要提供 `TOOLS` 列表，每项包括 `name`、`description`、`parameters`（JSON Schema 对象）、可选的 `read_only` 和同步 `run(arguments)` 函数；插件代码在启动时执行，只配置自己信任的文件。插件与 MCP 使用相同的会话授权和参数校验入口。`read_only` 为 true 的工具（MCP 工具由服务端的 `readOnlyHint` 标注）在同一轮连续出现的调用会并行执行，未声明的工具按出现顺序单独串行执行，避免有副作用的调用乱序。内置读取工具均为只读。测试命令：`python -m unittest discover -s tests -q`。
 

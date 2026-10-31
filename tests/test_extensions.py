@@ -2,7 +2,9 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from career_agent.channels import ConsoleChannel
 from career_agent.cli import run_channel
 from career_agent.events import Usage
 from career_agent.plugins import LocalPlugins
@@ -94,6 +96,17 @@ class ExtensionTests(unittest.TestCase):
         config = Path(self.temp.name) / "plugins-bom.json"
         config.write_text('[{"path": "%s"}]' % plugin, encoding="utf-8-sig")
         self.assertEqual(LocalPlugins(config).discover()[0]["name"], "plugin_echo_plugin_echo")
+
+    def test_console_channel_ends_on_exit_and_end_of_input(self):
+        channel = ConsoleChannel()
+        with patch("builtins.input", side_effect=["你好", "  /exit  "]):
+            self.assertEqual(asyncio.run(channel.receive()), "你好")
+            self.assertIsNone(asyncio.run(channel.receive()))
+        with patch("builtins.input", side_effect=EOFError):
+            self.assertIsNone(asyncio.run(channel.receive()))
+        with patch("builtins.print") as output:
+            asyncio.run(channel.send("文本"))
+        output.assert_called_once_with("文本")
 
     def test_cli_channel_uses_runtime_and_persists_session(self):
         class Channel:

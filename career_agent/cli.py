@@ -4,31 +4,14 @@ import argparse
 import asyncio
 import os
 from pathlib import Path
-from typing import Protocol
 
+from .channels import ConsoleChannel, TextChannel
 from .mcp import MCPServers
 from .models import ModelCatalog
 from .plugins import LocalPlugins
 from .providers import ModelError
 from .runtime import AgentRuntime
 from .store import Store
-
-
-class TextChannel(Protocol):
-    async def receive(self) -> str | None: ...
-    async def send(self, text: str) -> None: ...
-
-
-class ConsoleChannel:
-    async def receive(self) -> str | None:
-        try:
-            value = await asyncio.to_thread(input, "你> ")
-        except (EOFError, KeyboardInterrupt):
-            return None
-        return None if value.strip() in ("/exit", "/quit") else value
-
-    async def send(self, text: str) -> None:
-        print(text)
 
 
 async def run_channel(channel: TextChannel, store: Store, model_id: str = "default",
