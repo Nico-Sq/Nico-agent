@@ -138,6 +138,10 @@ class ChatMemoryInput(BaseModel):
     text: str = Field(max_length=2000)
 
 
+class LongMemoryInput(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class SessionTitleInput(BaseModel):
     title: str = Field(max_length=80)
 
@@ -192,6 +196,23 @@ def config():
 @app.get("/api/models")
 def list_models():
     return model_catalog.list()
+
+
+@app.get("/api/memories")
+def list_memories(q: str = Query(default="", max_length=100)):
+    return active_store().search_memories(q)
+
+
+@app.post("/api/memories")
+def add_memory(body: LongMemoryInput):
+    return active_store().add_memory(nonempty(body.content))
+
+
+@app.delete("/api/memories/{memory_id}")
+def delete_memory(memory_id: str):
+    if not active_store().delete_memory(memory_id):
+        raise HTTPException(404, "记忆不存在")
+    return {"deleted": True}
 
 
 @app.get("/api/mcp/tools")

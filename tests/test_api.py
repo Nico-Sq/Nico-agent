@@ -57,6 +57,17 @@ class InterviewApiTests(unittest.TestCase):
                 "model_id": "missing",
             }).status_code, 422)
 
+    def test_long_term_memory_search_and_delete(self):
+        created = self.client.post("/api/memories", json={"content": "熟悉 Python 和 SQL"})
+        self.assertEqual(created.status_code, 200)
+        memory_id = created.json()["id"]
+        self.assertEqual(len(self.client.get("/api/memories", params={"q": "Python"}).json()), 1)
+        self.assertEqual(self.client.get("/api/memories", params={"q": "%"}).json(), [])
+        self.assertEqual(self.client.post("/api/memories", json={"content": "  "}).status_code, 422)
+        self.assertEqual(self.client.delete(f"/api/memories/{memory_id}").status_code, 200)
+        self.assertEqual(self.client.get("/api/memories").json(), [])
+        self.assertEqual(self.client.delete(f"/api/memories/{memory_id}").status_code, 404)
+
     def test_session_titles_are_display_only_and_can_be_reset(self):
         chat = self.client.post("/api/chat/sessions").json()
         pending = self.client.post(f"/api/chat/sessions/{chat['id']}/messages/claim", json={

@@ -1,4 +1,4 @@
-const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, selectionSeq: 0, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, modelReady: true, models: [], ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, selectionSeq: 0, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
 let sessionSearchTimer;
@@ -23,6 +23,7 @@ function showAuth() {
   state.models = [];
   for (const id of ["chat-form", "answer-form", "material-form", "claim-form", "interview-setup", "chat-memory-form"]) $(id).reset();
   if ($("resource-editor").open) $("resource-editor").close();
+  if ($("platform-settings").open) $("platform-settings").close();
   $("chat-resource").replaceChildren(new Option("选择要讨论的内容", ""));
   $("material-list").replaceChildren();
   $("claim-list").replaceChildren();
@@ -861,8 +862,126 @@ $("resume-button").onclick = () => action("interview", async () => {
   finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
 });
 
+function settingsNotice(message = "") { $("settings-notice").textContent = message; }
+function renderModelSettings() {
+  const box = $("settings-model-list");
+  box.replaceChildren();
+  for (const model of state.models) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const content = document.createElement("div");
+    content.className = "settings-row-content";
+    const title = document.createElement("strong");
+    title.textContent = `${model.id} · ${model.provider}`;
+    const detail = document.createElement("small");
+    detail.textContent = `${model.model || "演示模型"} · ${model.config_error || "已就绪 · 支持工具调用"}`;
+    content.append(title, detail);
+    row.append(content);
+    box.append(row);
+  }
+}
+async function loadToolSettings() {
+  const box = $("settings-tool-list");
+  box.replaceChildren();
+  const id = state.ids[state.kind];
+  if (!id) {
+    box.textContent = "先创建或打开一个会话，再授权外部工具。";
+    $("save-tool-grants").disabled = true;
+    return;
+  }
+  const kind = state.kind;
+  try {
+    const [tools, grants] = await Promise.all([api("/tools"), api(`/${kind}/sessions/${id}/tools`)]);
+    if (state.ids[state.kind] !== id || state.kind !== kind) return;
+    if (!tools.length) box.textContent = "当前没有配置外部工具。";
+    for (const tool of tools) {
+      const label = document.createElement("label");
+      label.className = "settings-row";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = tool.name;
+      checkbox.checked = grants.names.includes(tool.name);
+      const content = document.createElement("span");
+      content.className = "settings-row-content";
+      const name = document.createElement("strong");
+      name.textContent = tool.name;
+      const description = document.createElement("small");
+      description.textContent = tool.description || "无描述";
+      content.append(name, description);
+      label.append(checkbox, content);
+      box.append(label);
+    }
+    $("save-tool-grants").disabled = !tools.length;
+  } catch (error) {
+    box.textContent = "工具发现失败，请检查本地服务器配置。";
+    $("save-tool-grants").disabled = true;
+    settingsNotice(error.message);
+  }
+}
+async function loadMemorySettings() {
+  const box = $("settings-memory-list");
+  const query = $("memory-search").value.trim();
+  const items = await api(`/memories?q=${encodeURIComponent(query)}`);
+  if (query !== $("memory-search").value.trim()) return;
+  box.replaceChildren();
+  if (!items.length) box.textContent = "没有匹配的记忆。";
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    const content = document.createElement("span");
+    content.className = "settings-row-content";
+    content.textContent = item.content;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = "删除";
+    button.setAttribute("aria-label", `删除记忆：${item.content.slice(0, 30)}`);
+    button.onclick = async () => {
+      if (!window.confirm("删除这条长期记忆？")) return;
+      try { await api(`/memories/${item.id}`, { method: "DELETE" }); await loadMemorySettings(); settingsNotice("记忆已删除。") }
+      catch (error) { settingsNotice(error.message); }
+    };
+    row.append(content, button);
+    box.append(row);
+  }
+}
 $("chat-model").onchange = updateModelReadiness;
 $("interview-model").onchange = updateModelReadiness;
+$("open-settings").onclick = async () => {
+  $("platform-settings").showModal();
+  settingsNotice();
+  renderModelSettings();
+  await Promise.allSettled([loadToolSettings(), loadMemorySettings()]);
+};
+$("close-settings").onclick = () => $("platform-settings").close();
+$("save-tool-grants").onclick = async () => {
+  const id = state.ids[state.kind];
+  if (!id) return;
+  const names = [...$("settings-tool-list").querySelectorAll("input:checked")].map((item) => item.value);
+  $("save-tool-grants").disabled = true;
+  try {
+    await api(`/${state.kind}/sessions/${id}/tools`, { method: "PUT", body: JSON.stringify({ names }) });
+    settingsNotice("工具授权已保存，将在下次运行时生效。");
+  } catch (error) { settingsNotice(error.message); }
+  finally { $("save-tool-grants").disabled = false; }
+};
+$("long-memory-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const content = $("long-memory-input").value.trim();
+  if (!content) return;
+  try {
+    await api("/memories", { method: "POST", body: JSON.stringify({ content }) });
+    $("long-memory-input").value = "";
+    await loadMemorySettings();
+    settingsNotice("记忆已保存。")
+  } catch (error) { settingsNotice(error.message); }
+};
+let memorySearchTimer;
+$("memory-search").oninput = () => {
+  clearTimeout(memorySearchTimer);
+  memorySearchTimer = setTimeout(() => loadMemorySettings().catch((error) => settingsNotice(error.message)), 200);
+};
+
 async function authenticate(mode) {
   const username = $("auth-username").value.trim();
   const password = $("auth-password").value;

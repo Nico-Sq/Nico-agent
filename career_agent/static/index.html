@@ -48,7 +48,7 @@
       <div class="sidebar-footer"><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
     </aside>
     <div class="main-column">
-      <header class="topbar"><div><h1 id="workspace-title">新对话</h1><p id="workspace-subtitle">聊聊岗位、经历或下一步准备</p></div><span id="provider" class="badge">读取模型配置中</span></header>
+      <header class="topbar"><div><h1 id="workspace-title">新对话</h1><p id="workspace-subtitle">聊聊岗位、经历或下一步准备</p></div><div class="topbar-actions"><span id="provider" class="badge">读取模型配置中</span><button id="open-settings" type="button" class="secondary">平台设置</button></div></header>
       <p id="provider-data-notice" class="privacy-notice" hidden>真实模型模式会把本次消息、面试回答及获授权读取的材料发送到已配置的模型服务。</p>
       <p id="model-config-notice" class="notice" role="alert" hidden></p>
       <main id="main-content" class="workspace">
@@ -141,6 +141,13 @@
       <p id="resource-edit-error" role="alert" hidden></p>
       <div class="composer-actions"><button id="resource-edit-cancel" type="button" class="secondary">取消</button><button type="submit">保存新版本</button></div>
     </form>
+  </dialog>
+  <dialog id="platform-settings" aria-labelledby="platform-settings-heading">
+    <div class="settings-heading"><div><span class="eyebrow">LOCAL AGENT</span><h2 id="platform-settings-heading">平台设置</h2></div><button id="close-settings" type="button" class="secondary">关闭</button></div>
+    <section class="settings-section" aria-labelledby="settings-models-heading"><h3 id="settings-models-heading">模型配置</h3><p>模型和密钥由本机环境变量及模型目录提供。新会话可在输入区选择模型。</p><div id="settings-model-list" class="settings-list"></div></section>
+    <section class="settings-section" aria-labelledby="settings-tools-heading"><h3 id="settings-tools-heading">当前会话工具授权</h3><p>只有你明确勾选并保存的外部工具才会出现在本会话的模型调用中。</p><div id="settings-tool-list" class="settings-list"></div><button id="save-tool-grants" type="button">保存工具授权</button></section>
+    <section class="settings-section" aria-labelledby="settings-memory-heading"><h3 id="settings-memory-heading">长期记忆</h3><p>仅保存你主动提交的内容，可搜索和删除；面试不会读取聊天记忆。</p><form id="long-memory-form"><label for="long-memory-input">记住一条信息</label><textarea id="long-memory-input" maxlength="2000" rows="2" required></textarea><button type="submit">保存记忆</button></form><label for="memory-search">搜索记忆</label><input id="memory-search" type="search" maxlength="100" placeholder="输入关键词"><div id="settings-memory-list" class="settings-list"></div></section>
+    <p id="settings-notice" class="notice" role="status" aria-live="polite"></p>
   </dialog>
   <script src="/static/app.js" defer></script>
 </body>

@@ -50,6 +50,11 @@ class Store:
                     tool_name TEXT NOT NULL,
                     PRIMARY KEY (session_id, tool_name)
                 );
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS materials (
                     id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL CHECK (kind IN ('resume', 'job_description', 'project')),
@@ -423,6 +428,24 @@ class Store:
             rows = db.execute("SELECT tool_name FROM session_tool_grants WHERE session_id = ? ORDER BY tool_name",
                               (session_id,)).fetchall()
         return [row["tool_name"] for row in rows]
+
+    def add_memory(self, content: str) -> dict:
+        memory_id = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute("INSERT INTO memories(id, content, created_at) VALUES (?, ?, ?)",
+                       (memory_id, content, now()))
+        return {"id": memory_id, "content": content}
+
+    def search_memories(self, query: str = "") -> list[dict]:
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self.connect() as db:
+            rows = db.execute("SELECT id, content, created_at FROM memories WHERE content LIKE ? ESCAPE '\\' "
+                              "ORDER BY created_at DESC LIMIT 50", (f"%{escaped}%",)).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_memory(self, memory_id: str) -> bool:
+        with self.connect() as db:
+            return bool(db.execute("DELETE FROM memories WHERE id = ?", (memory_id,)).rowcount)
 
     def set_tool_grants(self, session_id: str, names: list[str]) -> list[str]:
         with self.connect() as db:
