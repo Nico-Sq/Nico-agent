@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field
 from .auth import AuthStore, LoginRateLimited
 from .auto_backup import backup_all
 from .extract import MAX_FILE_BYTES, extract_text
+from .mcp import MCPServers
 from .models import ModelCatalog
+from .plugins import LocalPlugins
 from .provider import ModelError, Provider
 from .runtime import AgentRuntime
 from .store import Store
@@ -27,7 +29,9 @@ auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
 store = Store(DATA_DIR / "career_agent.sqlite3")
 provider = Provider()
 model_catalog = ModelCatalog()
-runtime = AgentRuntime(store, provider)
+mcp_servers = MCPServers()
+local_plugins = LocalPlugins()
+runtime = AgentRuntime(store, provider, mcp_servers, local_plugins)
 
 
 @asynccontextmanager
@@ -78,7 +82,7 @@ async def bind_account(request: Request, call_next):
         return JSONResponse({"detail": "请先登录"}, status_code=401)
     scoped_store = Store(DATA_DIR / "users" / user_id / "career_agent.sqlite3")
     store_token = request_store.set(scoped_store)
-    runtime_token = request_runtime.set(AgentRuntime(scoped_store, provider))
+    runtime_token = request_runtime.set(AgentRuntime(scoped_store, provider, mcp_servers, local_plugins))
     try:
         return await call_next(request)
     finally:
@@ -100,6 +104,10 @@ class InterviewInput(BaseModel):
 
 class ChatCreateInput(BaseModel):
     model_id: str = Field(default="default", min_length=1, max_length=80)
+
+
+class ToolGrantsInput(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=20)
 
 
 class MaterialInput(BaseModel):
@@ -165,7 +173,7 @@ async def complete_run(session: dict) -> dict | JSONResponse:
     try:
         selected = session.get("model_id", "default")
         run = active_runtime() if selected == "default" else AgentRuntime(
-            active_store(), model_catalog.get(selected))
+            active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
         return await run.run(session)
     except ModelError as exc:
         return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
@@ -184,6 +192,46 @@ def config():
 @app.get("/api/models")
 def list_models():
     return model_catalog.list()
+
+
+@app.get("/api/mcp/tools")
+async def list_mcp_tools():
+    try:
+        return await mcp_servers.discover()
+    except Exception as exc:
+        raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
+
+
+@app.get("/api/tools")
+async def list_tools():
+    try:
+        return local_plugins.discover() + await mcp_servers.discover()
+    except Exception as exc:
+        raise HTTPException(502, "工具发现失败，请检查本地插件或 MCP 配置") from exc
+
+
+@app.get("/api/{kind}/sessions/{session_id}/tools")
+def get_session_tools(kind: str, session_id: str):
+    if kind not in ("chat", "interview"):
+        raise HTTPException(404)
+    require_session(session_id, kind)
+    return {"names": active_store().tool_grants(session_id)}
+
+
+@app.put("/api/{kind}/sessions/{session_id}/tools")
+async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
+    if kind not in ("chat", "interview"):
+        raise HTTPException(404)
+    session = require_session(session_id, kind)
+    if session["status"] == "running":
+        raise HTTPException(409, "运行中不能修改工具授权")
+    try:
+        available = {item["name"] for item in local_plugins.discover() + await mcp_servers.discover()}
+    except Exception as exc:
+        raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
+    if not set(body.names) <= available:
+        raise HTTPException(422, "包含未配置的 MCP 工具")
+    return {"names": active_store().set_tool_grants(session_id, body.names)}
 
 
 @app.get("/api/data/backup")

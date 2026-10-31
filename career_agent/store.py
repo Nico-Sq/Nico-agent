@@ -45,6 +45,11 @@ class Store:
                     detail TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS session_tool_grants (
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    tool_name TEXT NOT NULL,
+                    PRIMARY KEY (session_id, tool_name)
+                );
                 CREATE TABLE IF NOT EXISTS materials (
                     id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL CHECK (kind IN ('resume', 'job_description', 'project')),
@@ -413,6 +418,19 @@ class Store:
             ).rowcount
         return self.get(session_id, kind) if changed else None
 
+    def tool_grants(self, session_id: str) -> list[str]:
+        with self.connect() as db:
+            rows = db.execute("SELECT tool_name FROM session_tool_grants WHERE session_id = ? ORDER BY tool_name",
+                              (session_id,)).fetchall()
+        return [row["tool_name"] for row in rows]
+
+    def set_tool_grants(self, session_id: str, names: list[str]) -> list[str]:
+        with self.connect() as db:
+            db.execute("DELETE FROM session_tool_grants WHERE session_id = ?", (session_id,))
+            db.executemany("INSERT INTO session_tool_grants(session_id, tool_name) VALUES (?, ?)",
+                           [(session_id, name) for name in sorted(set(names))])
+        return self.tool_grants(session_id)
+
     def delete_session(self, session_id: str, kind: str) -> bool:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -425,7 +443,7 @@ class Store:
             if not ids:
                 return False
             for table in ("interview_evidence", "interview_items", "session_materials",
-                          "session_claims", "messages", "events", "practice_sessions"):
+                          "session_claims", "session_tool_grants", "messages", "events", "practice_sessions"):
                 db.executemany(f"DELETE FROM {table} WHERE session_id = ?", [(item,) for item in ids])
             db.executemany("DELETE FROM sessions WHERE id = ?", [(item,) for item in ids])
         return True
