@@ -11,7 +11,7 @@ python -m pip install -e .
 python -m career_agent
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。该命令只监听本机回环地址；开发时需要自动重载可运行 `python -m uvicorn career_agent.main:app --reload`。默认 `MODEL_PROVIDER=demo`，可以直接体验 1–10 题流程；演示反馈是固定文本，不代表真实评价。
+浏览器打开 `http://127.0.0.1:8000`。该命令只监听本机回环地址；开发时需要自动重载可运行 `python -m uvicorn career_agent.main:app --reload`。默认 `MODEL_PROVIDER=demo`，可以直接体验 1–10 题流程；演示聊天只回显输入的前 1000 字，演示反馈是固定文本，不代表真实评价。
 
 接 OpenAI 兼容的聊天补全接口时，在启动前设置环境变量。请求使用 `max_tokens=2048`；所选端点需要支持该参数和工具调用协议：
 

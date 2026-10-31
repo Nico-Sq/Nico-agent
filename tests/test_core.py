@@ -264,6 +264,14 @@ class CoreTests(unittest.TestCase):
             run_demo(AgentRuntime(self.store, OversizedProvider()).run(running))
         self.assertEqual([row["role"] for row in self.store.messages(chat["id"], "chat")], ["user"])
 
+    def test_demo_chat_accepts_maximum_length_input(self):
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "甲" * 12000)
+        result = run_demo(self.runtime.run(running))
+        self.assertLess(len(result["message"]), MAX_MODEL_OUTPUT_CHARS)
+        self.assertIn("演示模式已收到：", result["message"])
+        self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
+
     def test_interview_rejects_next_question_after_last_answer(self):
         class InvalidFinalProvider:
             async def complete(self, messages, tools):

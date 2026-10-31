@@ -178,5 +178,6 @@ class Provider:
             }]}
         return {
             "role": "assistant",
-            "content": f"演示模式已收到：{latest}\n\n配置真实模型后，我可以讨论岗位、整理你确认的经历，并解释指定的面试反馈。",
+            "content": f"演示模式已收到：{latest[:1000]}{'…' if len(latest) > 1000 else ''}\n\n"
+                       "配置真实模型后，我可以讨论岗位、整理你确认的经历，并解释指定的面试反馈。",
         }
