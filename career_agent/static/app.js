@@ -12,6 +12,7 @@ function showAuth() {
   state.username = null;
   $("session-search").value = "";
   $("session-title-form").hidden = true;
+  setHistoryOpen(false);
   $("sessions").replaceChildren();
   renderMessages("chat", []);
   renderMessages("interview", []);
@@ -42,6 +43,11 @@ async function api(path, options = {}) {
 }
 
 function notice(message = "") { $("notice").textContent = message; }
+function setHistoryOpen(open) {
+  $("sidebar-history").classList.toggle("open", open);
+  $("history-toggle").setAttribute("aria-expanded", String(open));
+  $("history-toggle").textContent = `${open ? "收起" : "展开"}${state.kind === "chat" ? "历史对话" : "历史面试"}`;
+}
 async function copyId(id) {
   try { await navigator.clipboard.writeText(id); notice("ID 已复制"); }
   catch { notice(`ID：${id}`); }
@@ -81,10 +87,35 @@ function renderMessages(kind, messages) {
   const box = $(`${kind}-messages`);
   box.replaceChildren();
   if (!messages.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = kind === "chat" ? "发一条消息，开始你的求职讨论。" : "设置目标岗位后开始面试。";
-    box.append(empty);
+    if (kind === "chat") {
+      const empty = document.createElement("div");
+      empty.className = "chat-empty";
+      const heading = document.createElement("h2");
+      heading.textContent = "从一个问题开始";
+      const description = document.createElement("p");
+      description.textContent = "整理岗位要求、打磨经历表达，或讨论刚结束的面试反馈。";
+      const starters = document.createElement("div");
+      starters.className = "chat-starters";
+      for (const [label, prompt] of [
+        ["分析目标岗位", "帮我梳理目标岗位最看重的能力，以及我应该先准备什么。"],
+        ["打磨项目经历", "我想把一段项目经历讲清楚。请先问我做了什么、为什么做、结果如何。"],
+        ["规划面试准备", "根据我的目标岗位，帮我列一个可执行的面试准备顺序。"],
+      ]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-starter";
+        button.textContent = label;
+        button.onclick = () => { $("chat-text").value = prompt; $("chat-text").focus(); };
+        starters.append(button);
+      }
+      empty.append(heading, description, starters);
+      box.append(empty);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "设置目标岗位后开始面试。";
+      box.append(empty);
+    }
   }
   for (const message of messages) {
     const item = document.createElement("div");
@@ -379,7 +410,13 @@ function renderSessionList() {
     const detail = document.createElement("small");
     detail.textContent = kind === "chat" ? new Date(session.created_at).toLocaleString() : `${session.question_count} 题 · ${session.status}`;
     button.append(detail);
-    button.onclick = () => selectSession(session.id);
+    button.onclick = async () => {
+      await selectSession(session.id);
+      if (window.matchMedia("(max-width: 760px)").matches) {
+        setHistoryOpen(false);
+        $("workspace-title").scrollIntoView({ block: "start" });
+      }
+    };
     box.append(button);
   }
 }
@@ -393,13 +430,17 @@ async function selectSession(id) {
   if (id) localStorage.setItem(sessionKey(state.kind), id);
   else localStorage.removeItem(sessionKey(state.kind));
   const view = id ? await api(`/${state.kind}/sessions/${id}`) : null;
+  $("workspace-title").textContent = view?.session.title || (state.kind === "chat" ? "新对话" : "AI 面试");
+  $("workspace-subtitle").textContent = state.kind === "chat" ? "聊聊岗位、经历或下一步准备" : "每次聚焦一题，保留完整练习记录";
   if (state.kind === "chat") {
     $("chat-export").hidden = !view;
     if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
-    $("chat-memory-form").hidden = !view;
+    $("chat-notes").hidden = !view;
+    if (!view) $("chat-notes").open = false;
     $("chat-memory").value = view?.session.chat_memory || "";
     $("chat-retry").hidden = !view || view.session.status !== "active" || view.messages.at(-1)?.role !== "user";
     $("chat-retry").disabled = !state.modelReady;
+    $("chat-interrupt").hidden = !view || view.session.status !== "running";
   }
   renderMessages(state.kind, view?.messages || []);
   renderRunHistory(state.kind, view?.events || [], Boolean(view));
@@ -413,15 +454,20 @@ async function selectSession(id) {
   notice();
 }
 
-async function switchKind(kind) {
+async function switchKind(kind, fresh = false) {
   state.kind = kind;
   const previousId = state.ids[kind];
   $("session-search").value = state.sessionQueries[kind];
+  setHistoryOpen(false);
+  $("history-heading").textContent = kind === "chat" ? "历史对话" : "历史面试";
+  $("new-session").textContent = kind === "chat" ? "新建对话" : "新建面试";
   $("tab-chat").classList.toggle("active", kind === "chat");
   $("tab-interview").classList.toggle("active", kind === "interview");
+  if (kind === "chat") { $("tab-chat").setAttribute("aria-current", "page"); $("tab-interview").removeAttribute("aria-current"); }
+  else { $("tab-interview").setAttribute("aria-current", "page"); $("tab-chat").removeAttribute("aria-current"); }
   $("chat-panel").hidden = kind !== "chat";
   $("interview-panel").hidden = kind !== "interview";
-  try { await selectSession(state.ids[kind]); }
+  try { await selectSession(fresh ? null : state.ids[kind]); }
   catch (error) {
     if (!$("auth-panel").hidden) return;
     state.ids[kind] = null;
@@ -466,7 +512,7 @@ async function performChatRun(id, path, body) {
   }
 }
 
-$("tab-chat").onclick = () => switchKind("chat");
+$("tab-chat").onclick = () => switchKind("chat", true);
 $("tab-interview").onclick = () => switchKind("interview");
 $("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
 $("discuss-report").onclick = async () => {
@@ -483,7 +529,12 @@ $("chat-insert-resource").onclick = () => {
   select.value = "";
   $("chat-insert-resource").disabled = true;
 };
-$("new-session").onclick = () => selectSession(null);
+$("new-session").onclick = async () => {
+  await selectSession(null);
+  setHistoryOpen(false);
+  (state.kind === "chat" ? $("chat-text") : $("interview-goal")).focus();
+};
+$("history-toggle").onclick = () => setHistoryOpen($("history-toggle").getAttribute("aria-expanded") !== "true");
 $("session-search").oninput = () => {
   state.sessionQueries[state.kind] = $("session-search").value.trim();
   renderSessionList();
@@ -510,6 +561,7 @@ $("session-title-form").onsubmit = async (event) => {
     await api(`/${kind}/sessions/${id}/title`, { method: "PUT", body: JSON.stringify({ title }) });
     if (state.kind === kind && state.ids[kind] === id) {
       $("session-title-form").hidden = true;
+      $("workspace-title").textContent = title || (kind === "chat" ? "新对话" : "AI 面试");
       await loadSessions();
       notice(title ? "会话名称已保存。" : "已恢复默认会话名称。");
     }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>求职双线 Agent</title>
+  <title>Nico · 求职 Agent</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -21,20 +21,15 @@
   </section>
   <div id="shell" class="shell" hidden>
     <a class="skip-link" href="#main-content">跳转到主要内容</a>
-    <header class="topbar">
-      <div><span class="eyebrow">CAREER STUDIO</span><h1>求职双线 Agent</h1></div>
-      <div><span id="provider" class="badge">读取模型配置中</span><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
-    </header>
-    <p class="intro">在聊天中梳理思路，在独立的面试会话中逐题练习。两条线各自保存记录。</p>
-    <p id="provider-data-notice" class="intro" hidden>真实模型模式会把本次消息、面试回答及获授权读取的材料发送到已配置的模型服务。</p>
-    <p id="model-config-notice" class="notice" role="alert" hidden></p>
-    <nav class="tabs" aria-label="选择入口">
-      <button type="button" id="tab-chat" class="active">聊天助手</button>
-      <button type="button" id="tab-interview">模拟面试</button>
-    </nav>
-    <main id="main-content" class="layout">
-      <aside class="sidebar">
-        <div class="side-title"><h2>会话记录</h2><button id="new-session" type="button">新建</button></div>
+    <aside class="sidebar" aria-label="入口与历史记录">
+      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true">N</span><div><strong>Nico</strong><small>求职 Agent</small></div></div>
+      <nav class="tabs" aria-label="选择入口">
+        <button type="button" id="tab-chat" class="active" aria-current="page">新对话</button>
+        <button type="button" id="tab-interview">AI 面试</button>
+      </nav>
+      <button id="history-toggle" class="secondary history-toggle" type="button" aria-expanded="false" aria-controls="sidebar-history">展开历史对话</button>
+      <div id="sidebar-history" class="sidebar-history">
+        <div class="side-title"><h2 id="history-heading">历史对话</h2><button id="new-session" type="button" class="secondary">新建</button></div>
         <label class="session-search-label" for="session-search">查找会话</label>
         <input id="session-search" type="search" placeholder="名称、目标或 ID" autocomplete="off">
         <p id="session-count" class="session-count" role="status" aria-live="polite"></p>
@@ -49,29 +44,33 @@
           <div><button type="button" id="cancel-session-title" class="secondary">取消</button><button type="submit">保存</button></div>
         </form>
         <div id="sessions" class="sessions"></div>
-      </aside>
-      <section class="workspace">
+      </div>
+      <div class="sidebar-footer"><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
+    </aside>
+    <div class="main-column">
+      <header class="topbar"><div><h1 id="workspace-title">新对话</h1><p id="workspace-subtitle">聊聊岗位、经历或下一步准备</p></div><span id="provider" class="badge">读取模型配置中</span></header>
+      <p id="provider-data-notice" class="privacy-notice" hidden>真实模型模式会把本次消息、面试回答及获授权读取的材料发送到已配置的模型服务。</p>
+      <p id="model-config-notice" class="notice" role="alert" hidden></p>
+      <main id="main-content" class="workspace">
         <div id="chat-panel">
-          <div class="panel-head"><div><span class="eyebrow">ASSISTANT</span><h2>和助手聊聊</h2></div><div class="panel-meta"><p>讨论岗位、经历和面试反馈</p><a id="chat-export" class="button-link" hidden>导出聊天</a></div></div>
-          <div class="chat-reference">
-            <label for="chat-resource">引用材料或面试反馈</label>
-            <select id="chat-resource"><option value="">选择要讨论的内容</option></select>
-            <button id="chat-insert-resource" type="button" class="secondary" disabled>加入消息</button>
-          </div>
-          <p class="selected-resources">引用会先加入消息草稿，检查并发送后助手才能读取该内容。</p>
-          <form id="chat-memory-form" class="resource-form" hidden>
-            <label for="chat-memory">当前聊天的固定备注</label>
-            <textarea id="chat-memory" rows="2" maxlength="2000" placeholder="例如：目标岗位、准备重点或希望保持的回复风格"></textarea>
-            <div class="composer-actions"><button type="submit">保存备注</button><span>只在当前聊天中使用；清空后保存可删除。</span></div>
-          </form>
+          <a id="chat-export" class="chat-export button-link" hidden>导出当前对话</a>
           <div id="chat-messages" class="messages" aria-live="polite"></div>
           <details id="chat-run-history" class="run-history" hidden>
             <summary>运行记录</summary>
             <div id="chat-run-events" class="run-events"></div>
           </details>
+          <div class="chat-utilities">
+            <details id="chat-context"><summary>引用材料或面试反馈</summary>
+              <div class="chat-reference"><label for="chat-resource">选择引用内容</label><select id="chat-resource"><option value="">选择要讨论的内容</option></select><button id="chat-insert-resource" type="button" class="secondary" disabled>加入消息</button></div>
+              <p class="selected-resources">引用会先加入消息草稿，检查并发送后助手才能读取。</p>
+            </details>
+            <details id="chat-notes" hidden><summary>当前对话备注</summary>
+              <form id="chat-memory-form" class="resource-form"><label for="chat-memory">固定备注</label><textarea id="chat-memory" rows="2" maxlength="2000" placeholder="例如：目标岗位、准备重点或回复风格"></textarea><div class="composer-actions"><span>只在当前对话中使用；清空后保存可删除。</span><button type="submit">保存备注</button></div></form>
+            </details>
+          </div>
           <form id="chat-form" class="composer">
-            <label for="chat-text">你的消息</label>
-            <textarea id="chat-text" rows="3" maxlength="12000" placeholder="例如：帮我梳理一下这个岗位最看重的能力" required></textarea>
+            <label class="sr-only" for="chat-text">你的消息</label>
+            <textarea id="chat-text" rows="3" maxlength="12000" placeholder="今天想聊什么？例如：帮我梳理目标岗位的准备重点" required></textarea>
             <div class="composer-actions"><button type="button" id="chat-retry" class="secondary" hidden>重试上条消息</button><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div>
           </form>
         </div>
@@ -116,7 +115,7 @@
           <section id="interview-report" class="interview-report" hidden>
             <h3>本轮复盘</h3>
             <p id="report-summary"></p>
-            <button id="discuss-report" type="button" class="secondary" hidden>到聊天助手讨论反馈</button>
+            <button id="discuss-report" type="button" class="secondary" hidden>到新对话讨论反馈</button>
             <div id="practice-compare" class="report-item" hidden></div>
             <div id="report-items"></div>
           </section>
@@ -126,8 +125,8 @@
           </details>
         </div>
         <p id="notice" class="notice" role="status" aria-live="polite"></p>
-      </section>
-    </main>
+      </main>
+    </div>
   </div>
   <dialog id="resource-editor" aria-labelledby="resource-editor-heading">
     <form id="resource-editor-form">
