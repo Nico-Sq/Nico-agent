@@ -421,6 +421,21 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("用户-0-", json.dumps(context, ensure_ascii=False))
         self.assertEqual(len(self.store.messages(chat["id"], "chat")), 15)
 
+    def test_oversized_chat_memory_yields_to_the_latest_message(self):
+        chat = self.store.create("chat")
+        self.store.set_chat_memory(chat["id"], "备" * MAX_CONTEXT_CHARS)
+        latest = self.store.claim_run(chat["id"], "chat", "active", "LATEST_USER_MESSAGE")
+        context = self.runtime.build_context(latest)
+        self.assertLessEqual(sum(len(item["content"]) for item in context), MAX_CONTEXT_CHARS)
+        self.assertEqual(context[-1]["content"], "LATEST_USER_MESSAGE")
+        self.assertNotIn("[CHAT_MEMORY]", json.dumps(context, ensure_ascii=False))
+
+    def test_run_without_room_for_the_latest_message_reports_a_budget_error(self):
+        chat = self.store.create("chat")
+        latest = self.store.claim_run(chat["id"], "chat", "active", "问" * (MAX_CONTEXT_CHARS + 1))
+        with self.assertRaisesRegex(ValueError, "上下文预算不足以容纳最新消息"):
+            self.runtime.build_context(latest)
+
     def test_run_event_records_metadata_without_message_content(self):
         chat = self.store.create("chat")
         running = self.store.claim_run(chat["id"], "chat", "active", "PRIVATE_CHAT_TEXT")

@@ -24,6 +24,25 @@ def prompt_version(kind: str) -> str:
     return hashlib.sha256(PROMPT_POLICY_VERSION.encode() + prompt).hexdigest()[:12]
 
 
+def _fit(blocks: list[tuple[bool, dict]], messages: list[dict]) -> list[dict]:
+    """Keep the newest whole messages; drop the largest optional block until they fit."""
+    while True:
+        context = [message for _, message in blocks]
+        remaining = MAX_CONTEXT_CHARS - sum(len(item["content"]) for item in context)
+        selected = []
+        for row in reversed(messages):
+            if len(row["content"]) > remaining:
+                break
+            selected.append({"role": row["role"], "content": row["content"]})
+            remaining -= len(row["content"])
+        if not messages or selected:
+            return context + list(reversed(selected))
+        optional = [index for index, (required, _) in enumerate(blocks) if not required]
+        if not optional:
+            raise ValueError("上下文预算不足以容纳最新消息")
+        blocks.pop(max(optional, key=lambda index: len(blocks[index][1]["content"])))
+
+
 def build_context(store, session: dict) -> list[dict]:
     """Build the system prompt, the resource blocks and the recent messages."""
     kind = session["kind"]
@@ -52,45 +71,38 @@ def build_context(store, session: dict) -> list[dict]:
         )
         if practice:
             system += "这是复练会话。根据原题的薄弱点换一种问法，不让用户复述标准答案。"
-    context = [{"role": "system", "content": system}]
+    system_message = {"role": "system", "content": system}
+    # 每项是 (是否必需, 消息)。必需块不能为最近消息让位，可选块按体积从大到小让位。
+    blocks: list[tuple[bool, dict]] = [(True, system_message)]
     if kind == "chat" and session["chat_memory"]:
-        context.append({"role": "user", "content": "[CHAT_MEMORY]\n" + session["chat_memory"]})
+        blocks.append((False, {"role": "user",
+                               "content": "[CHAT_MEMORY]\n" + session["chat_memory"]}))
     if kind == "interview":
-        context.append({"role": "user", "content": "[INTERVIEW_GOAL]\n" + json.dumps(
+        blocks.append((True, {"role": "user", "content": "[INTERVIEW_GOAL]\n" + json.dumps(
             {"goal": session["goal"]}, ensure_ascii=False
-        )})
+        )}))
         resources = store.interview_resources(session["id"])
         if resources["materials"] or resources["claims"]:
-            context.append({
+            blocks.append((False, {
                 "role": "user",
                 "content": "[INTERVIEW_RESOURCES]\n" + json.dumps(resources, ensure_ascii=False),
-            })
+            }))
         if practice:
             practice = {**practice, "answer": (practice["answer"] or "")[:4000],
                         "feedback": (practice["feedback"] or "")[:4000]}
-            context.append({
+            blocks.append((False, {
                 "role": "user",
                 "content": "[PRACTICE_SOURCE]\n" + json.dumps(practice, ensure_ascii=False),
-            })
+            }))
         report = store.interview_report(session["id"])
         if report["items"] and report["items"][-1]["skipped"]:
-            context[0]["content"] += "\nCURRENT_QUESTION_SKIPPED=true"
+            system_message["content"] += "\nCURRENT_QUESTION_SKIPPED=true"
         progress = [{"number": item["number"], "question": item["question"][:120],
                      "skipped": bool(item["skipped"]),
                      "feedback": (item["feedback"] or "")[:240],
                      "evidence": item["evidence"][0][:120] if item["evidence"] else ""}
                     for item in report["items"] if item["feedback"] or item["skipped"]]
         if progress:
-            context.append({"role": "user", "content": "[INTERVIEW_PROGRESS]\n" +
-                            json.dumps(progress, ensure_ascii=False)})
-    messages = store.messages(session["id"], kind, limit=16)
-    remaining = MAX_CONTEXT_CHARS - sum(len(item["content"]) for item in context)
-    selected = []
-    for row in reversed(messages):
-        if len(row["content"]) > remaining:
-            break
-        selected.append({"role": row["role"], "content": row["content"]})
-        remaining -= len(row["content"])
-    if messages and not selected:
-        raise ValueError("上下文预算不足以容纳最新消息")
-    return context + list(reversed(selected))
+            blocks.append((False, {"role": "user", "content": "[INTERVIEW_PROGRESS]\n" +
+                                   json.dumps(progress, ensure_ascii=False)}))
+    return _fit(blocks, store.messages(session["id"], kind, limit=16))
