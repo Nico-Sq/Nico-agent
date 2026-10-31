@@ -524,6 +524,16 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(too_long.status_code, 422)
         self.assertEqual(self.client.get("/api/materials").json(), [])
 
+    def test_material_file_extraction_accepts_gb18030_text(self):
+        for extension in ("txt", "md"):
+            with self.subTest(extension=extension):
+                response = self.client.post("/api/materials/extract", files={
+                    "file": (f"resume.{extension}", "项目经历：接口优化".encode("gb18030"), "text/plain"),
+                })
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["content"], "项目经历：接口优化")
+        self.assertEqual(self.client.get("/api/materials").json(), [])
+
     @staticmethod
     def _simple_pdf():
         stream = b"BT /F1 12 Tf 20 100 Td (Hello PDF) Tj ET"

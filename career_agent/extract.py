@@ -17,7 +17,10 @@ def extract_text(filename: str, data: bytes) -> str:
     extension = Path(filename).suffix.lower()
     try:
         if extension in (".txt", ".md"):
-            text = data.decode("utf-8-sig")
+            try:
+                text = data.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text = data.decode("gb18030")
         elif extension == ".docx":
             with ZipFile(BytesIO(data)) as archive:
                 if sum(item.file_size for item in archive.infolist()) > 20_000_000:
