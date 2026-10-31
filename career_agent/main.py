@@ -17,7 +17,8 @@ from .extract import MAX_FILE_BYTES, extract_text
 from .mcp import MCPServers
 from .models import ModelCatalog
 from .plugins import LocalPlugins
-from .provider import ModelError, Provider
+from .provider import Provider
+from .providers import ModelError
 from .runtime import AgentRuntime
 from .store import Store
 

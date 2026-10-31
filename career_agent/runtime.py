@@ -8,7 +8,8 @@ import jsonschema
 
 from .mcp import MCPServers
 from .plugins import LocalPlugins
-from .provider import ModelError, Provider
+from .provider import Provider
+from .providers import ModelError
 from .store import Store
 
 

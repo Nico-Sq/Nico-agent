@@ -2,6 +2,18 @@
 
 import json
 
+PROTOCOL_VERSION = "2026-10-21"
+
+
+def request(model: str, messages: list[dict], tools: list[dict],
+            max_tokens: int) -> tuple[str, dict, dict]:
+    return "messages", {"anthropic-version": PROTOCOL_VERSION}, request_payload(
+        model, messages, tools, max_tokens)
+
+
+def parse(data: dict) -> dict:
+    return parse_response(data)
+
 
 def request_payload(model: str, messages: list[dict], tools: list[dict], max_tokens: int) -> dict:
     system = "\n\n".join(message["content"] for message in messages if message["role"] == "system")
@@ -43,6 +55,8 @@ def parse_response(data: dict) -> dict:
     text = []
     calls = []
     for block in data["content"]:
+        if not isinstance(block, dict) or not isinstance(block.get("type"), str):
+            raise ValueError("invalid content")
         if block["type"] == "text":
             text.append(block["text"])
         elif block["type"] == "tool_use":

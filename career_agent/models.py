@@ -29,7 +29,8 @@ class ModelCatalog:
                 if not isinstance(key_name, str) or not key_name.startswith("MODEL_"):
                     raise ValueError("api_key_env 必须是 MODEL_ 开头的环境变量名")
                 provider = Provider(mode=entry.get("provider"), model=entry.get("model"),
-                                    base_url=entry.get("base_url"), api_key=os.getenv(key_name, ""))
+                                    base_url=entry.get("base_url"), api_key=os.getenv(key_name, ""),
+                                    max_output=entry.get("max_output_tokens"))
                 error = provider.configuration_error()
                 if error:
                     raise ValueError(f"模型 {model_id} 配置无效：{error}")
@@ -43,5 +44,6 @@ class ModelCatalog:
 
     def list(self) -> list[dict]:
         return [{"id": model_id, "provider": item.mode, "model": item.model,
-                 "supports_tools": True, "config_error": item.configuration_error()}
+                 "supports_tools": True, "max_output_tokens": item.max_output_tokens(),
+                 "config_error": item.configuration_error()}
                 for model_id, item in self.models.items()]

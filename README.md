@@ -27,18 +27,18 @@ python -m career_agent
 
 真实模型模式至少要设置 `MODEL_NAME`，`MODEL_API_BASE_URL` 要是有效的 HTTP(S) 地址；本机兼容服务若不要求认证，`MODEL_API_KEY` 可以不设置。配置不完整时页面会显示原因，并暂时禁用聊天发送和开始面试；修改环境变量后重启应用。兼容接口若报告输出截断或其他非正常结束，本轮不会采纳回复或执行其中的工具调用；已提交的聊天消息或面试回答会保留，调整请求后可重试。
 
-`MODEL_PROVIDER` 可选 `demo`、`openai`、`openai_compatible` 和 `anthropic`。`openai` 使用 OpenAI Chat Completions，`openai_compatible` 使用同协议的自定义接口，`anthropic` 使用原生 Anthropic Messages 协议；`openai` 和 `anthropic` 需设置 `MODEL_API_KEY`，本地兼容接口可不设。Anthropic 的默认地址为 `https://api.anthropic.com/v1`。各模式均使用工具调用；具体模型必须具备工具调用能力。
+`MODEL_PROVIDER` 可选 `demo`、`openai`、`openai_compatible` 和 `anthropic`。`openai` 使用 OpenAI Chat Completions，`openai_compatible` 使用同协议的自定义接口，`anthropic` 使用原生 Anthropic Messages 协议；`openai` 和 `anthropic` 需设置 `MODEL_API_KEY`，本地兼容接口可不设。Anthropic 的默认地址为 `https://api.anthropic.com/v1`。各模式均使用工具调用；具体模型必须具备工具调用能力。单次输出上限默认 2048，可用 `MODEL_MAX_OUTPUT_TOKENS` 或模型目录中的 `max_output_tokens` 调整，范围 256–8192。每个协议一个适配器（`career_agent/providers/`），运行时只依赖统一的 `complete` 接口、共用的重试与错误码映射，新增厂商不需要改运行时。
 
 需要在新会话中选择不同模型时，设置 `MODEL_CATALOG_PATH` 指向本地 JSON 文件，例如：
 
 ```json
 [
   {"id":"local","provider":"openai_compatible","model":"your-local-model","base_url":"http://127.0.0.1:1234/v1","supports_tools":true},
-  {"id":"claude","provider":"anthropic","model":"your-claude-model","api_key_env":"MODEL_CLAUDE_KEY","supports_tools":true}
+  {"id":"claude","provider":"anthropic","model":"your-claude-model","api_key_env":"MODEL_CLAUDE_KEY","supports_tools":true,"max_output_tokens":4096}
 ]
 ```
 
-启动前设置 `MODEL_CLAUDE_KEY`。目录中的 `api_key_env` 是环境变量名，不写入密钥；缺少必需密钥、非法地址或未声明工具能力会在启动时报错。`GET /api/models` 列出可选模型，创建聊天会话时提交 `{"model_id":"claude"}`，创建面试会话时在原请求体增加 `model_id`。不传时使用 `default`（上述环境变量配置）。会话创建后固定其模型，复练继承原面试模型。
+启动前设置 `MODEL_CLAUDE_KEY`。目录中的 `api_key_env` 是环境变量名，不写入密钥；`max_output_tokens` 可选，缺省沿用环境变量或 2048。缺少必需密钥、非法地址、输出上限越界或未声明工具能力会在启动时报错。`GET /api/models` 列出可选模型及其 `max_output_tokens`，创建聊天会话时提交 `{"model_id":"claude"}`，创建面试会话时在原请求体增加 `model_id`。不传时使用 `default`（上述环境变量配置）。会话创建后固定其模型，复练继承原面试模型。
 
 本地 MCP 服务器可通过 `MCP_SERVERS_PATH` 配置（当前支持 stdio 与 `2025-11-25` 握手协议）：
 

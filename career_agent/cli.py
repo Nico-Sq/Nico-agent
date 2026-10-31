@@ -9,7 +9,7 @@ from typing import Protocol
 from .mcp import MCPServers
 from .models import ModelCatalog
 from .plugins import LocalPlugins
-from .provider import ModelError
+from .providers import ModelError
 from .runtime import AgentRuntime
 from .store import Store
 
@@ -98,7 +98,8 @@ def main() -> None:
     plugins = LocalPlugins()
     if args.command == "models":
         for item in catalog.list():
-            print(f"{item['id']}: {item['provider']} {item['model']} {item['config_error'] or ''}")
+            print(f"{item['id']}: {item['provider']} {item['model']} "
+                  f"输出上限 {item['max_output_tokens'] or '—'} {item['config_error'] or ''}")
     elif args.command == "chat":
         asyncio.run(run_chat(args, store, catalog, mcp, plugins))
     elif args.command == "memory":

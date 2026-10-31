@@ -874,7 +874,7 @@ function renderModelSettings() {
     const title = document.createElement("strong");
     title.textContent = `${model.id} · ${model.provider}`;
     const detail = document.createElement("small");
-    detail.textContent = `${model.model || "演示模型"} · ${model.config_error || "已就绪 · 支持工具调用"}`;
+    detail.textContent = `${model.model || "演示模型"} · 输出上限 ${model.max_output_tokens ?? "—"} · ${model.config_error || "已就绪，支持工具调用"}`;
     content.append(title, detail);
     row.append(content);
     box.append(row);

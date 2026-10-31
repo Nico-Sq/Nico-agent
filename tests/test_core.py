@@ -59,7 +59,7 @@ class CoreTests(unittest.TestCase):
         provider = Provider()
         provider.mode = "openai_compatible"
         provider.model = "test-model"
-        with patch("career_agent.provider.httpx.AsyncClient", return_value=client):
+        with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=client):
             reply = asyncio.run(provider.complete([{"role": "user", "content": "问题"}], []))
         self.assertEqual(client.payload["max_tokens"], 2048)
         self.assertEqual(reply["usage"]["total_tokens"], 6)
@@ -95,7 +95,7 @@ class CoreTests(unittest.TestCase):
         provider.base_url = "https://api.anthropic.com/v1"
         chat = self.store.create("chat")
         running = self.store.claim_run(chat["id"], "chat", "active", "看看我已确认的经历")
-        with patch("career_agent.provider.httpx.AsyncClient", return_value=client):
+        with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=client):
             result = run_demo(AgentRuntime(self.store, provider).run(running))
         self.assertIn("没有已确认的经历", result["message"])
         self.assertEqual(len(client.requests), 2)
@@ -130,7 +130,7 @@ class CoreTests(unittest.TestCase):
         provider.api_key = "test-key"
         chat = self.store.create("chat")
         running = self.store.claim_run(chat["id"], "chat", "active", "看看我已确认的经历")
-        with patch("career_agent.provider.httpx.AsyncClient", return_value=Client()):
+        with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=Client()):
             with self.assertRaises(ModelError) as caught:
                 run_demo(AgentRuntime(self.store, provider).run(running))
         self.assertEqual(caught.exception.code, "model_output_truncated")
@@ -243,7 +243,7 @@ class CoreTests(unittest.TestCase):
         provider = Provider()
         provider.mode = "openai_compatible"
         provider.model = "test-model"
-        with patch("career_agent.provider.httpx.AsyncClient", return_value=Client()):
+        with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=Client()):
             with self.assertRaises(ModelError) as caught:
                 asyncio.run(provider.complete([{"role": "user", "content": "问题"}], []))
         self.assertEqual(caught.exception.code, "model_request_rejected")
