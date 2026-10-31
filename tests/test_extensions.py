@@ -7,6 +7,7 @@ from career_agent.cli import run_channel
 from career_agent.plugins import LocalPlugins
 from career_agent.runtime import AgentRuntime
 from career_agent.store import Store
+from career_agent.tools import READ_ONLY_TOOLS, schemas
 
 
 class ExtensionTests(unittest.TestCase):
@@ -64,6 +65,14 @@ class ExtensionTests(unittest.TestCase):
         serial = asyncio.run(runtime._execute_tools(None, [read, write, read], external))
         self.assertEqual(state["peak"], 1)
         self.assertEqual([item["tool_call_id"] for item in serial], ["a", "b", "a"])
+
+    def test_builtin_tool_schemas_are_shared_and_read_only(self):
+        chat = [item["function"]["name"] for item in schemas("chat")]
+        interview = [item["function"]["name"] for item in schemas("interview")]
+        self.assertEqual(chat, ["read_interview_feedback", "read_confirmed_claims",
+                                "read_material", "search_memories"])
+        self.assertEqual(interview, ["read_interview_goal", "read_interview_materials"])
+        self.assertTrue(set(chat + interview) <= READ_ONLY_TOOLS)
 
     def test_plugin_config_tolerates_a_byte_order_mark(self):
         plugin = (Path(__file__).resolve().parent.parent / "examples" / "echo_plugin.py").as_posix()
