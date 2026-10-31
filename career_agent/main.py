@@ -428,6 +428,7 @@ def delete_session(kind: str, session_id: str):
         raise HTTPException(404)
     if not active_store().delete_session(session_id, kind):
         raise HTTPException(404, "会话不存在")
+    AgentRuntime.cancel_session_runs(session_id)
     return {"deleted": True}
 
 
@@ -493,8 +494,10 @@ def create_chat(body: ChatCreateInput | None = None):
 
 @app.put("/api/chat/sessions/{session_id}/memory")
 def update_chat_memory(session_id: str, body: ChatMemoryInput):
-    if active_store().set_chat_memory(session_id, body.text.strip()) is None:
+    session = active_store().set_chat_memory(session_id, body.text.strip())
+    if session is None:
         raise HTTPException(404, "聊天会话不存在")
+    AgentRuntime.cancel_session_runs(session_id)
     return {"text": body.text.strip()}
 
 
@@ -504,6 +507,7 @@ async def chat_message(session_id: str, body: TextInput):
     session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能发送消息")
+    AgentRuntime.cancel_session_runs(session_id)
     return await complete_run(session)
 
 
@@ -513,6 +517,7 @@ def claim_chat_message(session_id: str, body: TextInput):
     session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能发送消息")
+    AgentRuntime.cancel_session_runs(session_id)
     return session
 
 
@@ -530,6 +535,7 @@ async def retry_chat_message(session_id: str):
     session = active_store().retry_chat(session_id)
     if session is None:
         raise HTTPException(409, "当前没有待重试的消息")
+    AgentRuntime.cancel_session_runs(session_id)
     return await complete_run(session)
 
 
@@ -539,6 +545,7 @@ def interrupt_chat(session_id: str):
     result = active_store().interrupt(session_id, "chat")
     if result is None:
         raise HTTPException(409, "当前没有可中断的运行")
+    AgentRuntime.cancel_session_runs(session_id)
     return result
 
 
@@ -586,6 +593,7 @@ async def answer_interview(session_id: str, body: TextInput):
     session = active_store().claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text))
     if session is None:
         raise HTTPException(409, "当前不能提交回答")
+    AgentRuntime.cancel_session_runs(session_id)
     return await complete_run(session)
 
 
@@ -596,6 +604,7 @@ def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
                               expected_question=body.question_number)
     if session is None:
         raise HTTPException(409, "当前题目已变化，无法提交回答")
+    AgentRuntime.cancel_session_runs(session_id)
     return session
 
 
@@ -613,6 +622,7 @@ async def skip_interview_question(session_id: str, body: PracticeInput):
     session = active_store().skip_interview_question(session_id, body.question_number)
     if session is None:
         raise HTTPException(409, "当前题目已变化，无法跳过")
+    AgentRuntime.cancel_session_runs(session_id)
     return await complete_run(session)
 
 
@@ -622,6 +632,7 @@ def pause_interview(session_id: str):
     result = active_store().interrupt(session_id, "interview")
     if result is None:
         raise HTTPException(409, "当前不能暂停")
+    AgentRuntime.cancel_session_runs(session_id)
     return result
 
 
@@ -631,6 +642,7 @@ def cancel_interview(session_id: str):
     result = active_store().cancel_interview(session_id)
     if result is None:
         raise HTTPException(409, "当前不能结束面试")
+    AgentRuntime.cancel_session_runs(session_id)
     return result
 
 

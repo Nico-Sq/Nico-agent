@@ -24,6 +24,8 @@ MAX_TOOL_CALLS = 8
 MAX_RUN_SECONDS = 120
 MAX_MODEL_OUTPUT_CHARS = 12_000
 
+_ACTIVE_RUNS: dict[str, dict[int, asyncio.Task]] = {}
+
 
 class RunSuperseded(Exception):
     pass
@@ -36,6 +38,29 @@ class AgentRuntime:
         self.provider = provider
         self.mcp = mcp
         self.plugins = plugins
+
+    @classmethod
+    def cancel_session_runs(cls, session_id: str) -> int:
+        """Cancel tasks still working on a session after its version changed."""
+        runs = _ACTIVE_RUNS.get(session_id, {})
+        tasks = [task for task in runs.values() if not task.done()]
+        if runs and not tasks:
+            _ACTIVE_RUNS.pop(session_id, None)
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        cancelled = 0
+        for task in tasks:
+            loop = task.get_loop()
+            if loop.is_closed():
+                continue
+            if loop is current_loop:
+                cancelled += int(task.cancel())
+            else:
+                loop.call_soon_threadsafe(task.cancel)
+                cancelled += 1
+        return cancelled
 
     def build_context(self, session: dict) -> list[dict]:
         """Delegate prompt assembly to the context module."""
@@ -166,6 +191,9 @@ class AgentRuntime:
             if current and current["status"] == "running" and current["version"] == session["version"]:
                 return {"in_progress": True, "session": current}
             return {"interrupted": True, "session": current}
+        task = asyncio.current_task()
+        if task is not None:
+            _ACTIVE_RUNS.setdefault(session["id"], {})[session["version"]] = task
         started = time.perf_counter()
         outcome = "failed"
         context_chars = 0
@@ -175,6 +203,8 @@ class AgentRuntime:
         prompt_version = ""
         error_code = None
         try:
+            if not self.store.run_current(session["id"], session["version"]):
+                raise RunSuperseded()
             prompt_version = prompt_fingerprint(kind)
             try:
                 context, dropped = assemble_context(self.store, session)
@@ -279,6 +309,11 @@ class AgentRuntime:
             self.store.fail_run(session["id"], session["version"], kind, error_code)
             raise
         finally:
+            runs = _ACTIVE_RUNS.get(session["id"])
+            if runs and runs.get(session["version"]) is task:
+                runs.pop(session["version"], None)
+                if not runs:
+                    _ACTIVE_RUNS.pop(session["id"], None)
             self.store.event(session["id"], "model_run", run_event(
                 version=session["version"], status=outcome, error_code=error_code,
                 provider=getattr(self.provider, "mode", "custom"),

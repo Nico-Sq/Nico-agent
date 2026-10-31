@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import tempfile
 import unittest
@@ -207,6 +208,70 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
         self.assertEqual(messages[0]["content"], text)
         self.assertEqual(self.client.post(f"/api/chat/sessions/{chat_id}/retry").status_code, 409)
+
+    def test_chat_followup_claim_cancels_inflight_run(self):
+        class WaitingProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.cancelled = False
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+
+        async def scenario():
+            provider = WaitingProvider()
+            chat = main.store.create("chat")
+            first = main.store.claim_run(chat["id"], "chat", "active", "旧问题")
+            task = asyncio.create_task(AgentRuntime(main.store, provider).run(first))
+            await provider.started.wait()
+            second = await asyncio.to_thread(
+                main.claim_chat_message, chat["id"], main.TextInput(text="补充问题")
+            )
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            return provider, first, second
+
+        provider, first, second = asyncio.run(scenario())
+        self.assertTrue(provider.cancelled)
+        self.assertGreater(second["version"], first["version"])
+        self.assertEqual(main.store.get(first["id"], "chat")["status"], "running")
+        self.assertEqual([item["content"] for item in main.store.messages(first["id"], "chat")],
+                         ["旧问题", "补充问题"])
+
+    def test_chat_interrupt_cancels_inflight_run(self):
+        class WaitingProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.cancelled = False
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+
+        async def scenario():
+            provider = WaitingProvider()
+            chat = main.store.create("chat")
+            pending = main.store.claim_run(chat["id"], "chat", "active", "问题")
+            task = asyncio.create_task(AgentRuntime(main.store, provider).run(pending))
+            await provider.started.wait()
+            interrupted = await asyncio.to_thread(main.interrupt_chat, chat["id"])
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            return provider, interrupted
+
+        provider, interrupted = asyncio.run(scenario())
+        self.assertTrue(provider.cancelled)
+        self.assertEqual(interrupted["status"], "active")
+        self.assertEqual(main.store.get(interrupted["id"], "chat")["status"], "active")
 
     def test_backup_contains_committed_business_data(self):
         material = self.client.post("/api/materials", json={

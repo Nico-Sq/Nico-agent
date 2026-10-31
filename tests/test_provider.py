@@ -68,6 +68,43 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertNotIn("tools", client.requests[0]["payload"])
         self.assertNotIn("Authorization", client.requests[0]["headers"])
 
+    def test_cancelling_provider_request_closes_transport(self):
+        class BlockingClient:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.cancelled = False
+                self.closed = False
+
+            async def post(self, *_args, **_kwargs):
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                self.closed = True
+
+        async def scenario():
+            client = BlockingClient()
+            provider = Provider(mode="openai", model="m", base_url="https://example.test/v1",
+                                api_key="k")
+            with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=client):
+                task = asyncio.create_task(provider.complete([{"role": "user", "content": "问题"}], []))
+                await client.started.wait()
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            return client
+
+        client = asyncio.run(scenario())
+        self.assertTrue(client.cancelled)
+        self.assertTrue(client.closed)
+
     def test_anthropic_request_and_reply(self):
         body = {"content": [{"type": "text", "text": "结论"},
                             {"type": "tool_use", "id": "call-1", "name": "read_material", "input": {"id": "m1"}}],

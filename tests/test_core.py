@@ -519,6 +519,77 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(duplicate["in_progress"])
         self.assertEqual(completed["message"], "只生成一次")
 
+    def test_cancel_session_stops_inflight_model_request(self):
+        class WaitingProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+                self.cancelled = False
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+
+        async def scenario():
+            provider = WaitingProvider()
+            chat = self.store.create("chat")
+            running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+            task = asyncio.create_task(AgentRuntime(self.store, provider).run(running))
+            await provider.started.wait()
+            cancelled = AgentRuntime.cancel_session_runs(chat["id"])
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            return chat, provider, cancelled
+
+        chat, provider, cancelled = asyncio.run(scenario())
+        self.assertEqual(cancelled, 1)
+        self.assertTrue(provider.cancelled)
+        self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
+        events = [event for event in self.store.events(chat["id"], "chat")
+                  if event["kind"] == "model_run"]
+        self.assertEqual(json.loads(events[0]["detail"])["status"], "cancelled")
+        self.assertEqual(AgentRuntime.cancel_session_runs(chat["id"]), 0)
+
+    def test_cancel_during_tool_batch_skips_pending_call(self):
+        class ToolProvider:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                return {"tool_calls": [
+                    {"id": "read", "function": {"name": "read_material", "arguments": "{}"}},
+                    {"id": "write", "function": {"name": "write_material", "arguments": "{}"}},
+                ]}
+
+        async def scenario():
+            provider = ToolProvider()
+            runtime = AgentRuntime(self.store, provider)
+            started = asyncio.Event()
+            executed = []
+
+            async def wait_tool(session, call, external=None):
+                executed.append(call["function"]["name"])
+                started.set()
+                await asyncio.Event().wait()
+
+            runtime._execute_tool = wait_tool
+            chat = self.store.create("chat")
+            running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+            task = asyncio.create_task(runtime.run(running))
+            await started.wait()
+            AgentRuntime.cancel_session_runs(chat["id"])
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            return provider, executed
+
+        provider, executed = asyncio.run(scenario())
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(executed, ["read_material"])
+
     def test_tool_call_limit_rejects_oversized_batch(self):
         class ExcessProvider:
             async def complete(self, messages, tools):
