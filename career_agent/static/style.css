@@ -101,6 +101,8 @@ h2 { margin: 4px 0 0; font-size: 19px; }
 .run-event small { display: block; color: #626262; margin-top: 3px; }
 .run-event p { margin: 5px 0 0; color: #4e4e4e; }
 .composer, .setup { display: grid; gap: 10px; border-top: 1px solid #ededed; padding-top: 18px; }
+.composer select, .setup select { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid #bdbdbd; border-radius: 10px; background: #fff; }
+.field-help { margin: -5px 0 4px; color: #626262; font-size: 12px; }
 .setup { border: 0; padding: 26px 0; }
 .setup input[type=number] { width: 100px; padding: 10px 12px; border: 1px solid #d5d5d5; border-radius: 10px; background: white; }
 label { font-size: 13px; font-weight: 650; }

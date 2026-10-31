@@ -20,6 +20,7 @@ function showAuth() {
   state.sessionSearchSeq.chat++;
   state.sessionSearchSeq.interview++;
   state.username = null;
+  state.models = [];
   for (const id of ["chat-form", "answer-form", "material-form", "claim-form", "interview-setup", "chat-memory-form"]) $(id).reset();
   if ($("resource-editor").open) $("resource-editor").close();
   $("chat-resource").replaceChildren(new Option("选择要讨论的内容", ""));
@@ -70,6 +71,30 @@ async function api(path, options = {}) {
 }
 
 function notice(message = "") { $("notice").textContent = message; }
+function updateModelReadiness() {
+  const selected = $(state.kind === "chat" ? "chat-model" : "interview-model").value;
+  const model = state.models.find((item) => item.id === selected);
+  state.modelReady = Boolean(model && !model.config_error);
+  $("provider").textContent = model ? model.provider === "demo" ? "演示模式" : `模型：${model.model}` : "模型不可用";
+  $("provider-data-notice").hidden = !model || model.provider === "demo";
+  $("model-config-notice").hidden = state.modelReady;
+  $("model-config-notice").textContent = state.modelReady ? "" : model?.config_error || "所选模型已移除，请创建新会话并选择可用模型。";
+  setBusy("chat", state.busy.chat);
+  setBusy("interview", state.busy.interview);
+}
+async function loadModels() {
+  state.models = await api("/models");
+  for (const id of ["chat-model", "interview-model"]) {
+    const select = $(id);
+    select.replaceChildren();
+    for (const model of state.models) {
+      const option = new Option(`${model.id} · ${model.provider === "demo" ? "演示模式" : model.model}${model.config_error ? "（未就绪）" : ""}`, model.id);
+      select.append(option);
+    }
+    select.value = "default";
+  }
+  updateModelReadiness();
+}
 function setHistoryOpen(open) {
   $("sidebar-history").classList.toggle("open", open);
   $("history-toggle").setAttribute("aria-expanded", String(open));
@@ -467,6 +492,13 @@ async function selectSession(id) {
   if (!current()) return;
   $("workspace-title").textContent = view?.session.title || (kind === "chat" ? "新对话" : "AI 面试");
   $("workspace-subtitle").textContent = kind === "chat" ? "聊聊岗位、经历或下一步准备" : "每次聚焦一题，保留完整练习记录";
+  const modelSelect = $(kind === "chat" ? "chat-model" : "interview-model");
+  if (view && !state.models.some((item) => item.id === view.session.model_id)) {
+    modelSelect.append(new Option(`${view.session.model_id}（已移除）`, view.session.model_id));
+  }
+  modelSelect.value = view?.session.model_id || "default";
+  modelSelect.disabled = Boolean(view);
+  updateModelReadiness();
   if (kind === "chat") {
     $("chat-export").hidden = !view;
     if (view) $("chat-export").href = `/api/chat/sessions/${id}/export.md`;
@@ -723,7 +755,7 @@ $("chat-form").onsubmit = async (event) => {
   let claimed;
   try {
     if (!id) {
-      id = (await api("/chat/sessions", { method: "POST" })).id;
+      id = (await api("/chat/sessions", { method: "POST", body: JSON.stringify({ model_id: $("chat-model").value }) })).id;
       state.ids.chat = id;
       localStorage.setItem(sessionKey("chat"), id);
     }
@@ -751,7 +783,7 @@ $("interview-setup").onsubmit = (event) => {
     const max_questions = Number($("interview-max-questions").value);
     const material_ids = [...$("material-list").querySelectorAll("input:checked")].map((item) => item.value);
     const claim_ids = [...$("claim-list").querySelectorAll("input:checked")].map((item) => item.value);
-    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, max_questions, material_ids, claim_ids }) });
+    const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, max_questions, material_ids, claim_ids, model_id: $("interview-model").value }) });
     state.ids.interview = session.id;
     localStorage.setItem(sessionKey("interview"), session.id);
     try {
@@ -829,6 +861,8 @@ $("resume-button").onclick = () => action("interview", async () => {
   finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
 });
 
+$("chat-model").onchange = updateModelReadiness;
+$("interview-model").onchange = updateModelReadiness;
 async function authenticate(mode) {
   const username = $("auth-username").value.trim();
   const password = $("auth-password").value;
@@ -837,6 +871,7 @@ async function authenticate(mode) {
     $("auth-password").value = "";
     $("auth-notice").textContent = "";
     showApp(user.username);
+    await loadModels();
     await switchKind("chat");
   } catch (error) { $("auth-notice").textContent = error.message; }
 }
@@ -864,6 +899,7 @@ async function bootstrap() {
         showApp(user.username);
       } catch { showAuth(); return; }
     } else showApp();
+    await loadModels();
     await switchKind("chat");
   } catch (error) {
     showAuth();

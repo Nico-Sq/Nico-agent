@@ -10,6 +10,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 
 from career_agent import main
+from career_agent.models import ModelCatalog
 from career_agent.provider import Provider
 from career_agent.runtime import AgentRuntime
 from career_agent.store import Store
@@ -37,6 +38,24 @@ class InterviewApiTests(unittest.TestCase):
             config = self.client.get("/api/config").json()
         self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
         self.assertNotIn("api_key", config)
+
+    def test_session_selects_configured_model_and_rejects_unknown(self):
+        path = Path(self.temp.name) / "models.json"
+        path.write_text('[{"id":"local","provider":"openai_compatible","model":"test-model",'
+                        '"base_url":"http://127.0.0.1:1234/v1","supports_tools":true}]', encoding="utf-8")
+        with patch.object(main, "model_catalog", ModelCatalog(path)):
+            models = self.client.get("/api/models").json()
+            self.assertEqual(models[1]["id"], "local")
+            chat = self.client.post("/api/chat/sessions", json={"model_id": "local"})
+            self.assertEqual(chat.status_code, 200)
+            self.assertEqual(chat.json()["model_id"], "local")
+            interview = self.client.post("/api/interview/sessions", json={
+                "goal": "后端开发", "model_id": "local",
+            })
+            self.assertEqual(interview.json()["model_id"], "local")
+            self.assertEqual(self.client.post("/api/chat/sessions", json={
+                "model_id": "missing",
+            }).status_code, 422)
 
     def test_session_titles_are_display_only_and_can_be_reset(self):
         chat = self.client.post("/api/chat/sessions").json()

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from .auth import AuthStore, LoginRateLimited
 from .auto_backup import backup_all
 from .extract import MAX_FILE_BYTES, extract_text
+from .models import ModelCatalog
 from .provider import ModelError, Provider
 from .runtime import AgentRuntime
 from .store import Store
@@ -25,6 +26,7 @@ AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
 auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
 store = Store(DATA_DIR / "career_agent.sqlite3")
 provider = Provider()
+model_catalog = ModelCatalog()
 runtime = AgentRuntime(store, provider)
 
 
@@ -93,6 +95,11 @@ class InterviewInput(BaseModel):
     max_questions: int = Field(default=3, ge=1, le=10)
     material_ids: list[str] = Field(default_factory=list, max_length=5)
     claim_ids: list[str] = Field(default_factory=list, max_length=10)
+    model_id: str = Field(default="default", min_length=1, max_length=80)
+
+
+class ChatCreateInput(BaseModel):
+    model_id: str = Field(default="default", min_length=1, max_length=80)
 
 
 class MaterialInput(BaseModel):
@@ -156,7 +163,10 @@ def require_session(session_id: str, kind: str) -> dict:
 
 async def complete_run(session: dict) -> dict | JSONResponse:
     try:
-        return await active_runtime().run(session)
+        selected = session.get("model_id", "default")
+        run = active_runtime() if selected == "default" else AgentRuntime(
+            active_store(), model_catalog.get(selected))
+        return await run.run(session)
     except ModelError as exc:
         return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
     except ValueError:
@@ -169,6 +179,11 @@ async def complete_run(session: dict) -> dict | JSONResponse:
 def config():
     return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED,
             "config_error": provider.configuration_error()}
+
+
+@app.get("/api/models")
+def list_models():
+    return model_catalog.list()
 
 
 @app.get("/api/data/backup")
@@ -373,8 +388,15 @@ def export_session(kind: str, session_id: str):
 
 
 @app.post("/api/chat/sessions")
-def create_chat():
-    return active_store().create("chat")
+def create_chat(body: ChatCreateInput | None = None):
+    model_id = body.model_id if body else "default"
+    try:
+        model = model_catalog.get(model_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if model.configuration_error():
+        raise HTTPException(422, model.configuration_error())
+    return active_store().create("chat", model_id=model_id)
 
 
 @app.put("/api/chat/sessions/{session_id}/memory")
@@ -431,8 +453,11 @@ def interrupt_chat(session_id: str):
 @app.post("/api/interview/sessions")
 def create_interview(body: InterviewInput):
     try:
+        model = model_catalog.get(body.model_id)
+        if model.configuration_error():
+            raise ValueError(model.configuration_error())
         return active_store().create("interview", nonempty(body.goal), tuple(body.material_ids),
-                            tuple(body.claim_ids), body.max_questions)
+                            tuple(body.claim_ids), body.max_questions, body.model_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

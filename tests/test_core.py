@@ -10,6 +10,7 @@ from unittest.mock import patch
 import httpx
 
 from career_agent.provider import ModelError, Provider
+from career_agent.models import ModelCatalog
 from career_agent.runtime import MAX_CONTEXT_CHARS, MAX_MODEL_OUTPUT_CHARS, AgentRuntime
 from career_agent.store import Store
 
@@ -64,6 +65,77 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reply["usage"]["total_tokens"], 6)
         self.assertEqual(reply["finish_reason"], "stop")
 
+    def test_anthropic_provider_runs_tool_cycle_with_native_messages(self):
+        class Client:
+            def __init__(self):
+                self.requests = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, headers, json):
+                self.requests.append((url, headers, json))
+                if len(self.requests) == 1:
+                    body = {"content": [{"type": "tool_use", "id": "tool-1",
+                                         "name": "read_confirmed_claims", "input": {}}],
+                            "stop_reason": "tool_use", "usage": {"input_tokens": 12, "output_tokens": 4}}
+                else:
+                    body = {"content": [{"type": "text", "text": "当前没有已确认的经历。"}],
+                            "stop_reason": "end_turn", "usage": {"input_tokens": 20, "output_tokens": 8}}
+                return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+
+        client = Client()
+        provider = Provider()
+        provider.mode = "anthropic"
+        provider.model = "claude-test"
+        provider.api_key = "test-key"
+        provider.base_url = "https://api.anthropic.com/v1"
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "看看我已确认的经历")
+        with patch("career_agent.provider.httpx.AsyncClient", return_value=client):
+            result = run_demo(AgentRuntime(self.store, provider).run(running))
+        self.assertIn("没有已确认的经历", result["message"])
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(client.requests[0][0], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(client.requests[0][1]["anthropic-version"], "2026-10-21")
+        self.assertIn("求职", client.requests[0][2]["system"])
+        self.assertEqual(client.requests[0][2]["tools"][1]["name"], "read_confirmed_claims")
+        second = client.requests[1][2]["messages"]
+        self.assertEqual(second[-2]["content"][0]["type"], "tool_use")
+        self.assertEqual(second[-1]["content"][0]["tool_use_id"], "tool-1")
+        run = next(item for item in self.store.events(chat["id"], "chat") if item["kind"] == "model_run")
+        self.assertEqual(json.loads(run["detail"])["usage"]["total_tokens"], 44)
+
+    def test_anthropic_truncated_tool_call_is_not_executed(self):
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, url, headers, json):
+                return httpx.Response(200, json={
+                    "content": [{"type": "tool_use", "id": "tool-1", "name": "read_confirmed_claims",
+                                 "input": {}}],
+                    "stop_reason": "max_tokens", "usage": {"input_tokens": 10, "output_tokens": 20},
+                }, request=httpx.Request("POST", url))
+
+        provider = Provider()
+        provider.mode = "anthropic"
+        provider.model = "claude-test"
+        provider.api_key = "test-key"
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "看看我已确认的经历")
+        with patch("career_agent.provider.httpx.AsyncClient", return_value=Client()):
+            with self.assertRaises(ModelError) as caught:
+                run_demo(AgentRuntime(self.store, provider).run(running))
+        self.assertEqual(caught.exception.code, "model_output_truncated")
+        self.assertFalse(any(item["kind"] == "tool" for item in self.store.events(chat["id"], "chat")))
+
     def test_provider_reports_configuration_errors_before_request(self):
         provider = Provider()
         provider.mode = "openai_compatible"
@@ -77,6 +149,22 @@ class CoreTests(unittest.TestCase):
         self.assertIn("MODEL_API_BASE_URL", provider.configuration_error())
         provider.base_url = "http://[invalid"
         self.assertIn("MODEL_API_BASE_URL", provider.configuration_error())
+
+    def test_model_catalog_requires_tools_and_keeps_keys_out_of_listing(self):
+        path = Path(self.temp.name) / "models.json"
+        path.write_text(json.dumps([{"id": "claude", "provider": "anthropic", "model": "claude-test",
+                                     "supports_tools": True, "api_key_env": "MODEL_CLAUDE_KEY"}]),
+                        encoding="utf-8")
+        with patch.dict("os.environ", {"MODEL_CLAUDE_KEY": "private-key"}):
+            catalog = ModelCatalog(path)
+        self.assertEqual(catalog.get("claude").api_key, "private-key")
+        self.assertNotIn("private-key", json.dumps(catalog.list()))
+        with self.assertRaises(ValueError):
+            catalog.get("missing")
+        path.write_text(json.dumps([{"id": "no-tools", "provider": "anthropic", "model": "claude-test",
+                                     "supports_tools": False}]), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ModelCatalog(path)
 
     def test_truncated_model_reply_keeps_input_and_skips_tools(self):
         class TruncatedProvider:

@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .anthropic import parse_response, request_payload
+
 
 MAX_OUTPUT_TOKENS = 2048
 
@@ -25,19 +27,23 @@ QUESTIONS = (
 
 
 class Provider:
-    def __init__(self):
-        self.mode = os.getenv("MODEL_PROVIDER", "demo")
-        self.model = os.getenv("MODEL_NAME", "").strip()
-        self.base_url = os.getenv("MODEL_API_BASE_URL", "https://api.openai.com/v1").strip()
-        self.api_key = os.getenv("MODEL_API_KEY", "")
+    def __init__(self, mode: str | None = None, model: str | None = None,
+                 base_url: str | None = None, api_key: str | None = None):
+        self.mode = mode if mode is not None else os.getenv("MODEL_PROVIDER", "demo")
+        self.model = model if model is not None else os.getenv("MODEL_NAME", "").strip()
+        default_url = "https://api.anthropic.com/v1" if self.mode == "anthropic" else "https://api.openai.com/v1"
+        self.base_url = base_url if base_url is not None else os.getenv("MODEL_API_BASE_URL", default_url).strip()
+        self.api_key = api_key if api_key is not None else os.getenv("MODEL_API_KEY", "")
 
     def configuration_error(self) -> str | None:
         if self.mode == "demo":
             return None
-        if self.mode != "openai_compatible":
-            return "MODEL_PROVIDER 仅支持 demo 或 openai_compatible"
+        if self.mode not in ("openai", "openai_compatible", "anthropic"):
+            return "MODEL_PROVIDER 仅支持 demo、openai、openai_compatible 或 anthropic"
         if not self.model.strip():
             return "请设置 MODEL_NAME"
+        if self.mode in ("openai", "anthropic") and not self.api_key:
+            return "请设置 MODEL_API_KEY"
         try:
             url = urlsplit(self.base_url)
             port = url.port
@@ -56,14 +62,20 @@ class Provider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        payload = {"model": self.model, "messages": messages, "max_tokens": MAX_OUTPUT_TOKENS}
-        if tools:
-            payload["tools"] = tools
+        if self.mode == "anthropic":
+            headers["anthropic-version"] = "2026-10-21"
+            payload = request_payload(self.model, messages, tools, MAX_OUTPUT_TOKENS)
+            endpoint = "messages"
+        else:
+            payload = {"model": self.model, "messages": messages, "max_tokens": MAX_OUTPUT_TOKENS}
+            if tools:
+                payload["tools"] = tools
+            endpoint = "chat/completions"
         async with httpx.AsyncClient(timeout=60) as client:
             for attempt in range(2):
                 try:
                     response = await client.post(
-                        f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload
+                        f"{self.base_url.rstrip('/')}/{endpoint}", headers=headers, json=payload
                     )
                     response.raise_for_status()
                     break
@@ -85,6 +97,8 @@ class Provider:
                     raise ModelError("model_unavailable", "无法连接模型服务") from exc
         try:
             data = response.json()
+            if self.mode == "anthropic":
+                return parse_response(data)
             choice = data["choices"][0]
             message = choice["message"]
             if not isinstance(message, dict):

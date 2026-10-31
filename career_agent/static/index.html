@@ -69,6 +69,7 @@
             </details>
           </div>
           <form id="chat-form" class="composer">
+            <label for="chat-model">对话模型</label><select id="chat-model" aria-describedby="chat-model-help"></select><p id="chat-model-help" class="field-help">创建对话后固定模型；可在平台设置查看配置状态。</p>
             <label class="sr-only" for="chat-text">你的消息</label>
             <textarea id="chat-text" rows="3" maxlength="12000" placeholder="今天想聊什么？例如：帮我梳理目标岗位的准备重点" required></textarea>
             <div class="composer-actions"><button type="button" id="chat-retry" class="secondary" hidden>重试上条消息</button><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div>
@@ -98,6 +99,7 @@
             <div id="claim-list" class="resource-list"></div>
           </section>
           <form id="interview-setup" class="setup">
+            <label for="interview-model">面试模型</label><select id="interview-model"></select>
             <label for="interview-goal">目标岗位与练习重点</label>
             <textarea id="interview-goal" rows="3" maxlength="500" placeholder="例如：后端开发岗位，重点练习项目经历和问题排查" required></textarea>
             <label for="interview-max-questions">本轮题数（1–10）</label>
