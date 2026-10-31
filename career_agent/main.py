@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -297,10 +297,10 @@ def confirm_claim(claim_id: str):
 
 
 @app.get("/api/{kind}/sessions")
-def list_sessions(kind: str):
+def list_sessions(kind: str, q: str = Query(default="", max_length=100)):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    return active_store().list_sessions(kind)
+    return active_store().list_sessions(kind, q)
 
 
 @app.get("/api/{kind}/sessions/{session_id}")

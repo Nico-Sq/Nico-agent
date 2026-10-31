@@ -62,6 +62,13 @@ class AuthApiTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM materials").fetchone()[0], 0)
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name = 'users'").fetchone())
         self.assertEqual(self.bob.get(f"/api/interview/sessions/{interview['id']}").status_code, 404)
+        private_chat = self.alice.post("/api/chat/sessions").json()
+        self.alice.post(f"/api/chat/sessions/{private_chat['id']}/messages/claim", json={
+            "text": "仅 Alice 可查找的内容",
+        })
+        self.assertEqual(self.bob.get("/api/chat/sessions", params={
+            "q": "仅 Alice 可查找的内容",
+        }).json(), [])
         self.assertEqual(self.bob.put(f"/api/interview/sessions/{interview['id']}/title", json={
             "title": "其他账户的会话",
         }).status_code, 404)

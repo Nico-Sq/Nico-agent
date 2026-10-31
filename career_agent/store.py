@@ -365,21 +365,35 @@ class Store:
             session.pop("run_started")
         return session
 
-    def list_sessions(self, kind: str) -> list[dict]:
+    def list_sessions(self, kind: str, query: str = "") -> list[dict]:
+        where = "s.kind = ?"
+        params = [kind]
+        if query.strip():
+            match = "instr(lower({field}), lower(?)) > 0"
+            conditions = [match.format(field=field) for field in ("s.id", "s.title", "s.goal")]
+            conditions.append("EXISTS(SELECT 1 FROM messages m WHERE m.session_id = s.id AND "
+                              + match.format(field="m.content") + ")")
+            if kind == "interview":
+                conditions.append("EXISTS(SELECT 1 FROM interview_items i WHERE i.session_id = s.id AND ("
+                                  + " OR ".join(match.format(field=f"i.{field}") for field in
+                                                ("question", "answer", "feedback")) + "))")
+            where += " AND (" + " OR ".join(conditions) + ")"
+            params.extend([query.strip()] * (7 if kind == "interview" else 4))
         with self.connect() as db:
             if kind == "interview":
                 rows = db.execute(
                     "SELECT s.*, EXISTS(SELECT 1 FROM interview_items i "
                     "WHERE i.session_id = s.id AND i.feedback IS NOT NULL) AS has_feedback "
-                    "FROM sessions s WHERE s.kind = ? ORDER BY s.created_at DESC", (kind,)
+                    f"FROM sessions s WHERE {where} ORDER BY s.created_at DESC", params
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT * FROM sessions WHERE kind = ? ORDER BY created_at DESC", (kind,)
+                    f"SELECT s.* FROM sessions s WHERE {where} ORDER BY s.created_at DESC", params
                 ).fetchall()
         sessions = [dict(row) for row in rows]
         for session in sessions:
             session.pop("run_started")
+            session.pop("chat_memory")
         return sessions
 
     def set_session_title(self, session_id: str, kind: str, title: str) -> dict | None:

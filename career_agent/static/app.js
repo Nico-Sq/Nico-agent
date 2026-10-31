@@ -1,14 +1,18 @@
-const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const state = { kind: "chat", username: null, modelReady: true, ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
 const $ = (id) => document.getElementById(id);
 const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
+let sessionSearchTimer;
 
 function showAuth() {
+  clearTimeout(sessionSearchTimer);
   $("shell").hidden = true;
   $("auth-panel").hidden = false;
   for (const kind of ["chat", "interview"]) state.pending[kind]?.controller.abort();
   state.ids = { chat: null, interview: null };
   state.sessionLists = { chat: [], interview: [] };
   state.sessionQueries = { chat: "", interview: "" };
+  state.sessionSearchSeq.chat++;
+  state.sessionSearchSeq.interview++;
   state.username = null;
   $("session-search").value = "";
   $("session-title-form").hidden = true;
@@ -379,29 +383,29 @@ function startPractice(sourceId, questionNumber) {
 
 async function loadSessions() {
   const kind = state.kind;
-  state.sessionLists[kind] = await api(`/${kind}/sessions`);
+  const query = state.sessionQueries[kind];
+  const sequence = ++state.sessionSearchSeq[kind];
+  const sessions = await api(`/${kind}/sessions${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+  if (sequence !== state.sessionSearchSeq[kind] || query !== state.sessionQueries[kind]) return;
+  state.sessionLists[kind] = sessions;
   if (state.kind === kind) renderSessionList();
 }
 
 function renderSessionList() {
   const kind = state.kind;
   const sessions = state.sessionLists[kind];
-  const query = state.sessionQueries[kind].toLocaleLowerCase();
-  const visible = sessions.filter((session) => {
-    const name = session.title || (kind === "chat" ? `聊天 ${session.id.slice(0, 6)}` : session.goal);
-    return `${name} ${session.goal} ${session.id}`.toLocaleLowerCase().includes(query);
-  });
-  $("session-count").textContent = query ? `找到 ${visible.length} / ${sessions.length} 个会话` : `${sessions.length} 个会话`;
+  const query = state.sessionQueries[kind];
+  $("session-count").textContent = query ? `找到 ${sessions.length} 个会话` : `${sessions.length} 个会话`;
   const box = $("sessions");
   box.replaceChildren();
-  if (!visible.length) {
+  if (!sessions.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = query ? "没有匹配的会话，试试其他名称、目标或 ID。"
+    empty.textContent = query ? "没有匹配的会话，试试其他名称、消息内容或 ID。"
       : kind === "chat" ? "还没有聊天会话，发送消息后会显示在这里。" : "还没有面试会话，设置目标后开始一场练习。";
     box.append(empty);
   }
-  for (const session of visible) {
+  for (const session of sessions) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = session.id === state.ids[kind] ? "selected" : "";
@@ -455,6 +459,7 @@ async function selectSession(id) {
 }
 
 async function switchKind(kind, fresh = false) {
+  clearTimeout(sessionSearchTimer);
   state.kind = kind;
   const previousId = state.ids[kind];
   $("session-search").value = state.sessionQueries[kind];
@@ -536,8 +541,18 @@ $("new-session").onclick = async () => {
 };
 $("history-toggle").onclick = () => setHistoryOpen($("history-toggle").getAttribute("aria-expanded") !== "true");
 $("session-search").oninput = () => {
-  state.sessionQueries[state.kind] = $("session-search").value.trim();
-  renderSessionList();
+  const kind = state.kind;
+  const query = $("session-search").value.trim();
+  state.sessionQueries[kind] = query;
+  $("session-count").textContent = "正在查找…";
+  clearTimeout(sessionSearchTimer);
+  sessionSearchTimer = setTimeout(() => loadSessions().catch((error) => {
+    if (state.kind === kind && state.sessionQueries[kind] === query) {
+      $("session-count").textContent = "查找失败，请重试。";
+      $("sessions").replaceChildren();
+      notice(error.message);
+    }
+  }), 200);
 };
 $("rename-session").onclick = () => {
   const session = state.sessionLists[state.kind].find((item) => item.id === state.ids[state.kind]);

@@ -78,6 +78,39 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(renamed["goal"], "算法岗位")
         self.assertEqual(self.client.get("/api/interview/sessions").json()[0]["title"], "第一次模拟")
 
+    def test_session_search_finds_messages_and_interview_feedback(self):
+        chat = self.client.post("/api/chat/sessions").json()
+        chat_id = chat["id"]
+        self.client.put(f"/api/chat/sessions/{chat_id}/memory", json={"text": "PRIVATE_CHAT_NOTE"})
+        self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
+            "text": "后端项目中的索引优化",
+        })
+        other = self.client.post("/api/chat/sessions").json()
+        self.client.put(f"/api/chat/sessions/{other['id']}/title", json={"title": "100XX 岗位"})
+        self.client.put(f"/api/chat/sessions/{chat_id}/title", json={"title": "100%_ 岗位"})
+        for query in ("索引优化", "100%_", chat_id[:8]):
+            matches = self.client.get("/api/chat/sessions", params={"q": query}).json()
+            self.assertEqual([item["id"] for item in matches], [chat_id])
+            self.assertNotIn("索引优化", str(matches))
+            self.assertNotIn("PRIVATE_CHAT_NOTE", str(matches))
+        self.assertEqual(self.client.get("/api/chat/sessions", params={"q": "不存在的内容"}).json(), [])
+        self.assertEqual(self.client.get("/api/chat/sessions", params={"q": "甲" * 101}).status_code, 422)
+
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "max_questions": 1,
+        }).json()
+        interview_id = interview["id"]
+        self.client.post(f"/api/interview/sessions/{interview_id}/start")
+        self.client.post(f"/api/interview/sessions/{interview_id}/answers", json={
+            "text": "我优化了数据库连接池",
+        })
+        with main.store.connect() as db:
+            db.execute("UPDATE interview_items SET feedback = ? WHERE session_id = ?", ("反馈专属关键词", interview_id))
+        for query in ("连接池", "反馈专属关键词", "后端开发"):
+            matches = self.client.get("/api/interview/sessions", params={"q": query}).json()
+            self.assertEqual([item["id"] for item in matches], [interview_id])
+        self.assertEqual(self.client.get("/api/chat/sessions", params={"q": "反馈专属关键词"}).json(), [])
+
     def test_chat_memory_is_editable_and_invalidates_old_run(self):
         chat_id = self.client.post("/api/chat/sessions").json()["id"]
         pending = self.client.post(f"/api/chat/sessions/{chat_id}/messages/claim", json={
