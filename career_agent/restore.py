@@ -13,6 +13,7 @@ TABLES = {
     "session_materials", "session_claims", "interview_items",
     "interview_evidence", "practice_sessions",
 }
+OPTIONAL_TABLES = {"session_tool_grants", "memories"}
 
 
 def validate_backup(db: sqlite3.Connection):
@@ -21,7 +22,7 @@ def validate_backup(db: sqlite3.Connection):
     objects = db.execute("SELECT type, name FROM sqlite_master").fetchall()
     tables = {name for kind, name in objects if kind == "table"}
     if not TABLES.issubset(tables) or any(
-        kind in ("trigger", "view") or (kind == "table" and name not in TABLES | {"sqlite_sequence"})
+        kind in ("trigger", "view") or (kind == "table" and name not in TABLES | OPTIONAL_TABLES | {"sqlite_sequence"})
         for kind, name in objects
     ):
         raise ValueError("文件不是 Nico-agent 业务数据备份")
