@@ -7,7 +7,7 @@ name = "nico-application"
 version = "0.1.0"
 description = "Chat, interview, material and memory use cases for Nico-agent"
 requires-python = ">=3.11"
-dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0"]
+dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0", "jsonschema>=4.21,<5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

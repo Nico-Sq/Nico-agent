@@ -26,9 +26,15 @@ from career_agent.auth import AuthStore as LegacyAuthStore
 from career_agent.auto_backup import backup_all as legacy_backup_all
 from career_agent.restore import restore as legacy_restore
 from career_agent.store import Store as LegacyStore
+import career_agent.tools as LegacyTools
+import career_agent.mcp as LegacyMCP
+import career_agent.plugins as LegacyPlugins
 from nico_storage import AuthStore, Store
 from nico_storage.backup import backup_all
 from nico_storage.restore import restore as storage_restore
+import nico_application.tools as ApplicationTools
+import nico_adapters.mcp as AdapterMCP
+import nico_adapters.plugins as AdapterPlugins
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -109,6 +115,11 @@ class CompatibilitySnapshotTests(unittest.TestCase):
         self.assertIs(LegacyChannelAccessError, ChannelAccessError)
         self.assertIs(LegacyChannelDeliveryError, ChannelDeliveryError)
         self.assertIs(LegacyAdapter, ModelAdapter)
+
+    def test_legacy_tool_modules_forward_to_the_new_packages(self):
+        self.assertIs(LegacyTools, ApplicationTools)
+        self.assertIs(LegacyMCP, AdapterMCP)
+        self.assertIs(LegacyPlugins, AdapterPlugins)
 
     def test_cli_top_level_commands_are_stable(self):
         parser = build_parser()

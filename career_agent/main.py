@@ -10,21 +10,22 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from nico_adapters.registry import load_tool_adapters
 
 from nico_application import (
     ChatUseCases,
     InterviewUseCases,
     MaterialUseCases,
     MemoryUseCases,
+    ToolGrantError,
+    ToolGrantUseCases,
     UseCaseError,
 )
 
 from .auth import AuthStore, LoginRateLimited
 from .auto_backup import backup_all
 from .extract import MAX_FILE_BYTES, extract_text
-from .mcp import MCPServers
 from .models import ModelCatalog
-from .plugins import LocalPlugins
 from .provider import Provider
 from .providers import ModelError
 from .runtime import AgentRuntime
@@ -38,6 +39,9 @@ auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
 store = Store(DATA_DIR / "career_agent.sqlite3")
 provider = Provider()
 model_catalog = ModelCatalog()
+_TOOL_ADAPTER_TYPES = load_tool_adapters(("stdio_mcp", "trusted_local_plugins"))
+MCPServers = _TOOL_ADAPTER_TYPES["stdio_mcp"]
+LocalPlugins = _TOOL_ADAPTER_TYPES["trusted_local_plugins"]
 mcp_servers = MCPServers()
 local_plugins = LocalPlugins()
 runtime = AgentRuntime(store, provider, mcp_servers, local_plugins)
@@ -45,6 +49,7 @@ runtime = AgentRuntime(store, provider, mcp_servers, local_plugins)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    local_plugins.activate()
     async def backup_once():
         try:
             await asyncio.to_thread(backup_all, DATA_DIR)
@@ -66,6 +71,8 @@ async def lifespan(_app: FastAPI):
             await task
         with suppress(Exception):
             await mcp_servers.close()
+        with suppress(Exception):
+            await local_plugins.close()
         await backup_once()
 
 
@@ -384,7 +391,7 @@ def get_session_tools(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     require_session(session_id, kind)
-    return {"names": active_store().tool_grants(session_id)}
+    return {"names": ToolGrantUseCases(active_store()).list(session_id)}
 
 
 @app.put("/api/{kind}/sessions/{session_id}/tools")
@@ -399,11 +406,14 @@ async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
                      for item in local_plugins.discover() + await mcp_servers.discover()}
     except Exception as exc:
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
-    if not set(body.names) <= available.keys():
-        raise HTTPException(422, "包含未配置的外部工具")
-    if any(available[name].get("read_only") is not True for name in body.names):
-        raise HTTPException(422, "非只读工具尚未开放")
-    return {"names": active_store().set_tool_grants(session_id, body.names)}
+    try:
+        names = ToolGrantUseCases(active_store()).replace(
+            session_id, body.names, available.values(),
+        )
+    except ToolGrantError as exc:
+        message = "包含未配置的外部工具" if exc.kind == "unavailable" else str(exc)
+        raise HTTPException(422, message) from exc
+    return {"names": names}
 
 
 @app.get("/api/data/backup")

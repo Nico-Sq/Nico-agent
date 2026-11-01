@@ -7,7 +7,11 @@ name = "nico-adapters"
 version = "0.1.0"
 description = "Model protocol adapters for Nico-agent"
 requires-python = ">=3.11"
-dependencies = ["nico-contracts==0.1.0", "nico-agent-core==0.1.0", "httpx>=0.27"]
+dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0", "nico-agent-core==0.1.0", "nico-application==0.1.0", "httpx>=0.27", "jsonschema>=4.21,<5"]
+
+[project.entry-points."nico_agent.tool_adapters"]
+stdio_mcp = "nico_adapters.mcp:MCPServers"
+trusted_local_plugins = "nico_adapters.plugins:LocalPlugins"
 
 [tool.setuptools.packages.find]
 where = ["src"]

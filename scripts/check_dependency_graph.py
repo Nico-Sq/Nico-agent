@@ -37,7 +37,7 @@ PACKAGES: dict[str, dict[str, object]] = {
     "nico_adapters": {
         "distribution": "nico-adapters",
         "directory": Path("packages/nico-adapters"),
-        "depends": {"nico_contracts", "nico_agent_core"},
+        "depends": {"nico_contracts", "nico_domain", "nico_agent_core", "nico_application"},
     },
     "nico_storage": {
         "distribution": "nico-storage",

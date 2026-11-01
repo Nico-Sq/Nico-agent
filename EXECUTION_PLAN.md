@@ -163,6 +163,9 @@ flowchart LR
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/core/memory/engine.py` | 记忆记录携带 `EvidenceRef` 和来源 resolver | **采用**长期记忆必须可回源；不采用复杂多引擎、图谱和自动记忆写入 |
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/plugins/base.py` | 插件声明版本并暴露 prepare/activate/retire/terminate 生命周期 | **调整后采用**最小生命周期和不可变工具目录；不可信插件进程隔离仅在真实来源出现后实施 |
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/prompts/agent.py`、`E:/Akashic-agent/akashic-agent/agent/context.py` | 身份、行为、记忆和上下文按块组织，并保留可追踪的组装边界 | **不采用**其完整人格/主动任务提示体系；Nico 继续使用求职专用短提示和结构化状态 |
+| Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/tools/registry.py`、`agent/tool_hooks/executor.py`、`prompts/agent.py` | Registry 统一登记工具风险、来源和声明；执行器先允许拒绝/确定最终参数，再调用实现，提示词只要求调用当前可见工具 | **调整后采用**同一会话授权快照生成模型声明与执行映射，并在调用前校验；不复制动态搜索、hook 平台或其完整提示词 |
+| nanobot：`E:/nanobot/nanobot/agent/tools/registry.py`、`agent/tools/base.py`、`agent/runner.py`、`templates/agent/tool_contract.md` | Registry 提供稳定工具声明、参数准备/校验和统一执行入口；Runner 承担调用批次，契约提示说明读写及验证顺序 | **调整后采用**通用 adapter 端口、目录快照和同一执行边界；保留 Nico 严格 JSON Schema 拒绝行为，不采用错误后自动换法重试的提示 |
+| Pi：`E:/Agent/Pi-agent/pi/packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/coding-agent/src/core/mcp-servers.ts`、`packages/coding-agent/src/extensions/mcp/runtime.ts`、`packages/coding-agent/src/core/extensions/loader.ts` | Agent loop 在工具列表中校验后执行；提示声明按选中工具生成；MCP server 注册副本隔离，关闭可取消连接；扩展加载失败会丢弃本次注册 | **调整后采用**目录与执行使用同一只读快照、资源释放和最小插件生命周期；本阶段只保留本地 stdio，不引入远端 MCP/OAuth、热重载或完整扩展框架 |
 
 ## 5. 目标架构
 
@@ -468,6 +471,8 @@ git status --short --branch
 - MCP 保留 stdio、白名单、连接复用、服务器隔离和不确定调用不重试。插件增加 load/prepare/activate/retire/close 最小生命周期和不可变工具快照。
 - 使用 entry point 注册第一方和外部适配器；组合根按配置发现，业务用例不判断具体来源。
 - 写工具继续默认不可用，除非用户完成下一节的条件决定。
+- `propose_memory` 继续保持现有受限语义：只在用户明确要求时产生带来源的待确认候选，候选本身不能直接写入已确认记忆；它属于现有求职 application 流程，不因此开放任意 MCP/插件写工具。
+- 模型声明与执行器都只读取本轮构造的一份不可变目录快照；会话 grant 在模型请求前读取，运行中 Web API 已拒绝更改授权。MCP 与插件仍由可信的第一方 entry point 按固定名称装配；外部 Python 插件代码只有在用户配置 `LOCAL_PLUGINS_PATH` 指向可信本地文件时才会导入。
 
 **对外结果**：现有只读工具、MCP、插件和 API/CLI 授权行为不变；新增工具适配器不修改 Agent 循环或业务用例。
 
@@ -706,7 +711,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [x] 阶段 3：面试 application 用例和结果校验。
 - [x] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
 - [x] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
-- [ ] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
+- [x] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
 - [ ] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
 - [ ] 阶段 8：性能/可靠性基线与超预算优化。
 - [ ] 阶段 9：唯一组合根、兼容层、WebUI 收口和全 wheel 安装验收。
@@ -749,7 +754,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
 | 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
 | 5 storage/schema/迁移 | 已完成（2026-11-01） | `3b38d1b` | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
-| 6 tools/MCP/plugins | 待做 | — | — | — |
+| 6 tools/MCP/plugins | 已完成（2026-11-01） | 随阶段记录提交 | 根测试 139 项、适配器测试 4 项；依赖图无环；6 个 wheel 构建并在仓库外安装；兼容 API/CLI/MCP/插件测试通过；`git diff --check` | 未开放写工具；未改变 Store、schema、渠道和流式行为 |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
 | 8 性能基线 | 待做 | — | — | — |
 | 9 app/Web/安装收口 | 待做 | — | — | — |
@@ -789,6 +794,16 @@ API/CLI/数据兼容：
 - 本阶段建立 `nico-storage`，把 Store 的事务基类、会话/事件/授权、材料/经历、记忆候选、运行状态、Auth、自动备份和恢复拆成模块；`career_agent.*` 保留兼容转发。新空库和已识别 `user_version=0` 历史库共用 v1 基线；迁移先在同目录副本验证，通过后备份原库并原子替换；未知 schema 与未来版本拒绝处理。业务表定义未重建或改动。
 - 实际命令与结果：根测试运行前通过 `TemporaryDirectory` 设置临时 `DATA_DIR`、假模型及全部包的 `PYTHONPATH`，执行 `D:\anaconda3\python.exe -m unittest discover -s tests -q`（137 项通过）；`D:\anaconda3\python.exe -m unittest discover -s packages/nico-storage/tests -q`（12 项通过），覆盖历史业务/认证库安全备份、未知库原样保留、失败回滚、未来版本、连续版本、账户隔离和旧备份恢复。`D:\anaconda3\python.exe scripts/check_dependency_graph.py` 通过；`E:\Agent\Nico-agent\.venv\Scripts\python.exe scripts/build_wheels.py --all --out dist` 构建 6 个包，最终 `--changed` 重建 application/storage；`D:\anaconda3\python.exe scripts/verify_wheel_install.py --all` 在仓库外临时 venv 安装并 smoke test 6 个 wheel，storage wheel 从自身 SQL 资源创建 v1 数据库；`git diff --check` 通过。没有读取或迁移真实 `data/`。
 - 阶段 7 再实现 ChannelLedger 的数据库表和跨重启幂等；本阶段只定义 application 端口。没有改变第二渠道、流式输出、记忆检索或工具授权策略。
+
+阶段 6 参考项目与实施记录（2026-11-01）：
+
+- Pi：复核 `E:\Agent\Pi-agent\pi\packages\agent\src\agent-loop.ts`、`packages\coding-agent\src\core\system-prompt.ts`、`packages\coding-agent\src\core\mcp-servers.ts`、`packages\coding-agent\src\extensions\mcp\runtime.ts` 和 `packages\coding-agent\src\core\extensions\loader.ts`。采用工具列表校验、提示与执行共享一份目录快照、连接资源可关闭和最小插件生命周期；不引入 Pi 的扩展生态、热重载或远端 MCP。
+- nanobot：复核 `E:\nanobot\nanobot\agent\tools\registry.py`、`agent\tools\base.py`、`agent\runner.py` 和 `templates\agent\tool_contract.md`。调整后采用稳定工具声明、参数 schema、统一调用边界和 runner 执行；保持 Nico 的逐会话 grant、拒绝非法参数和不确定调用不重试，不引入全局可变 registry。
+- Akashic：复核 `E:\Akashic-agent\akashic-agent\agent\tools\registry.py`、`agent\tool_hooks\executor.py`、`agent\plugins\base.py`、`bootstrap\tools.py`、`agent\looping\core.py` 和 `prompts\agent.py`。调整后采用统一来源/风险信息、调用前授权、最小 load/prepare/activate/retire/close 生命周期；不建通用 hook 平台或不可信插件沙箱。本阶段重用现有 `AgentCore` 的 framework-free 执行回调边界，没有修改 Agent 循环。
+- 实施：domain 集中“必须显式 `read_only is True`”规则；application 提供工具目录、只读 grant 用例和不可变运行快照；adapters 承载内置工具、MCP、可信本地插件和显式 entry point 注册。模型工具声明、外部描述、处理器映射及并行只读决策均绑定到同一运行快照。MCP 保留 stdio、白名单、连接复用、服务器隔离和调用不重试；插件仅在用户配置可信本地路径时导入，并具备最小生命周期、不可变发现结果和超时仍可能后台运行的原语义。兼容 `career_agent.tools/mcp/plugins` 导入别名及原 API/CLI grant 行为。
+- 安全与范围：未授权工具不进入模型工具定义；非只读工具不能 grant 或执行。`propose_memory` 继续只在用户明确提出记忆请求后生成带来源的待确认候选，确认前不会写为已确认记忆；没有开放任意写工具。第三方 entry point 不自动加载。没有改变数据库 schema、Store、ChannelLedger、第二渠道或流式输出，也没有为本阶段下载模型。
+- 实际验证：`D:\anaconda3\python.exe -m unittest discover -s tests -q`（139 项通过，包含 core、API、MCP、兼容、扩展和账户/备份恢复回归）；`D:\anaconda3\python.exe -m unittest discover -s packages\nico-adapters\tests -q`（4 项通过）；`D:\anaconda3\python.exe -m compileall -q career_agent packages\nico-domain\src packages\nico-application\src packages\nico-adapters\src scripts`；`D:\anaconda3\python.exe scripts\check_dependency_graph.py`（无环，领域、application 层依赖检查通过）；`D:\anaconda3\python.exe scripts\build_wheels.py --all --out dist`（6 个 wheel 构建成功）；`D:\anaconda3\python.exe scripts\verify_wheel_install.py --all`（仓库外临时 venv 安装和导入 6 个 wheel 成功，并验证 `stdio_mcp`、`trusted_local_plugins` entry point）；`git diff --check` 通过。wheel 安装日志中的 pip 更新提示不影响安装结果。
+- 未验证/后续条件：没有外部 MCP 服务或第三方插件源用于实网验收；未来不可信插件若需支持，仍须独立子进程和资源/终止边界。真实模型端点不阻塞本阶段。
 
 ## 16. 给后续执行 AI 的直接指令
 

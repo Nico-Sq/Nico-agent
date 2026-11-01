@@ -70,13 +70,19 @@ def main() -> int:
             "for module in modules:\n"
             "    importlib.import_module(module)\n"
             "    loaded.append(module)\n"
+            "tool_adapters=[]\n"
+            "if 'nico_adapters' in modules:\n"
+            "    tool_adapters=sorted(ep.name for ep in importlib.metadata.entry_points("
+            "group='nico_agent.tool_adapters'))\n"
+            "    assert {'stdio_mcp','trusted_local_plugins'} <= set(tool_adapters), tool_adapters\n"
             "if 'nico_storage' in modules:\n"
             "    from nico_storage import Store\n"
             "    with tempfile.TemporaryDirectory() as directory:\n"
             "        store=Store(Path(directory) / 'career_agent.sqlite3')\n"
             "        with store.connect() as db:\n"
             "            assert db.execute('PRAGMA user_version').fetchone()[0] == 1\n"
-            "print(json.dumps({'loaded': loaded, 'cwd': __import__('os').getcwd()}))\n"
+            "print(json.dumps({'loaded': loaded, 'tool_adapters': tool_adapters, "
+            "'cwd': __import__('os').getcwd()}))\n"
         )
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)

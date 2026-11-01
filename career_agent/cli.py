@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 
+from nico_adapters.registry import load_tool_adapters
 from nico_application import ChatUseCases, InterviewUseCases, MemoryUseCases, UseCaseError
+from nico_application import ToolGrantUseCases
 
 from .channels import (
     ChannelDeliveryError,
@@ -327,8 +329,9 @@ def main() -> None:
     store = Store(Path(os.getenv("DATA_DIR", root / "data")) / "career_agent.sqlite3")
     memory_use_cases = MemoryUseCases(store)
     catalog = ModelCatalog()
-    mcp = MCPServers()
-    plugins = LocalPlugins()
+    adapter_types = load_tool_adapters(("stdio_mcp", "trusted_local_plugins"))
+    mcp = adapter_types["stdio_mcp"]()
+    plugins = adapter_types["trusted_local_plugins"]()
     try:
         if args.command == "models":
             for item in catalog.list():
@@ -367,20 +370,20 @@ def main() -> None:
                     raise ValueError(f"需要现有{args.kind}会话 ID")
                 if not args.tool_name:
                     raise ValueError("需要工具名称")
-                names = set(store.tool_grants(args.session_id))
                 if args.action == "grant":
                     available = {item["name"]: item
                                  for item in plugins.discover() + asyncio.run(discover_mcp(mcp))}
-                    if args.tool_name not in available:
-                        raise ValueError("工具不存在或未启用")
-                    if available[args.tool_name].get("read_only") is not True:
-                        raise ValueError("非只读工具尚未开放")
-                    names.add(args.tool_name)
+                    names = ToolGrantUseCases(store).grant(
+                        args.session_id, args.tool_name, available.values(),
+                    )
                 else:
-                    names.discard(args.tool_name)
-                print(store.set_tool_grants(args.session_id, sorted(names)))
+                    names = ToolGrantUseCases(store).revoke(args.session_id, args.tool_name)
+                print(names)
     except (ModelError, ValueError) as exc:
         parser.exit(1, f"操作失败：{cli_error_text(exc)}\n")
+    finally:
+        asyncio.run(mcp.close())
+        asyncio.run(plugins.close())
 
 
 if __name__ == "__main__":

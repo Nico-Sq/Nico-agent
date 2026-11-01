@@ -281,6 +281,35 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         self.assertIn('"error": "plugin_tool_failed"', result["message"])
         self.assertNotIn("private detail", result["message"])
 
+    def test_retired_plugin_adapter_does_not_block_model_run(self):
+        root = Path(self.temp.name)
+        plugin = root / "reader.py"
+        plugin.write_text(
+            "def read(arguments): return arguments['text']\n"
+            "TOOLS = [{'name':'read','description':'read','read_only':True,"
+            "'parameters':{'type':'object','properties':{'text':{'type':'string'}},"
+            "'required':['text'],'additionalProperties':False},'run':read}]\n",
+            encoding="utf-8",
+        )
+        config = root / "reader.json"
+        config.write_text(json.dumps([{"path": plugin.name}]), encoding="utf-8")
+        plugins = LocalPlugins(config)
+        item = plugins.discover()[0]
+
+        class Provider:
+            async def complete(self, messages, tools):
+                self.tools = [entry["function"]["name"] for entry in tools]
+                return {"content": "模型仍可运行"}
+
+        chat = self.store.create("chat")
+        self.store.set_tool_grants(chat["id"], [item["name"]])
+        running = self.store.claim_run(chat["id"], "chat", "active", "继续回答")
+        plugins.retire()
+        provider = Provider()
+        result = asyncio.run(AgentRuntime(self.store, provider, plugins=plugins).run(running))
+        self.assertEqual(result["message"], "模型仍可运行")
+        self.assertNotIn(item["name"], provider.tools)
+
     def test_console_channel_ends_on_exit_and_end_of_input(self):
         channel = ConsoleChannel()
         with patch("builtins.input", side_effect=["你好", "  /exit  "]):
