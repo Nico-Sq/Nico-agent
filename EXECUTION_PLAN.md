@@ -743,7 +743,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 |---|---|---|---|---|
 | 0 现有本地能力基线 | 历史记录，当前需回归 | `40de88c` 之前 | 旧文档记录 133 测试；本次未复跑 | 当前提交、真实模型、浏览器 |
 | 1 workspace/契约/护栏 | 已完成（2026-10-31） | `39f6732` | 136 项现有测试、4 项契约测试；依赖图无环；`python -m build --wheel packages/nico-contracts --outdir dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | 本地/商业真实模型调用按阶段 4 决策执行；未改变 Store 或数据库 schema |
-| 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | 本行所在提交 | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
+| 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
 | 3 面试用例/校验 | 待做 | — | — | — |
 | 4 Agent core/多模型 | 待做 | — | — | — |
 | 5 storage/schema/迁移 | 待做 | — | — | — |
