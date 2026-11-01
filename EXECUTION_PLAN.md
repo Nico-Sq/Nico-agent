@@ -754,7 +754,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
 | 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
 | 5 storage/schema/迁移 | 已完成（2026-11-01） | `3b38d1b` | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
-| 6 tools/MCP/plugins | 已完成（2026-11-01） | 随阶段记录提交 | 根测试 139 项、适配器测试 4 项；依赖图无环；6 个 wheel 构建并在仓库外安装；兼容 API/CLI/MCP/插件测试通过；`git diff --check` | 未开放写工具；未改变 Store、schema、渠道和流式行为 |
+| 6 tools/MCP/plugins | 已完成（2026-11-01） | `87dd7f3` | 根测试 139 项、适配器测试 4 项；依赖图无环；6 个 wheel 构建并在仓库外安装；兼容 API/CLI/MCP/插件测试通过；`git diff --check` | 未开放写工具；未改变 Store、schema、渠道和流式行为 |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
 | 8 性能基线 | 待做 | — | — | — |
 | 9 app/Web/安装收口 | 待做 | — | — | — |
@@ -803,6 +803,7 @@ API/CLI/数据兼容：
 - 实施：domain 集中“必须显式 `read_only is True`”规则；application 提供工具目录、只读 grant 用例和不可变运行快照；adapters 承载内置工具、MCP、可信本地插件和显式 entry point 注册。模型工具声明、外部描述、处理器映射及并行只读决策均绑定到同一运行快照。MCP 保留 stdio、白名单、连接复用、服务器隔离和调用不重试；插件仅在用户配置可信本地路径时导入，并具备最小生命周期、不可变发现结果和超时仍可能后台运行的原语义。兼容 `career_agent.tools/mcp/plugins` 导入别名及原 API/CLI grant 行为。
 - 安全与范围：未授权工具不进入模型工具定义；非只读工具不能 grant 或执行。`propose_memory` 继续只在用户明确提出记忆请求后生成带来源的待确认候选，确认前不会写为已确认记忆；没有开放任意写工具。第三方 entry point 不自动加载。没有改变数据库 schema、Store、ChannelLedger、第二渠道或流式输出，也没有为本阶段下载模型。
 - 实际验证：`D:\anaconda3\python.exe -m unittest discover -s tests -q`（139 项通过，包含 core、API、MCP、兼容、扩展和账户/备份恢复回归）；`D:\anaconda3\python.exe -m unittest discover -s packages\nico-adapters\tests -q`（4 项通过）；`D:\anaconda3\python.exe -m compileall -q career_agent packages\nico-domain\src packages\nico-application\src packages\nico-adapters\src scripts`；`D:\anaconda3\python.exe scripts\check_dependency_graph.py`（无环，领域、application 层依赖检查通过）；`D:\anaconda3\python.exe scripts\build_wheels.py --all --out dist`（6 个 wheel 构建成功）；`D:\anaconda3\python.exe scripts\verify_wheel_install.py --all`（仓库外临时 venv 安装和导入 6 个 wheel 成功，并验证 `stdio_mcp`、`trusted_local_plugins` entry point）；`git diff --check` 通过。wheel 安装日志中的 pip 更新提示不影响安装结果。
+- 阶段实现提交：`87dd7f3`（`refactor: extract tool adapters and authorization boundary`）；未 push。
 - 未验证/后续条件：没有外部 MCP 服务或第三方插件源用于实网验收；未来不可信插件若需支持，仍须独立子进程和资源/终止边界。真实模型端点不阻塞本阶段。
 
 ## 16. 给后续执行 AI 的直接指令
