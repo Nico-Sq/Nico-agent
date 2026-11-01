@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+from nico_application import ChatUseCases, MemoryUseCases, UseCaseError
+
 from .channels import (
     ChannelDeliveryError,
     ChannelRouter,
@@ -58,6 +60,10 @@ async def run_channel(channel: TextChannel, store: Store, model_id: str = "defau
     if provider.configuration_error():
         raise ValueError(provider.configuration_error())
     runtime = AgentRuntime(store, provider, mcp, plugins)
+    chat = ChatUseCases(store, catalog, runtime.run, AgentRuntime.cancel_session_runs)
+    if session_id is None:
+        session = chat.create(model_id)
+        session_id = session["id"]
     sender_id = getattr(channel, "sender_id", "local")
     conversation_id = getattr(channel, "conversation_id", "console")
     allowed_senders = set(getattr(channel, "allowed_senders", {sender_id}))
@@ -78,17 +84,18 @@ async def run_channel(channel: TextChannel, store: Store, model_id: str = "defau
             continue
 
         async def handle(current_session: dict, message: TextMessage) -> str:
-            if message.text.strip() == "/retry":
-                running = store.retry_chat(current_session["id"])
-            else:
-                running = store.claim_run(
-                    current_session["id"], "chat", "active", message.text.strip()
-                )
-            if running is None:
-                return "当前没有可重试消息，或会话正在运行。"
             try:
-                result = await runtime.run(running)
+                if message.text.strip() == "/retry":
+                    result = await chat.retry_message(current_session["id"])
+                else:
+                    result = await chat.send_message(
+                        current_session["id"], message.text.strip(),
+                    )
                 return result.get("message", "本轮已中断")
+            except UseCaseError as exc:
+                if exc.kind == "conflict":
+                    return "当前没有可重试消息，或会话正在运行。"
+                return str(exc)
             except (ModelError, ValueError) as exc:
                 return f"运行失败：{cli_error_text(exc)}"
 
@@ -203,34 +210,26 @@ async def run_interview(args, store: Store, catalog: ModelCatalog,
 
 
 def run_memory_candidate_action(args, store: Store) -> dict:
+    memory = MemoryUseCases(store)
     if args.action == "list":
-        return {"candidates": store.list_memory_candidates(args.session_id, args.status)}
+        return {"candidates": memory.list_candidates(args.session_id, args.status)}
     if args.action == "show":
-        candidate = store.memory_candidate(args.candidate_id)
-        if candidate is None:
-            raise ValueError("记忆候选不存在")
-        return {"candidate": candidate}
+        return {"candidate": memory.get_candidate(args.candidate_id)}
     if args.action == "create":
-        return {"candidate": store.create_memory_candidate(
+        return {"candidate": memory.create_candidate(
             args.session_id, args.content, args.source,
         )}
     if args.action == "edit":
-        candidate = store.update_memory_candidate(args.candidate_id, args.content)
-        if candidate is None:
-            raise ValueError("候选不存在或已经确认")
-        return {"candidate": candidate}
+        try:
+            return {"candidate": memory.edit_candidate(args.candidate_id, args.content)}
+        except UseCaseError as exc:
+            if exc.kind in {"not_found", "conflict"}:
+                raise ValueError("候选不存在或已经确认") from exc
+            raise
     if args.action == "confirm":
-        candidate = store.confirm_memory_candidate(args.candidate_id)
-        if candidate is None:
-            raise ValueError("记忆候选不存在")
-        return {"candidate": candidate}
+        return {"candidate": memory.confirm_candidate(args.candidate_id)}
     if args.action == "delete":
-        candidate = store.memory_candidate(args.candidate_id)
-        if candidate is None:
-            raise ValueError("记忆候选不存在")
-        if candidate["status"] != "pending":
-            raise ValueError("已确认的记忆候选不能删除")
-        store.delete_memory_candidate(args.candidate_id)
+        memory.delete_candidate(args.candidate_id)
         return {"deleted": True, "candidate_id": args.candidate_id}
     raise ValueError("未知候选记忆命令")
 
@@ -349,6 +348,7 @@ def main() -> None:
         parser.error("启用账户登录时请通过 Web API 管理各账户数据")
     root = Path(__file__).resolve().parent.parent
     store = Store(Path(os.getenv("DATA_DIR", root / "data")) / "career_agent.sqlite3")
+    memory_use_cases = MemoryUseCases(store)
     catalog = ModelCatalog()
     mcp = MCPServers()
     plugins = LocalPlugins()
@@ -363,14 +363,15 @@ def main() -> None:
             if args.action == "add":
                 if not args.value or not args.value.strip() or len(args.value) > 2000:
                     raise ValueError("记忆内容需为 1–2000 字")
-                saved = store.add_memory(args.value.strip())
+                saved = memory_use_cases.add(args.value)
                 print(saved["id"] + ("" if saved["created"] else "（已存在）"))
             elif args.action == "delete":
-                if not args.value or not store.delete_memory(args.value):
+                if not args.value:
                     raise ValueError("记忆不存在")
+                memory_use_cases.delete(args.value)
                 print("已删除")
             else:
-                for item in store.search_memories(args.value or ""):
+                for item in memory_use_cases.search(args.value or ""):
                     print(f"{item['id']}  {item['content']}")
         elif args.command == "candidate":
             args.action = args.candidate_action

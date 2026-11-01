@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from nico_application import ChatUseCases, MaterialUseCases, MemoryUseCases, UseCaseError
+
 from .auth import AuthStore, LoginRateLimited
 from .auto_backup import backup_all
 from .extract import MAX_FILE_BYTES, extract_text
@@ -72,6 +74,24 @@ def active_store() -> Store:
 
 def active_runtime() -> AgentRuntime:
     return request_runtime.get() or runtime
+
+
+def active_chat_use_cases() -> ChatUseCases:
+    return ChatUseCases(active_store(), model_catalog, run_chat_session,
+                        AgentRuntime.cancel_session_runs)
+
+
+def active_material_use_cases() -> MaterialUseCases:
+    return MaterialUseCases(active_store())
+
+
+def active_memory_use_cases() -> MemoryUseCases:
+    return MemoryUseCases(active_store())
+
+
+def http_use_case_error(exc: UseCaseError) -> HTTPException:
+    status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
+    return HTTPException(status, str(exc))
 
 
 @app.middleware("http")
@@ -195,18 +215,28 @@ def require_session(session_id: str, kind: str) -> dict:
     return session
 
 
-async def complete_run(session: dict) -> dict | JSONResponse:
+async def run_chat_session(session: dict) -> dict:
+    selected = session.get("model_id", "default")
+    run = active_runtime() if selected == "default" else AgentRuntime(
+        active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
+    return await run.run(session)
+
+
+async def complete_chat_request(result) -> dict | JSONResponse:
     try:
-        selected = session.get("model_id", "default")
-        run = active_runtime() if selected == "default" else AgentRuntime(
-            active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
-        return await run.run(session)
+        return await result
+    except UseCaseError:
+        raise
     except ModelError as exc:
         return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
     except ValueError:
         return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
     except Exception:
         return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
+
+
+async def complete_run(session: dict) -> dict | JSONResponse:
+    return await complete_chat_request(run_chat_session(session))
 
 
 @app.get("/api/config")
@@ -222,21 +252,23 @@ def list_models():
 
 @app.get("/api/memories")
 def list_memories(q: str = Query(default="", max_length=100)):
-    return active_store().search_memories(q)
+    return active_memory_use_cases().search(q)
 
 
 @app.post("/api/memories")
 def add_memory(body: LongMemoryInput):
     try:
-        return active_store().add_memory(nonempty(body.content))
+        return active_memory_use_cases().add(body.content)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
 @app.delete("/api/memories/{memory_id}")
 def delete_memory(memory_id: str):
-    if not active_store().delete_memory(memory_id):
-        raise HTTPException(404, "记忆不存在")
+    try:
+        active_memory_use_cases().delete(memory_id)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     return {"deleted": True}
 
 
@@ -247,37 +279,39 @@ def list_memory_candidates(
 ):
     if session_id is not None:
         require_session(session_id, "chat")
-    return active_store().list_memory_candidates(session_id, status)
+    try:
+        return active_memory_use_cases().list_candidates(session_id, status)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.get("/api/memory-candidates/{candidate_id}")
 def get_memory_candidate(candidate_id: str):
-    candidate = active_store().memory_candidate(candidate_id)
-    if candidate is None:
-        raise HTTPException(404, "记忆候选不存在")
-    return candidate
+    try:
+        return active_memory_use_cases().get_candidate(candidate_id)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/memory-candidates")
 def create_memory_candidate(session_id: str, body: MemoryCandidateInput):
     require_session(session_id, "chat")
     try:
-        return active_store().create_memory_candidate(
+        return active_memory_use_cases().create_candidate(
             session_id, body.content, body.source_message_ids
         )
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
 @app.put("/api/memory-candidates/{candidate_id}")
 def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
-    candidate = active_store().memory_candidate(candidate_id)
-    if candidate is None:
-        raise HTTPException(404, "记忆候选不存在")
-    if candidate["status"] != "pending":
-        raise HTTPException(409, "已确认的记忆候选不能修改")
     try:
-        return active_store().update_memory_candidate(candidate_id, body.content)
+        return active_memory_use_cases().edit_candidate(candidate_id, body.content)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -285,22 +319,19 @@ def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
 @app.post("/api/memory-candidates/{candidate_id}/confirm")
 def confirm_memory_candidate(candidate_id: str):
     try:
-        candidate = active_store().confirm_memory_candidate(candidate_id)
+        return active_memory_use_cases().confirm_candidate(candidate_id)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if candidate is None:
-        raise HTTPException(404, "记忆候选不存在")
-    return candidate
 
 
 @app.delete("/api/memory-candidates/{candidate_id}")
 def delete_memory_candidate(candidate_id: str):
-    candidate = active_store().memory_candidate(candidate_id)
-    if candidate is None:
-        raise HTTPException(404, "记忆候选不存在")
-    if candidate["status"] != "pending":
-        raise HTTPException(409, "已确认的记忆候选不能删除")
-    active_store().delete_memory_candidate(candidate_id)
+    try:
+        active_memory_use_cases().delete_candidate(candidate_id)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     return {"deleted": True}
 
 
@@ -410,12 +441,15 @@ def logout(request: Request, response: Response):
 
 @app.get("/api/materials")
 def list_materials():
-    return active_store().list_materials()
+    return active_material_use_cases().list_materials()
 
 
 @app.post("/api/materials")
 def create_material(body: MaterialInput):
-    return active_store().create_material(body.kind, nonempty(body.title), nonempty(body.content))
+    try:
+        return active_material_use_cases().create_material(body.kind, body.title, body.content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/materials/extract")
@@ -429,7 +463,12 @@ async def extract_material(file: UploadFile = File(...)):
 
 @app.put("/api/materials/{material_id}")
 def edit_material(material_id: str, body: MaterialEdit):
-    material = active_store().replace_material(material_id, nonempty(body.title), nonempty(body.content))
+    try:
+        material = active_material_use_cases().edit_material(
+            material_id, body.title, body.content,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if material is None:
         raise HTTPException(404, "材料不存在或已撤回")
     return material
@@ -437,27 +476,30 @@ def edit_material(material_id: str, body: MaterialEdit):
 
 @app.delete("/api/materials/{material_id}")
 def delete_material(material_id: str):
-    if not active_store().revoke_material(material_id):
+    if not active_material_use_cases().delete_material(material_id):
         raise HTTPException(404, "材料不存在或已撤回")
     return {"revoked": True}
 
 
 @app.get("/api/claims")
 def list_claims():
-    return active_store().list_claims()
+    return active_material_use_cases().list_claims()
 
 
 @app.post("/api/claims")
 def create_claim(body: ClaimInput):
     try:
-        return active_store().create_claim(nonempty(body.text), body.material_id)
+        return active_material_use_cases().create_claim(body.text, body.material_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
 @app.put("/api/claims/{claim_id}")
 def edit_claim(claim_id: str, body: ClaimEdit):
-    claim = active_store().replace_claim(claim_id, nonempty(body.text))
+    try:
+        claim = active_material_use_cases().edit_claim(claim_id, body.text)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if claim is None:
         raise HTTPException(404, "经历不存在或已撤回")
     return claim
@@ -465,14 +507,14 @@ def edit_claim(claim_id: str, body: ClaimEdit):
 
 @app.delete("/api/claims/{claim_id}")
 def delete_claim(claim_id: str):
-    if not active_store().revoke_claim(claim_id):
+    if not active_material_use_cases().delete_claim(claim_id):
         raise HTTPException(404, "经历不存在或已撤回")
     return {"revoked": True}
 
 
 @app.post("/api/claims/{claim_id}/confirm")
 def confirm_claim(claim_id: str):
-    claim = active_store().confirm_claim(claim_id)
+    claim = active_material_use_cases().confirm_claim(claim_id)
     if claim is None:
         raise HTTPException(404, "待确认经历不存在")
     return claim
@@ -559,69 +601,67 @@ def export_session(kind: str, session_id: str):
 def create_chat(body: ChatCreateInput | None = None):
     model_id = body.model_id if body else "default"
     try:
-        model = model_catalog.get(model_id)
+        return active_chat_use_cases().create(model_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if model.configuration_error():
-        raise HTTPException(422, model.configuration_error())
-    return active_store().create("chat", model_id=model_id)
 
 
 @app.put("/api/chat/sessions/{session_id}/memory")
 def update_chat_memory(session_id: str, body: ChatMemoryInput):
-    session = active_store().set_chat_memory(session_id, body.text.strip())
-    if session is None:
-        raise HTTPException(404, "聊天会话不存在")
-    AgentRuntime.cancel_session_runs(session_id)
-    return {"text": body.text.strip()}
+    try:
+        return {"text": active_chat_use_cases().set_memory(session_id, body.text)}
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/messages")
 async def chat_message(session_id: str, body: TextInput):
-    require_session(session_id, "chat")
-    session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
-    if session is None:
-        raise HTTPException(409, "当前不能发送消息")
-    AgentRuntime.cancel_session_runs(session_id)
-    return await complete_run(session)
+    try:
+        return await complete_chat_request(
+            active_chat_use_cases().send_message(session_id, body.text)
+        )
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/messages/claim")
 def claim_chat_message(session_id: str, body: TextInput):
-    require_session(session_id, "chat")
-    session = active_store().claim_run(session_id, "chat", "active", nonempty(body.text))
-    if session is None:
-        raise HTTPException(409, "当前不能发送消息")
-    AgentRuntime.cancel_session_runs(session_id)
-    return session
+    try:
+        return active_chat_use_cases().claim_message(session_id, body.text)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/messages/run")
 async def run_chat_message(session_id: str, body: ChatRunInput):
-    session = require_session(session_id, "chat")
-    if session["status"] != "running" or session["version"] != body.version:
-        return {"interrupted": True, "session": session}
-    return await complete_run(session)
+    try:
+        return await complete_chat_request(
+            active_chat_use_cases().run_claimed_message(session_id, body.version)
+        )
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/retry")
 async def retry_chat_message(session_id: str):
-    require_session(session_id, "chat")
-    session = active_store().retry_chat(session_id)
-    if session is None:
-        raise HTTPException(409, "当前没有待重试的消息")
-    AgentRuntime.cancel_session_runs(session_id)
-    return await complete_run(session)
+    try:
+        return await complete_chat_request(
+            active_chat_use_cases().retry_message(session_id)
+        )
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.post("/api/chat/sessions/{session_id}/interrupt")
 def interrupt_chat(session_id: str):
-    require_session(session_id, "chat")
-    result = active_store().interrupt(session_id, "chat")
-    if result is None:
-        raise HTTPException(409, "当前没有可中断的运行")
-    AgentRuntime.cancel_session_runs(session_id)
-    return result
+    try:
+        return active_chat_use_cases().interrupt(session_id)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @app.post("/api/interview/sessions")

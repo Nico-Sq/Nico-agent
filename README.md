@@ -8,6 +8,8 @@
 
 ```powershell
 python -m pip install -e packages/nico-contracts
+python -m pip install -e packages/nico-domain
+python -m pip install -e packages/nico-application
 python -m pip install -e .
 python -m career_agent
 ```
@@ -87,6 +89,8 @@ python -m career_agent.restore .\nico-agent-backup.sqlite3
 
 ```powershell
 python -m unittest discover -s packages/nico-contracts/tests -v
+python -m unittest discover -s packages/nico-domain/tests -v
+python -m unittest discover -s packages/nico-application/tests -v
 python -m unittest discover -s tests -v
 python scripts/check_dependency_graph.py
 ```

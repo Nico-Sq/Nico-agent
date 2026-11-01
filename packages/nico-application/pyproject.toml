@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nico-application"
+version = "0.1.0"
+description = "Chat, material and memory use cases for Nico-agent"
+requires-python = ">=3.11"
+dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nico_application = ["py.typed"]
