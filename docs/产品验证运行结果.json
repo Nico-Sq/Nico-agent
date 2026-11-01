@@ -1,0 +1,364 @@
+{
+  "test_date": "2026-11-02",
+  "provider": "openai_compatible",
+  "model": "openai/gpt-oss-20b",
+  "prompt_versions": {
+    "chat": "0dcb9cde7239",
+    "interview": "6b1a7486e6d5"
+  },
+  "cases": [
+    {
+      "id": "JM-01",
+      "output": "**候选人与岗位匹配度评估**\n\n| 领域 | 现有材料支持的优势 | 尚未证明或缺失的要求 | 下一步建议 |\n|------|--------------------|---------------------|------------|\n| **技术栈** | • 2 年 Java 后端经验 <br>• 熟练使用 Spring Boot <br>• 具备 MySQL 与 Redis 的使用经验 <br>• 负责订单查询接口的实现与单元测试 | • 未提及 Kafka <br>• 未提及 Kubernetes | 1. 询问候选人是否曾接触或使用过 Kafka 与 Kubernetes，若有请提供具体项目或使用场景。 <br>2. 若无经验，建议了解其对消息队列和容器编排的基本概念，并评估其学习意愿与可行性。 |\n| **后端开发实践** | • 参与订单查询接口的设计与实现 <br>• 编写单元测试，体现对代码质量的关注 | • 未说明是否使用过其他测试框架（如 Mockito、JUnit 5）或是否参与过性能/安全测试 | 1. 询问候选人使用的测试工具与覆盖率目标。 <br>2. 若涉及性能或安全需求，可进一步探讨其经验。 |\n| **项目经验** | • 负责订单查询接口，说明具备业务理解与 API 设计能力 | • 未提及项目规模、团队协作模式、持续集成/持续交付 (CI/CD) 经验 | 1. 了解项目的技术架构、团队规模以及是否使用 CI/CD 工具。 <br>2. 若有，询问其在其中的角色与贡献。 |\n| **软技能** | – | – | 1. 询问候选人对团队协作、代码评审、需求沟通的经验。 <br>2. 若岗位强调跨部门协作，可进一步探讨其沟通与协调能力。 |\n\n---\n\n### 下一步行动建议\n1. **技术深度访谈**  \n   * 重点讨论 Kafka 与 Kubernetes 的使用场景，确认候选人是否具备相关概念或实践经验。  \n   * 了解其在 Spring Boot 项目中如何处理事务、缓存、日志与监控。\n\n2. **案例讨论**  \n   * 让候选人详细描述订单查询接口的设计思路、数据库表结构、查询优化及单元测试覆盖。  \n   * 询问是否遇到过性能瓶颈，如何定位与解决。\n\n3. **学习与成长意愿**  \n   * 评估候选人对新技术的学习热情，特别是 Kafka、Kubernetes 这类在岗位中被强调的技术。  \n   * 若无经验，了解其计划（如线上课程、实验项目）以弥补缺口。\n\n4. **后续评估**  \n   * 若候选人具备可迁移的技术经验（如消息队列、容器化），可安排技术面或小型编码挑战。  \n   * 若缺乏核心技术，建议给出培训或短期项目机会后再决定是否继续推进。\n\n> **提示**：在后续沟通中仅引用已在材料中明确提及的职责、技术与结果，避免将未提及的技术写成已具备。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-02",
+      "output": "**匹配评估（基于目前已知信息）**\n\n| 需求 | 现有事实 | 缺口 / 未确认 |\n|------|----------|--------------|\n| **Python** | 未提及使用 | 缺失 |\n| **Spark** | 未提及使用 | 缺失 |\n| **Hive** | 未提及使用 | 缺失 |\n| **Airflow** | 未提及使用 | 缺失 |\n| **数据建模** | 未提及相关经验 | 缺失 |\n| **Java 后端开发** | 3 年经验，使用 Spring Boot | 相关经验已确认 |\n| **MySQL** | 经验已确认 | 相关经验已确认 |\n| **Redis** | 经验已确认 | 相关经验已确认 |\n\n### 结论\n- **匹配度**：目前的技术栈与岗位核心要求（Python、Spark、Hive、Airflow、数据建模）不匹配。\n- **可转移技能**：Java、Spring Boot、MySQL、Redis 等后端开发经验在一定程度上可迁移，但缺乏与大数据平台相关的直接经验。\n- **需要进一步了解**：如果候选人有任何与大数据、数据流水线或数据建模相关的项目经验（即使不在简历中列出），请补充说明。否则，当前信息显示此岗位与候选人技术栈的匹配度较低。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-03",
+      "output": "### 匹配分析（谨慎评估）\n\n| 维度 | 岗位要求 | 候选人现状 | 匹配程度 | 备注 |\n|------|----------|-----------|----------|------|\n| **技术栈** | React + TypeScript | 仅有 JavaScript 页面维护，未使用 React 或 TS | **低** | 需要学习 React 及 TS 语法、组件生命周期、状态管理等。 |\n| **前端经验** | 需要编写、维护复杂的 SPA | 仅维护少量 JavaScript 页面 | **低** | 对前端框架、模块化、构建工具（Webpack/ESBuild）不熟悉。 |\n| **浏览器性能优化** | 需要分析、调优渲染性能、网络请求、资源加载 | 经验不详，主要在后端 | **低** | 需要了解 Lighthouse、Chrome DevTools、代码拆分、懒加载等。 |\n| **后端能力** | 可能需要与后端协作，了解 API 设计 | Java + Spring Boot 经验丰富 | **中** | 对 API 设计、数据格式（JSON）和接口文档有优势，可在团队中承担后端协作任务。 |\n| **学习与迁移** | 能快速上手 React、TS | 具备 Java 后端经验，已维护 JS 页面 | **中** | 具备编程思维，能快速学习新技术；但需要时间熟悉前端生态。 |\n\n#### 结论\n- **整体匹配度**：**中等偏低**。虽然候选人拥有扎实的后端基础，但缺乏关键前端技术（React、TypeScript、浏览器性能优化）的直接经验。\n- **可行性**：如果公司对前端经验要求不极端严格，且愿意提供培训或让候选人先从维护小型页面做起，候选人可以考虑申请并在面试中强调快速学习能力与后端经验的协同价值。\n- **风险**：若岗位强调立即可交付的前端功能，候选人可能在面试时被视为经验不足，导致被淘汰。\n\n---\n\n### 建议行动方案\n\n1. **自学准备**  \n   - **React**：完成官方教程（`react.dev`）并实现一个小项目（如 Todo List）。  \n   - **TypeScript**：在 React 项目中逐步迁移为 TS，练习类型定义、接口、泛型。  \n   - **性能优化**：阅读《前端性能优化实战》或相关博客，学习 `React.memo`、`useMemo`、代码拆分、懒加载等。  \n   - **工具链**：熟悉 `Vite` 或 `Create React App` 的配置，了解 `Webpack` 相关概念。\n\n2. **项目展示**  \n   - 在简历中加入 **“React + TypeScript 小项目”**（即使是个人练手，也能展示学习成果）。  \n   - 说明项目中使用了哪些性能优化手段（例如图片懒加载、代码拆分），并给出具体实现细节。\n\n3. **面试时的自我定位**  \n   - **突出后端优势**：强调在 Spring Boot 里如何设计 API、进行安全控制、性能监控等，说明你能在前后端协同中发挥桥梁作用。  \n   - **表达学习热情**：说明你已在自学 React/TS，并能在短期内快速上手。  \n   - **询问培训与成长路径**：了解公司是否提供前端培训或内部技术分享，表明你愿意在团队中持续成长。\n\n4. **筛选合适的岗位**  \n   - 如果公司有 **“全栈/后端+前端”** 或 **“前端+后端协作”** 的岗位，候选人更有机会被考虑。  \n   - 若岗位明确要求 **“React + TypeScript + 浏览器性能优化”** 的即战力，建议先积累实际项目经验再申请。\n\n---\n\n### 小结\n\n- **不建议**直接投递要求全能 React 前端工程师的岗位，除非公司对前端经验的门槛相对宽松。  \n- **可考虑**先通过技术学习或小项目展示证明前端能力，再投递或在面试中说明你正在快速成长。  \n- **强调**后端经验与前端协同的价值，提升自己在全栈或协作型岗位中的竞争力。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-04",
+      "output": "**候选人匹配度评估（初级 Java 后端岗位）**\n\n| 维度 | 评估结果 | 说明 |\n|------|----------|------|\n| **Java 基础** | **良好** | 候选人使用 Java 开发电商项目，已掌握 Java 语法与基本面向对象思想。 |\n| **Spring Boot / MVC** | **良好** | 项目使用 Spring Boot，说明对框架的基本配置、依赖注入、控制器、服务层有一定实践。 |\n| **HTTP API 设计** | **一般** | 通过课程项目实现了电商业务的 API（如商品查询、下单等），但缺乏真实业务场景下的 RESTful 规范、版本管理、异常处理、日志等细节。 |\n| **SQL / MySQL** | **良好** | 项目使用 MySQL，已写过基本 CRUD 语句，并对表设计、索引有初步认识。 |\n| **数据库事务 / 并发** | **未知** | 课程项目通常不涉及高并发或复杂事务，建议补充此方面的学习或小练习。 |\n| **项目规模 / 团队协作** | **有限** | 仅为单人或小组课程项目，缺乏正式工作中的多团队协作、代码评审、CI/CD 流程经验。 |\n| **正式工作经验** | **无** | 目前没有正式全职工作经历，无法验证在真实业务环境中的适应能力和职业素养。 |\n\n### 区分课程项目与正式工作\n\n| 方面 | 课程项目 | 正式工作 |\n|------|----------|----------|\n| **目标导向** | 学习目标，强调技术掌握 | 业务导向，强调交付和质量 |\n| **代码质量** | 可能不够规范，缺少严格评审 | 通常通过 CI、代码审查、单元/集成测试保障 |\n| **部署与运维** | 通常在本地或简单云实例 | 需了解 Docker、K8s、CI/CD、监控、日志 |\n| **团队协作** | 通常是小组或个人 | 多人团队，需沟通、文档、任务管理 |\n| **业务压力** | 低 | 高，需按时交付、支持上线 |\n\n> **结论**：候选人已具备基础的 Java、Spring Boot、MySQL 技能，能够胜任初级后端岗位的技术要求。唯一缺失的是在真实业务环境中的工作经验和对生产级部署、运维、团队协作的熟悉度。建议在面试中重点考察候选人对以下内容的理解与经验：\n\n1. **RESTful API 设计原则**（路由命名、状态码、错误处理、文档化）。\n2. **数据库设计与优化**（范式、索引、查询优化、事务隔离级别）。\n3. **异常处理与日志**（统一异常处理、日志等级、日志聚合）。\n4. **单元/集成测试**（使用 JUnit、Mockito、Spring Test）。\n5. **CI/CD 与部署**（Maven/Gradle、Dockerfile、GitHub Actions/Bitbucket Pipelines）。\n6. **团队协作与代码规范**（Git 工作流、代码评审、代码风格工具）。\n\n如果候选人能在面试中展示对上述内容的基本掌握，且有学习计划或自学项目补足经验，完全可以考虑录用。否则可建议先做实习或参与开源项目，以积累正式工作经验。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-05",
+      "output": "**匹配度评估**\n\n| 需求 | 现有材料 | 匹配情况 | 需补充或验证的内容 |\n|------|----------|----------|-------------------|\n| RabbitMQ | “在个人练习项目中接入 RabbitMQ，能发送和消费消息” | ✅ 已满足 | 进一步确认是否使用了任何高级特性（如交换机类型、路由键、持久化等）可增强说明 |\n| 消息重试 | 无相关描述 | ❌ 目前无法声称有实现经验 | 需要确认是否在练习项目中尝试过重试机制（如死信队列、延迟队列、重试策略等） |\n| 幂等 | 无相关描述 | ❌ 目前无法声称有实现经验 | 需要确认是否在练习项目中考虑过幂等性（如使用消息唯一 ID、幂等处理逻辑等） |\n| 线上使用 | “没有线上使用经历” | ❌ 目前无法声称有线上部署或运维经验 | 若将来有上线经验，可补充上线环境、监控、异常处理等细节 |\n\n**不能声称的内容**\n\n1. **线上使用**：目前材料仅提到个人练习，没有任何线上部署、监控、性能调优或运维经验。  \n2. **消息重试实现**：材料中没有任何关于重试策略、死信队列、延迟队列或重试次数控制的描述。  \n3. **幂等实现**：材料中未提到任何幂等处理逻辑（如使用唯一 ID、去重机制、幂等服务端实现等）。  \n\n**建议**\n\n- **补充细节**：在简历或面试中，说明个人练习项目中 RabbitMQ 的具体使用方式（如交换机类型、路由键、消息持久化等），这能展示对 RabbitMQ 的基本掌握。  \n- **学习与验证**：若想满足岗位对“消息重试”和“幂等”的要求，可以在后续项目或练习中尝试实现重试机制（如使用死信队列或重试插件）以及幂等处理（如使用消息唯一 ID 或幂等数据库表），并在简历中记录实际实现和测试结果。  \n- **强调可迁移性**：虽然目前没有线上经验，但已掌握 RabbitMQ 的基本使用，具备快速上手线上环境的潜力。  \n\n**结论**  \n候选人对 RabbitMQ 有一定了解，但尚未满足岗位对消息重试和幂等的经验要求，也缺乏线上使用背景。建议在面试中诚实说明现有经验，并突出学习意愿与快速上手能力。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-06",
+      "output": "**岗位匹配与风险评估**\n\n| 评估维度 | 当前候选人情况 | 匹配度 | 风险说明 |\n|---------|----------------|--------|-----------|\n| **技术栈** | 已使用 **Spring Boot** 开发接口，熟悉 **MySQL** 表结构维护 | **中等** | 具备 Java/Spring 生态基础，可快速上手单体应用；但缺乏微服务框架（如 Spring Cloud、Dubbo 等）的使用经验。 |\n| **服务拆分** | 未提及任何服务拆分、模块化或微服务架构经验 | **低** | 需要从单体到多服务的拆分思路、领域驱动设计（DDD）以及 API Gateway、服务注册与发现等知识。 |\n| **分布式事务** | 未提供相关经验 | **低** | 需掌握 Saga、TCC 或 XA 等分布式事务模型；单体应用中通常不涉及此类问题。 |\n| **服务治理** | 未提及服务治理（限流、熔断、监控、配置中心等） | **低** | 需要熟悉 Hystrix/Resilience4j、Spring Cloud Config、Sentinel、Prometheus 等工具。 |\n| **整体匹配度** | 仅具备单体开发基础 | **低** | 需要较长的技术提升周期，可能影响项目上线速度。 |\n\n### 主要风险\n\n1. **技术迁移成本高**  \n   - 从单体到微服务涉及架构重构、分布式部署、网络通信、配置管理等多方面变更，缺乏经验可能导致上线延误或质量问题。\n\n2. **分布式事务处理不足**  \n   - 微服务系统往往需要跨服务的数据一致性保障，未掌握 Saga/TCC 等模式可能导致业务错误或数据不一致。\n\n3. **服务治理不完善**  \n   - 没有经验使用熔断、限流、监控等，可能在高并发或异常场景下出现系统崩溃或性能瓶颈。\n\n4. **团队协作与治理**  \n   - 微服务往往需要跨团队协作、持续集成/持续交付（CI/CD）流程，缺乏相关经验可能导致交付周期拉长。\n\n### 建议提升路径\n\n| 方向 | 关键技术/工具 | 练习/学习资源 |\n|------|--------------|---------------|\n| **微服务架构设计** | Spring Cloud、Dubbo、Docker、Kubernetes | 《Spring Cloud实战》, 《微服务设计》, 官方文档 |\n| **分布式事务** | Saga、TCC、XA, Seata, Atomikos | Seata 官方教程, Saga 设计模式案例 |\n| **服务治理** | Hystrix/Resilience4j、Sentinel、Spring Cloud Config、Istio、Prometheus/Grafana | Sentinel 官方文档, Prometheus 入门 |\n| **CI/CD & 监控** | Jenkins/GitHub Actions, Helm, Zipkin, ELK | 《持续交付实战》, 监控案例 |\n| **领域驱动设计（DDD）** | Bounded Context, Aggregates, Repositories | 《Domain-Driven Design》, DDD 线上课程 |\n\n### 结论\n\n- **匹配度**：整体偏低。候选人具备 Spring Boot 与 MySQL 的基础，但缺乏微服务、分布式事务与治理的核心经验。\n- **风险**：技术迁移成本、分布式事务处理、服务治理缺失将成为主要风险点，影响项目上线与质量。\n- **建议**：如公司对快速上手有较高要求，可考虑在岗位初期提供针对微服务架构与治理的培训；若希望快速投入产出，建议优先考虑已有微服务背景的候选人，或将此岗位作为技术成长的机会，让候选人先从小型服务做起，逐步扩展。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-07",
+      "output": "**匹配度评估（高性能后端岗位）**\n\n| 维度 | 现有信息 | 评估结果 | 备注 |\n|------|----------|----------|------|\n| **技术经验** | 通过“改过订单列表接口的数据读取方式，从逐条读取改为批量读取” | **基本符合**：批量读取是高性能后端常见的优化手段，表明候选人能识别并改进数据访问瓶颈。 | 但仅涉及单一接口，未见更广泛的系统级性能改造经验。 |\n| **压测与性能测试** | **未做** | **缺失**：岗位要求有压测经验，候选人未进行性能测试或记录结果。 | 需要进一步确认是否具备压测工具使用、指标分析等技能。 |\n| **容量规划** | 未提及 | **未知** | 无信息表明候选人曾参与容量规划或负载预测。 |\n| **性能指标** | 未记录 | **缺失**：没有性能指标（如响应时间、吞吐量、并发数等）的记录。 | 需要了解候选人是否能定义、监控、优化关键指标。 |\n| **整体匹配度** | **中等偏低** | 由于缺乏压测、容量规划和性能指标的实战证明，候选人目前与岗位的匹配度偏低。 | 若能补充相关经验或证明，将大幅提升匹配度。 |\n\n---\n\n### 建议的面试与复练方向\n\n1. **技术细节追问**  \n   - 你在改写订单列表接口时使用了哪些技术栈（如数据库、缓存、消息队列）？  \n   - 具体的批量读取实现细节（批大小、分页策略、并发度）如何决定？  \n   - 你是否使用过任何压测工具（如 JMeter、Locust、k6）？若没有，是否了解如何搭建压测环境？\n\n2. **性能指标与监控**  \n   - 你在项目中使用过哪些监控指标（RT、TPS、错误率、资源利用率）？  \n   - 如何基于指标做性能调优？请举例说明。\n\n3. **容量规划经验**  \n   - 在之前的项目中，你是否参与过容量规划或负载预测？  \n   - 你如何估算并发用户数与资源需求（CPU、内存、数据库连接数）？\n\n4. **复练建议**  \n   - **压测实战**：安排一次小型压测练习，使用 JMeter 或 k6 对批量读取接口做基准测试，记录 RT、TPS 等。  \n   - **性能分析**：在压测后使用 profiling 工具（如 pprof、perf、JVM Monitor）定位瓶颈。  \n   - **容量规划**：练习根据历史请求日志估算峰值负载，并给出相应的资源配置建议。  \n   - **指标定义**：制定一套关键性能指标（KPI）并演示如何监控和报警。\n\n---\n\n### 结论\n\n候选人已展示了对数据读取性能的基本优化思路（批量读取），但缺乏压测、容量规划以及性能指标的实战记录。若能在面试中补充这部分经验，或在复练中快速提升这些能力，匹配度将显著提升。否则，目前匹配度偏低，建议进一步筛选或要求候选人补充相关证明材料。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-08",
+      "output": null,
+      "error": "Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "JM-09",
+      "output": "**差距评估（基于您当前提供的信息）**\n\n| 关键岗位要求 | 候选人现状 | 差距说明 |\n|--------------|-----------|----------|\n| **工作年限** | 2 年 Java 后端经验 | 需要至少 5 年，差距约 3 年。 |\n| **团队领导** | 未曾带领过团队 | 需具备带领 2–5 人左右团队的经验，缺乏相关经历。 |\n| **系统架构** | 只负责部分接口实现和单元测试 | 未参与系统架构设计与决策，缺乏整体系统视角与设计能力。 |\n| **技术深度与广度** | 仅有接口实现、单元测试经验 | 高级岗位通常还需熟悉微服务、分布式系统、性能调优、数据库设计等。 |\n\n**主要差距点**  \n1. **经验深度**：高级后端岗位期望候选人有 3 年以上的项目主导经验，能在复杂场景下做技术决策。  \n2. **领导力**：缺乏团队管理、代码评审、技术指导等软硬结合能力。  \n3. **架构能力**：未参与系统整体设计，缺少对业务拆分、模块划分、技术选型等方面的经验。  \n4. **技术覆盖**：高级岗位往往要求掌握多层技术栈（网络协议、缓存、消息队列、数据库事务、容错等），当前信息不足以证明这方面能力。\n\n**建议（可自行决定是否进一步跟进）**  \n- 若想快速弥补差距，可主动承担小型项目或模块的技术负责人角色，积累团队协作与架构经验。  \n- 关注并参与开源项目或内部技术分享，展示对系统设计的思考。  \n- 通过技术博客或内部演讲记录自己的架构方案，提升可视化展示能力。  \n\n以上评估仅基于您目前提供的内容，若有更多项目细节或已完成的技术成就，欢迎补充，以便进一步精准评估。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "JM-10",
+      "output": "**Candidate Snapshot (What we know)**  \n- **Role**: Java backend developer  \n- **Experience**: Wrote unit tests for backend services (frameworks not specified)  \n- **Missing**: No Selenium usage, no CI/CD pipeline configuration\n\n---\n\n## 1. Strengths for an Automation‑Test Engineer role\n\n| Area | Why it matters | How to showcase it |\n|------|----------------|--------------------|\n| **Java proficiency** | Selenium WebDriver, TestNG/JUnit, and most CI tools are Java‑friendly. | List Java versions, libraries (Spring, Hibernate, etc.) and any performance or scalability work. |\n| **Unit‑testing experience** | Strong unit‑test culture is the foundation of robust automation. | Highlight coverage metrics, test‑driven development, and any code‑review or CI‑triggered test runs you already participate in. |\n| **Backend domain knowledge** | Test automation often needs to validate APIs, data integrity, and service contracts. | Mention API‑level tests, mock‑service usage, or integration‑test suites you wrote. |\n| **Problem‑solving & debugging** | Automation engineers debug flaky tests, flaky builds, and runtime errors. | Cite examples of diagnosing test failures, refactoring test code, or optimizing test execution time. |\n\n**Takeaway:** Your Java and unit‑test background is a solid launchpad. It demonstrates that you can write clean, maintainable code and that you understand the testing pyramid.\n\n---\n\n## 2. Gaps that need bridging\n\n| Gap | Why it hurts | What to do now |\n|-----|--------------|----------------|\n| **Selenium / UI automation** | The role explicitly calls for Selenium. | 1. **Start a small project** – build a simple login test for a demo site (e.g., `https://demoqa.com`).<br>2. **Learn the core concepts** – locators, waits, Page Object Model, and test data management.<br>3. **Add a reporting layer** – use Allure or ExtentReports to produce readable results. |\n| **CI/CD pipeline configuration** | Automation engineers usually integrate tests into CI pipelines (Jenkins, GitLab CI, GitHub Actions, etc.). | 1. **Pick a CI tool** – GitHub Actions is a good entry point.<br>2. **Create a workflow** – trigger on push, run Maven/Gradle build, execute tests, publish reports.<br>3. **Document** – note environment variables, caching, and parallel job strategies. |\n| **Test‑framework depth** | The job may expect familiarity with TestNG/JUnit, assertion libraries, or BDD tools (Cucumber, JBehave). | 1. **Review the framework you already use** – add advanced features (parameterized tests, listeners).<br>2. **Optional**: Try a BDD example to show versatility. |\n\n---\n\n## 3. How to position yourself in the application\n\n### a. Resume / LinkedIn\n1. **Headline** – “Java Backend Developer • Test Automation Enthusiast”  \n2. **Core Skills** – Java, Maven/Gradle, Unit Testing (JUnit/TestNG), Selenium WebDriver, CI/CD (GitHub Actions, Jenkins), API testing, Docker, Git.  \n3. **Projects**  \n   * *Unit‑Test Suite for Order Service* – 90 % coverage, automated nightly runs via GitHub Actions.  \n   * *UI Automation Demo* – Selenium tests for demoqa.com, integrated with Allure reports, triggered on every PR.  \n4. **Quantify** – “Reduced regression test time by 30 % through parallel execution and test‑case prioritization.” (If you have data; otherwise keep it qualitative.)\n\n### b. Cover Letter / Email\n- **Start** with how your backend expertise gives you a deep understanding of the system under test.  \n- **Bridge** to automation: “While I have focused on unit testing, I have recently built a Selenium‑based test suite that validates the user flow of a demo application.”  \n- **Show eagerness** to grow: “I’m actively learning CI/CD pipeline design and plan to contribute to the team’s build process.”\n\n### c. Interview Preparation\n| Topic | Key Points | Suggested Practice |\n|-------|------------|--------------------|\n| **Selenium fundamentals** | Locators, waits, Page Object Model, test data, cross‑browser strategy | Build a test that logs in, creates an item, and verifies it in the UI. |\n| **CI/CD concepts** | Pipeline stages, artifact handling, parallel jobs, test result publishing | Create a GitHub Actions workflow that runs your Selenium tests on every push. |\n| **Testing frameworks** | Assertions, parameterized tests, test listeners, test‑case prioritization | Refactor an existing JUnit test to use parameterized inputs and a custom listener that logs failures. |\n| **Problem‑solving** | Debug flaky tests, analyze stack traces, optimize test suites | Simulate a flaky test (e.g., random element timing) and show how you diagnose and fix it. |\n| **Soft skills** | Collaboration with QA, communication of defects, documentation | Prepare a brief demo of your test report and explain how you would present findings to developers. |\n\n### d. Practical next steps\n1. **Set up a small Selenium + GitHub Actions pipeline** – commit to GitHub and show the workflow in your profile.  \n2. **Contribute to an open‑source test automation project** – this demonstrates initiative and exposes you to real‑world CI setups.  \n3. **Take a short online course** (e.g., “Selenium WebDriver with Java” on Udemy or Coursera) – add the certificate to your profile.  \n4. **Build a personal “Test Automation Portfolio”** – host it on GitHub Pages or a personal site, summarizing your projects, lessons learned, and future plans.\n\n---\n\n## 4. Final recommendation\n\n- **Apply** to positions that explicitly list “Java + Selenium” in the tech stack. Even if the role is junior or “Automation Engineer – Java”, your backend and unit‑test background will be viewed favorably.  \n- **Emphasize** your willingness and recent progress in learning Selenium and CI.  \n- **Show** tangible evidence (GitHub repo, CI workflow) of your automation work.  \n- **Be honest** about the learning curve; frame it as a commitment to continuous improvement.\n\nGood luck—you already have the core programming and testing mindset; with a focused learning path, you’ll be a strong fit for most Java‑centric automation roles.",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-01",
+      "output": "**项目一：电商订单服务开发（Java/Spring Boot）**  \n- 与 4 人团队协作，负责实现订单查询接口。  \n- 使用 Java、Spring Boot、MySQL 及 Redis 开发后端业务逻辑。  \n- 编写并维护相关单元测试，确保接口功能正确性。  \n\n**项目二：订单查询数据读取优化（批量读取）**  \n- 将原先逐条读取商品信息的实现改为批量读取，以减少数据库访问次数。  \n- 该改动已完成代码实现，性能改进结果待进一步验证。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-02",
+      "output": "- Implemented a batch‑read solution for the order‑query API; during a 10‑minute load test with 200 concurrent users on a fixed dataset, the p95 latency dropped from 600 ms to 240 ms. (Load‑test environment set up by another team.)",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-03",
+      "output": "**保守版项目描述（基于已提供材料）**\n\n> **项目名称**：订单服务性能优化  \n> **角色**：参与者  \n> **工作内容**：对订单服务相关接口进行优化，提升了接口响应速度。  \n> **主要成果**：据报告，接口平均响应时间提升约 30%。  \n\n> *说明*：上述描述仅基于已提供的文字信息，未对优化措施、技术细节、测试方法或业务影响做进一步说明。  \n\n---\n\n**最需要确认的关键信息**\n\n| 序号 | 需要确认的内容 | 说明 |\n|------|----------------|------|\n| 1 | **对比指标** | 30% 的提升是相对于什么基线？（例如：前后平均响应时间、峰值吞吐量等） |\n| 2 | **测试环境** | 在什么环境下测得该提升？（生产、预生产、开发、单机、集群等） |\n| 3 | **测量方法** | 使用了哪些工具或方法测量接口性能？（如：JMeter、Locust、自研脚本等） |\n| 4 | **数据来源** | 30% 提升的数据来自哪类请求？（所有订单请求、特定业务场景等） |\n| 5 | **个人职责** | 具体负责了哪些工作？（代码重构、数据库索引优化、缓存策略、代码调优、性能监控等） |\n| 6 | **技术栈** | 采用了哪些技术或框架进行优化？（如：Spring Boot、Netty、Redis、Kafka 等） |\n| 7 | **业务影响** | 该优化对业务指标（如订单处理量、并发数、用户体验等）产生了哪些具体影响？ |\n| 8 | **验证结果** | 是否有回归测试、灰度发布或监控数据来验证稳定性与性能提升？ |\n| 9 | **风险与挑战** | 在优化过程中遇到了哪些技术难点或业务限制？如何解决？ |\n|10 | **后续工作** | 该项目后续还有哪些待完善或扩展的方向？ |\n\n请根据实际情况补充上述信息，以便进一步完善项目描述并在面试中展示更完整的技术与业务价值。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-04",
+      "output": null,
+      "error": "Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "EX-05",
+      "output": "**Contradiction identified**  \n- In the same set of materials, the project team size is reported as **4 people** in one section and **6 people** in another section.\n\n**Temporary wording that does not rely on the exact team size**\n\n> *“I worked as part of a small cross‑functional team on a large‑scale order‑management system. My responsibilities included designing and implementing the order‑query API, writing comprehensive unit tests, and collaborating closely with teammates to ensure high code quality and timely delivery.”*",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-06",
+      "output": "- **Implemented batch retrieval of product information for the order list** – replaced the previous per‑item query approach with a single bulk fetch to simplify the data pipeline.  \n  - *Performance impact*: **not yet measured**; database round‑trip counts and response‑time data remain untracked.",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-07",
+      "output": "**项目经历（草稿，待确认）**  \n\n- 负责订单查询接口的编码工作，使用（技术栈）实现业务逻辑。  \n- 编写部分单元测试，覆盖核心功能点。  \n- 未参与系统架构设计、支付流程实现或上线运维。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-08",
+      "output": "- **个人课程项目**：使用 Java 与 Spring Boot 开发简易图书查询 API，后端数据保存在本地 MySQL，项目仅用于课程实验，未部署到生产环境且无真实用户。  \n  （此经历尚未在系统中确认，需后续确认后再纳入正式简历）",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-09",
+      "output": null,
+      "error": "Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "EX-10",
+      "output": "**简历 bullet（保守陈述）**  \n- 使用 Java、Spring Boot、MySQL 与 Redis 开发并维护订单查询接口，并编写相关单元测试。\n\n**缺失的关键信息（需进一步确认）**  \n1. 该项目团队的规模（成员人数及角色分工）。  \n2. 该接口或项目的业务/技术成果与影响（例如性能提升、业务增长等）。  \n3. Redis 在订单查询接口中的具体用途（缓存、消息队列、限流等）。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-01",
+      "question": null,
+      "answer": "我负责订单查询接口和部分单元测试，把商品信息读取从逐条读取改成批量读取。性能没有测试，所以我没有可报告的响应时间变化。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-02",
+      "question": "第 1 题：请描述你在过去项目中如何验证SQL查询的改动，涉及哪些指标与测试边界？",
+      "answer": "我只在本地验证了功能正确性，没有做压测，也没有记录执行计划和响应时间。",
+      "feedback": "您目前的验证方式仅覆盖了功能正确性，缺少性能指标与边界测试。",
+      "evidence": [
+        "没有做压测，也没有记录执行计划和响应时间"
+      ],
+      "summary": "候选人只在本地验证了功能正确性，未进行压测、记录执行计划或响应时间，未覆盖性能指标与测试边界。建议在未来验证中加入性能基准、执行计划分析和边界条件测试，以确保 SQL 查询改动的可靠性与效率。",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-03",
+      "question": null,
+      "answer": "我写了订单存在和查询结果为空两类单元测试。具体测试数量和覆盖率没有统计。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-04",
+      "question": null,
+      "answer": "我负责接口实现，但没有配置事务，也没有参与系统架构设计。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-05",
+      "question": "第 1 题：在你负责的订单项目中，Redis 是如何被使用的？请描述它解决了哪些具体业务问题，以及你在实现过程中遇到的挑战和如何解决的。",
+      "answer": "项目用到了 Redis，但这个订单查询接口是否读取 Redis 缓存，我没有参与或确认。",
+      "feedback": "你说明了没有参与确认订单查询接口是否读取 Redis 缓存，但没有进一步说明你在项目中的角色或对 Redis 的使用情况。请补充具体业务场景或你在其他方面的经验。",
+      "evidence": [
+        "项目用到了 Redis，但这个订单查询接口是否读取 Redis 缓存，我没有参与或确认。"
+      ],
+      "summary": "All questions answered.",
+      "error": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-06",
+      "question": "第 1 题：请描述在您的项目中，如何捕获并处理接口层的异常？请提供具体示例。",
+      "answer": "我现在不能确认这个接口使用了哪些异常处理策略，需要回看实现代码后再回答。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "answer: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-07",
+      "question": null,
+      "answer": "我参与了批量读取改动，但没有做并发压测，也没有容量或线上监控数据，因此不能判断它在高并发下的表现。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-08",
+      "question": null,
+      "answer": "团队一共 4 人，我负责订单查询接口和部分单元测试。其他成员的分工我不确定。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-09",
+      "question": null,
+      "answer": "我完成了接口开发和部分测试，没有负责发布或上线后的运维。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    },
+    {
+      "id": "IF-10",
+      "question": null,
+      "answer": "我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。",
+      "feedback": null,
+      "evidence": [],
+      "summary": null,
+      "error": "start: Response status code does not indicate success: 502 (Bad Gateway).",
+      "cleanup": true
+    }
+  ],
+  "retries": [
+    {
+      "id": "JM-08",
+      "status": 200,
+      "stage": "chat",
+      "question": null,
+      "output": "**已知信息（仅来自候选人提供的材料）**  \n- 负责 Java 后端接口的开发  \n- 编写部分单元测试  \n- 没有在材料中提及应用安全、权限模型或漏洞修复的工作经历  \n\n**需进一步确认的信息**  \n- 是否曾参与过与安全相关的项目或任务（例如安全审计、漏洞扫描、权限校验实现等）？  \n- 是否熟悉常见的安全漏洞（如 SQL 注入、XSS、CSRF、权限提升等）及其修复方法？  \n- 是否了解权限模型设计（如基于角色、基于属性、基于访问控制列表等）？  \n- 是否使用过安全工具或框架（如 OWASP ZAP、Snyk、Spring Security 等）？  \n\n**建议的面试/评估方向**  \n\n| 评估维度 | 关键问题 | 目的 |\n|---------|-----------|------|\n| **安全意识** | “您在项目中遇到过哪些安全风险？是如何发现和处理的？” | 判断候选人对安全问题的敏感度 |\n| **权限模型** | “能否描述一次您在权限设计上的经验？使用了哪些模型或框架？” | 了解其权限体系设计能力 |\n| **漏洞修复** | “请举例说明一次您修复关键漏洞的经历，过程、工具和结果如何？” | 评估实际漏洞修复能力 |\n| **工具与技术** | “您平时使用哪些安全工具或库？在项目中如何集成？” | 判断技术栈适配度 |\n\n**如果候选人确实没有相关经历**  \n- 可考虑评估其 **Java 开发与单元测试** 能力是否足以补充安全知识，例如通过技术培训或内部安全项目快速提升。  \n- 或者在面试中关注其 **学习能力** 与 **对安全话题的兴趣**，看是否能在短期内弥补缺口。\n\n**总结**  \n目前只能确认候选人具备 Java 后端接口开发与单元测试经验，关于应用安全、权限模型与漏洞修复的经历尚未得到确认。建议在面试或进一步沟通中核实上述缺失信息，以便做出更精准的评估。",
+      "error_body": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-04",
+      "status": 200,
+      "stage": "chat",
+      "question": null,
+      "output": "**草稿 – 经验整理（尚未在系统中确认）**\n\n- **项目/职责**：开发订单查询接口  \n- **技术栈**：Java、Spring Boot、MySQL  \n- **主要工作**：实现订单查询功能，构建 RESTful 接口，完成后端业务逻辑与数据库交互。  \n\n> **说明**：以上内容仅来自用户当前提供的材料，尚未在系统中确认。请核对后再将其正式写入简历。\n\n---\n\n**岗位技能与简历匹配情况**\n\n| 技能 | 是否有实际实践 | 是否可写入简历 |\n|------|----------------|----------------|\n| Kafka | 无 | **不建议**（除非有培训或学习经验，建议标注为“了解”） |\n| Kubernetes | 无 | **不建议**（除非有培训或学习经验，建议标注为“了解”） |\n\n> 建议：在简历中只列出已验证的技术栈（Java、Spring Boot、MySQL）。如需展示对 Kafka 与 Kubernetes 的兴趣，可在“技术兴趣”或“学习经历”部分简要说明，但不要列为实际工作经验。",
+      "error_body": null,
+      "cleanup": true
+    },
+    {
+      "id": "EX-09",
+      "status": 502,
+      "stage": "chat",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"无法连接模型服务\",\"code\":\"model_unavailable\"}",
+      "cleanup": true
+    },
+    {
+      "id": "IF-03",
+      "status": 502,
+      "stage": "start",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"模型接口或参数不兼容，请检查配置\",\"code\":\"model_request_rejected\"}",
+      "cleanup": true
+    },
+    {
+      "id": "IF-04",
+      "status": 200,
+      "stage": "answer",
+      "question": "第 1 题：在接口改动后，如何确保数据在分布式系统中的一致性？请举例说明你会采用的策略。",
+      "output": {
+        "feedback": "请补充说明在没有事务支持的情况下，如何通过其他手段保持一致性。",
+        "evidence": [
+          "我负责接口实现，但没有配置事务，也没有参与系统架构设计。"
+        ],
+        "summary": "候选人未参与事务或架构设计，缺乏数据一致性经验，需要进一步了解其应对策略。"
+      },
+      "error_body": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-06",
+      "status": 502,
+      "stage": "start",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"无法连接模型服务\",\"code\":\"model_unavailable\"}",
+      "cleanup": true
+    },
+    {
+      "id": "IF-07",
+      "status": 200,
+      "stage": "answer",
+      "question": "第 1 题：请描述在高并发场景下，您如何评估系统的性能与容量？您是否有任何测试或监控数据来支持您的评估？",
+      "output": {
+        "feedback": "候选人坦诚表明没有进行并发压测，也缺乏容量或线上监控数据，导致无法评估系统在高并发场景下的性能。",
+        "evidence": [
+          "没有做并发压测，也没有容量或线上监控数据"
+        ],
+        "summary": "候选人未进行高并发性能测试，也未收集相关监控数据，无法证明系统在高并发环境下的性能与容量。"
+      },
+      "error_body": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-08",
+      "status": 502,
+      "stage": "start",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"模型接口或参数不兼容，请检查配置\",\"code\":\"model_request_rejected\"}",
+      "cleanup": true
+    },
+    {
+      "id": "IF-09",
+      "status": 200,
+      "stage": "answer",
+      "question": "第 1 题：请问在订单接口上线后，您是否承担过运维职责，包括监控、故障排查以及性能调优？",
+      "output": {
+        "feedback": "You clarified that you were not involved in post-launch operations, focusing solely on development and partial testing.",
+        "evidence": [
+          "我完成了接口开发和部分测试，没有负责发布或上线后的运维。"
+        ],
+        "summary": "Candidate clarified that they did not handle post-launch operations."
+      },
+      "error_body": null,
+      "cleanup": true
+    },
+    {
+      "id": "IF-10",
+      "status": 502,
+      "stage": "start",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"无法连接模型服务\",\"code\":\"model_unavailable\"}",
+      "cleanup": true
+    },
+    {
+      "id": "IF-01",
+      "status": 502,
+      "stage": "start",
+      "question": null,
+      "output": null,
+      "error_body": "{\"detail\":\"无法连接模型服务\",\"code\":\"model_unavailable\"}",
+      "cleanup": true
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "IF-01-start-only-probe",
+      "status": 200,
+      "stage": "start",
+      "question": "第 1 题：请描述你在订单列表批量读取改动时，如何区分已知事实与未测结果？",
+      "note": "只验证出题接口；未提交回答，不计作完整案例",
+      "cleanup": true
+    }
+  ]
+}
