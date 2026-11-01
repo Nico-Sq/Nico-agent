@@ -747,7 +747,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 1 workspace/契约/护栏 | 已完成（2026-10-31） | `39f6732` | 136 项现有测试、4 项契约测试；依赖图无环；`python -m build --wheel packages/nico-contracts --outdir dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | 本地/商业真实模型调用按阶段 4 决策执行；未改变 Store 或数据库 schema |
 | 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
-| 4 Agent core/多模型 | 实现、自动验证和真实端点验收通过（2026-11-01） | 待记录 | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
+| 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
 | 5 storage/schema/迁移 | 待做 | — | — | — |
 | 6 tools/MCP/plugins | 待做 | — | — | — |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
