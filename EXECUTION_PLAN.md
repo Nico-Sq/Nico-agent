@@ -715,7 +715,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [x] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
 - [x] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
 - [x] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
-- [ ] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
+- [x] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
 - [ ] 阶段 8：性能/可靠性基线与超预算优化。
 - [ ] 阶段 9：唯一组合根、兼容层、WebUI 收口和全 wheel 安装验收。
 
@@ -758,7 +758,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
 | 5 storage/schema/迁移 | 已完成（2026-11-01） | `3b38d1b` | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
 | 6 tools/MCP/plugins | 已完成（2026-11-01） | `87dd7f3` | 根测试 139 项、适配器测试 4 项；依赖图无环；6 个 wheel 构建并在仓库外安装；兼容 API/CLI/MCP/插件测试通过；`git diff --check` | 未开放写工具；未改变 Store、schema、渠道和流式行为 |
-| 7 CLI/channels/幂等 | 待做 | — | — | — |
+| 7 CLI/channels/幂等 | 已完成（2026-11-01） | `5a028ed` | 根测试 142 项；契约/领域/core/application/adapters/storage/CLI 包测试共 59 项；依赖图无环；7 个 wheel 构建并在仓库外临时 venv 安装；API/CLI/账户/备份恢复与兼容快照通过；`git diff --check` | schema v2 迁移只在临时测试库验证；没有下载模型或接入第二渠道 |
 | 8 性能基线 | 待做 | — | — | — |
 | 9 app/Web/安装收口 | 待做 | — | — | — |
 
@@ -817,6 +817,15 @@ API/CLI/数据兼容：
 - Pi：检查 `E:\Agent\Pi-agent\pi\packages\durable\src\storage\sqlite\schema.ts`、`storage\sqlite\storage.ts` 和 `test\sqlite-migrations.test.ts`。其 durable 包没有外部渠道收发账本；仅采用其唯一约束、事务提交、不可变迁移顺序和失败回滚模式。
 - 实施决定：只把现有 Console 渠道做成 adapter，并将当前 router 规则迁入 application；建立 schema v2 的持久 sender/conversation 绑定与 `(channel, conversation, message_id)` 入站账本。消息先原子认领为 `processing`，成功后保存完整回复和稳定 delivery ID，再发送并记录 delivered；发送失败保留回复，重投复用原 ID。重启后已有 `processing` 记录绝不自动再次调用模型；若回复已持久化则允许原 ID 重投。该契约保证模型执行至多一次，不宣称所有传输均可实现 exactly-once 投递。
 - 范围约束：`nico-cli` 只接收组合后的 application use cases 和 `TextChannel` contract；SQLite、Provider、MCP、插件只在现有根入口装配。阶段只迁移 Console 与渠道账本，不接第二平台、不预装 SDK、不改流式或写工具策略。Chat/Interview 命令、帮助、错误输出、`/retry`、`/exit` 和 `AUTH_REQUIRED` 拒绝行为保持兼容。
+
+阶段 7 实施与验收记录（2026-11-01）：
+
+- 新增 `nico-cli` 独立 wheel，将 CLI 命令解析和聊天、面试、材料/记忆候选、工具发现/授权流程移入只依赖 application/contract 的包；`career_agent.cli` 保留组合根和旧导入兼容。ConsoleChannel 成为显式加载的 adapter，未请求的第三方 channel entry point 不会被导入。
+- 业务 schema 升至 v2，加入 sender/conversation 绑定及持久 inbound/delivery 账本。已处理 v1 到 v2 数据保留、旧备份升级、并发认领、sender 归属、显式 `--session` 切换、相同消息跨 Store/Router 重启不重复运行模型，以及失败投递在重启后复用回复和 delivery ID。未知处理结果保持 `processing`，不自动重跑模型；传输仍按可重投语义处理，不宣称 exactly-once。
+- 实际验证：设置临时 `DATA_DIR`、假模型和全包 `PYTHONPATH` 后运行 `python -m unittest discover -s tests`（142 项通过）；独立包测试 contracts/domain/agent-core/application/adapters/storage/CLI 分别为 4/10/5/17/5/15/3 项通过。`python -m compileall -q career_agent packages tests scripts`、`python scripts/check_dependency_graph.py`（无环，领域/application 禁止依赖检查通过）及 `git diff --check` 均通过。
+- `python scripts/build_wheels.py --all --out dist` 构建 7 个物化包；最终改动后 `--changed` 重建 application、adapters、storage、CLI；`python scripts/verify_wheel_install.py --all --wheel-dir dist` 在仓库外临时 venv 安装和 smoke test 全部 7 个 wheel，并验证 Console channel entry point 与 v2 数据库初始化。API 路由、DATA_DIR/账户目录、CLI 命令和旧公开导入、备份恢复由兼容快照及根测试覆盖。所有迁移测试仅使用临时数据库，未打开或搬迁真实 `data/`。
+- 阶段实现提交：`5a028ed`（`refactor: extract CLI and persist channel ledger`）；未 push。阶段 7 不需要真实模型验收，因此没有下载模型或占用模型磁盘空间。
+- 未验证/后续条件：没有接入第二渠道；跨渠道投递确认和远端 exactly-once 不在本阶段保证。真实商业端点、流式输出、写工具和第二渠道仍按前述条件任务处理。
 
 ## 16. 给后续执行 AI 的直接指令
 
