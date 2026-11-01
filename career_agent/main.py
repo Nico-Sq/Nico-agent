@@ -11,7 +11,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from nico_application import ChatUseCases, MaterialUseCases, MemoryUseCases, UseCaseError
+from nico_application import (
+    ChatUseCases,
+    InterviewUseCases,
+    MaterialUseCases,
+    MemoryUseCases,
+    UseCaseError,
+)
 
 from .auth import AuthStore, LoginRateLimited
 from .auto_backup import backup_all
@@ -81,6 +87,11 @@ def active_chat_use_cases() -> ChatUseCases:
                         AgentRuntime.cancel_session_runs)
 
 
+def active_interview_use_cases() -> InterviewUseCases:
+    return InterviewUseCases(active_store(), model_catalog, run_interview_session,
+                             AgentRuntime.cancel_session_runs)
+
+
 def active_material_use_cases() -> MaterialUseCases:
     return MaterialUseCases(active_store())
 
@@ -92,6 +103,14 @@ def active_memory_use_cases() -> MemoryUseCases:
 def http_use_case_error(exc: UseCaseError) -> HTTPException:
     status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
     return HTTPException(status, str(exc))
+
+
+def http_interview_use_case_error(exc: UseCaseError) -> HTTPException:
+    if exc.kind == "not_found" and str(exc) == "面试会话不存在":
+        return HTTPException(404, "会话不存在")
+    if exc.kind == "invalid" and str(exc) == "回答不能为空":
+        return HTTPException(422, "内容不能为空")
+    return http_use_case_error(exc)
 
 
 @app.middleware("http")
@@ -201,13 +220,6 @@ class Credentials(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
-def nonempty(value: str) -> str:
-    value = value.strip()
-    if not value:
-        raise HTTPException(422, "内容不能为空")
-    return value
-
-
 def require_session(session_id: str, kind: str) -> dict:
     session = active_store().get(session_id, kind)
     if session is None:
@@ -220,6 +232,13 @@ async def run_chat_session(session: dict) -> dict:
     run = active_runtime() if selected == "default" else AgentRuntime(
         active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
     return await run.run(session)
+
+
+async def run_interview_session(session: dict, result_handler) -> dict:
+    selected = session.get("model_id", "default")
+    run = active_runtime() if selected == "default" else AgentRuntime(
+        active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
+    return await run.run(session, result_handler=result_handler)
 
 
 async def complete_chat_request(result) -> dict | JSONResponse:
@@ -235,8 +254,11 @@ async def complete_chat_request(result) -> dict | JSONResponse:
         return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
 
 
-async def complete_run(session: dict) -> dict | JSONResponse:
-    return await complete_chat_request(run_chat_session(session))
+async def complete_interview_request(result) -> dict | JSONResponse:
+    try:
+        return await complete_chat_request(result)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 
 @app.get("/api/config")
@@ -667,108 +689,86 @@ def interrupt_chat(session_id: str):
 @app.post("/api/interview/sessions")
 def create_interview(body: InterviewInput):
     try:
-        model = model_catalog.get(body.model_id)
-        if model.configuration_error():
-            raise ValueError(model.configuration_error())
-        return active_store().create("interview", nonempty(body.goal), tuple(body.material_ids),
-                            tuple(body.claim_ids), body.max_questions, body.model_id)
+        return active_interview_use_cases().create(
+            body.goal, tuple(body.material_ids), tuple(body.claim_ids),
+            body.max_questions, body.model_id,
+        )
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        message = "内容不能为空" if str(exc) == "岗位目标不能为空" else str(exc)
+        raise HTTPException(422, message) from exc
 
 
 @app.get("/api/interview/sessions/{session_id}/report")
 def interview_report(session_id: str):
-    report = active_store().interview_report(session_id)
-    if report is None:
-        raise HTTPException(404, "面试不存在")
-    return report
+    try:
+        return active_interview_use_cases().report(session_id)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/practice")
 def create_practice(session_id: str, body: PracticeInput):
-    require_session(session_id, "interview")
     try:
-        return active_store().create_practice(session_id, body.question_number)
+        return active_interview_use_cases().create_practice(session_id, body.question_number)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/start")
 async def start_interview(session_id: str):
-    require_session(session_id, "interview")
-    session = active_store().claim_run(session_id, "interview", "new")
-    if session is None:
-        raise HTTPException(409, "面试已开始")
-    return await complete_run(session)
+    return await complete_interview_request(active_interview_use_cases().start(session_id))
 
 
 @app.post("/api/interview/sessions/{session_id}/answers")
 async def answer_interview(session_id: str, body: TextInput):
-    require_session(session_id, "interview")
-    session = active_store().claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text))
-    if session is None:
-        raise HTTPException(409, "当前不能提交回答")
-    AgentRuntime.cancel_session_runs(session_id)
-    return await complete_run(session)
+    return await complete_interview_request(active_interview_use_cases().answer(session_id, body.text))
 
 
 @app.post("/api/interview/sessions/{session_id}/answers/claim")
 def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
-    require_session(session_id, "interview")
-    session = active_store().claim_run(session_id, "interview", "awaiting_answer", nonempty(body.text),
-                              expected_question=body.question_number)
-    if session is None:
-        raise HTTPException(409, "当前题目已变化，无法提交回答")
-    AgentRuntime.cancel_session_runs(session_id)
-    return session
+    try:
+        return active_interview_use_cases().claim_answer(
+            session_id, body.text, body.question_number,
+        )
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/answers/run")
 async def run_interview_answer(session_id: str, body: ChatRunInput):
-    session = require_session(session_id, "interview")
-    if session["status"] != "running" or session["version"] != body.version:
-        return {"interrupted": True, "session": session}
-    return await complete_run(session)
+    return await complete_interview_request(
+        active_interview_use_cases().run_claimed_answer(session_id, body.version)
+    )
 
 
 @app.post("/api/interview/sessions/{session_id}/skip")
 async def skip_interview_question(session_id: str, body: PracticeInput):
-    require_session(session_id, "interview")
-    session = active_store().skip_interview_question(session_id, body.question_number)
-    if session is None:
-        raise HTTPException(409, "当前题目已变化，无法跳过")
-    AgentRuntime.cancel_session_runs(session_id)
-    return await complete_run(session)
+    return await complete_interview_request(
+        active_interview_use_cases().skip(session_id, body.question_number)
+    )
 
 
 @app.post("/api/interview/sessions/{session_id}/pause")
 def pause_interview(session_id: str):
-    require_session(session_id, "interview")
-    result = active_store().interrupt(session_id, "interview")
-    if result is None:
-        raise HTTPException(409, "当前不能暂停")
-    AgentRuntime.cancel_session_runs(session_id)
-    return result
+    try:
+        return active_interview_use_cases().pause(session_id)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/cancel")
 def cancel_interview(session_id: str):
-    require_session(session_id, "interview")
-    result = active_store().cancel_interview(session_id)
-    if result is None:
-        raise HTTPException(409, "当前不能结束面试")
-    AgentRuntime.cancel_session_runs(session_id)
-    return result
+    try:
+        return active_interview_use_cases().cancel(session_id)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 
 @app.post("/api/interview/sessions/{session_id}/resume")
 async def resume_interview(session_id: str):
-    require_session(session_id, "interview")
-    result = active_store().resume(session_id)
-    if result is None:
-        raise HTTPException(409, "当前不能恢复")
-    session, needs_run = result
-    return await complete_run(session) if needs_run else {"session": session}
+    return await complete_interview_request(active_interview_use_cases().resume(session_id))
 
 
 STATIC = Path(__file__).parent / "static"

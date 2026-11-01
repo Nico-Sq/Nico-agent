@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nico-application"
 version = "0.1.0"
-description = "Chat, material and memory use cases for Nico-agent"
+description = "Chat, interview, material and memory use cases for Nico-agent"
 requires-python = ">=3.11"
 dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0"]
 

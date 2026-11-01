@@ -389,6 +389,8 @@ git status --short --branch
 
 **依赖**：阶段 2。**目的**：把面试状态机和证据/结果规则从 Runtime、Store、入口中收束。
 
+**参考核对（2026-11-01）**：Pi `E:\Agent\Pi-agent\pi\packages\agent\src\types.ts`、`agent-loop.ts` 将通用消息/事件契约与模型循环分开；nanobot `E:\nanobot\nanobot\providers\base.py`、`agent\loop.py` 和 `templates\agent\tool_contract.md` 定义通用模型响应、工具循环和工具约定；Akashic `E:\Akashic-agent\akashic-agent\bootstrap\app.py`、`agent\context.py`、`prompts\agent.py` 采用组合入口和上下文/提示词分层。已检查的相关实现没有可复用的面试状态机或回答证据校验。当前阶段采用通用运行回调、纯领域判定和 application 提交边界；不复制提示词或参考项目实现。
+
 - 建立/完善 domain 中的面试状态转换、题号和证据规则；application 中实现创建、开始、回答、跳过、暂停、恢复、取消、报告、复练。
 - 从 `career_agent/runtime.py` 移出面试 JSON schema、阶段约束、回答原文证据校验和提交决策。
 - 保留一个受版本保护的 UnitOfWork 提交；聊天记录继续不进入面试上下文。
@@ -701,7 +703,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 
 - [x] 阶段 1：workspace、契约、依赖图和兼容护栏。
 - [x] 阶段 2：聊天、材料、记忆 application 用例。
-- [ ] 阶段 3：面试 application 用例和结果校验。
+- [x] 阶段 3：面试 application 用例和结果校验。
 - [ ] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
 - [ ] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
 - [ ] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
@@ -744,7 +746,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 0 现有本地能力基线 | 历史记录，当前需回归 | `40de88c` 之前 | 旧文档记录 133 测试；本次未复跑 | 当前提交、真实模型、浏览器 |
 | 1 workspace/契约/护栏 | 已完成（2026-10-31） | `39f6732` | 136 项现有测试、4 项契约测试；依赖图无环；`python -m build --wheel packages/nico-contracts --outdir dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | 本地/商业真实模型调用按阶段 4 决策执行；未改变 Store 或数据库 schema |
 | 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
-| 3 面试用例/校验 | 待做 | — | — | — |
+| 3 面试用例/校验 | 已验证（2026-11-01） | 待提交 | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
 | 4 Agent core/多模型 | 待做 | — | — | — |
 | 5 storage/schema/迁移 | 待做 | — | — | — |
 | 6 tools/MCP/plugins | 待做 | — | — | — |

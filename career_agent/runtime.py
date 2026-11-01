@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Callable
 
 import jsonschema
 from nico_contracts.messages import AgentMessage
@@ -198,7 +199,8 @@ class AgentRuntime:
                 )
         raise ValueError("模型工具调用超过 4 轮")
 
-    async def run(self, session: dict) -> dict:
+    async def run(self, session: dict,
+                  result_handler: Callable[[dict, str], dict] | None = None) -> dict:
         kind = session["kind"]
         if not self.store.begin_run(session["id"], session["version"]):
             current = self.store.get(session["id"], kind)
@@ -235,76 +237,26 @@ class AgentRuntime:
                 raise ModelError("run_timeout", "本次模型运行超时", 504) from exc
             if len(raw) > MAX_MODEL_OUTPUT_CHARS:
                 raise ValueError("模型输出超过长度上限")
-            if kind == "chat":
-                content, status, count = raw, "active", 0
-            else:
-                payload = raw.strip()
-                if payload.startswith("```") and payload.endswith("```"):
-                    language, separator, fenced = payload.partition("\n")
-                    if separator and language.lower() in ("```", "```json"):
-                        payload = fenced[:-3].strip()
-                data = json.loads(payload)
-                if not isinstance(data, dict):
-                    raise ValueError("面试模型必须返回 JSON 对象")
-                if not {"feedback", "question", "finished", "evidence"}.issubset(data):
-                    raise ValueError("面试模型缺少必要字段")
-                feedback = data["feedback"]
-                question = data["question"]
-                evidence = data["evidence"]
-                summary = data.get("summary", "")
-                if (not isinstance(feedback, str) or not isinstance(question, str)
-                        or not isinstance(data["finished"], bool) or not isinstance(evidence, list)
-                        or not isinstance(summary, str)):
-                    raise ValueError("面试模型输出字段格式错误")
-                if (len(question) > 1000 or len(feedback) > 4000 or len(summary) > 4000
-                        or len(evidence) > 5):
-                    raise ValueError("面试模型输出超过长度上限")
-                old_count = session["question_count"]
-                max_questions = session["max_questions"]
-                report = self.store.interview_report(session["id"])
-                skipped = bool(old_count and report["items"][-1]["skipped"])
-                if data["finished"] != (old_count >= max_questions):
-                    raise ValueError("面试模型完成状态与题数不符")
-                if not old_count and (feedback.strip() or summary.strip()):
-                    raise ValueError("首题不能包含反馈或总结")
-                if old_count < max_questions and summary.strip():
-                    raise ValueError("未结束时不能生成全场总结")
-                if old_count >= max_questions and question.strip():
-                    raise ValueError("结束时不能生成下一题")
-                if skipped and (feedback.strip() or evidence):
-                    raise ValueError("跳过的题目不能生成反馈或回答证据")
-                if old_count and not skipped and not feedback.strip():
-                    raise ValueError("面试模型未返回反馈")
-                if old_count and not skipped:
-                    latest = self.store.messages(session["id"], "interview", limit=1)
-                    answer = latest[0]["content"] if latest and latest[0]["role"] == "user" else ""
-                    if not evidence or any(
-                        not isinstance(quote, str) or not quote.strip() or len(quote) > 200 or quote not in answer
-                        for quote in evidence
-                    ):
-                        raise ValueError("反馈证据必须是本题原始回答中的原文短句")
-                elif evidence:
-                    raise ValueError("首题不能引用尚未提交的回答")
-                if old_count < max_questions and not question.strip():
-                    raise ValueError("面试模型未返回下一题")
-                if old_count >= max_questions:
-                    if not summary.strip():
-                        raise ValueError("面试模型未返回总结")
-                    content, status, count = summary.strip(), "finished", old_count
-                else:
-                    content = (f"反馈：{feedback.strip()}\n\n" if feedback.strip() else "") + f"第 {old_count + 1} 题：{question.strip()}"
-                    status, count = "awaiting_answer", old_count + 1
+            if kind != "chat":
+                if result_handler is None:
+                    # Preserve direct AgentRuntime callers while keeping interview decisions in application.
+                    from nico_application import commit_interview_result
+
+                    result_handler = lambda current, output: commit_interview_result(
+                        self.store, current, output,
+                    )
+                result = result_handler(session, raw)
+                outcome = "interrupted" if result.get("interrupted") else "completed"
+                return result
+
             committed = self.store.finish_run(
-                session["id"], session["version"], content, status, count,
-                question=question.strip() if kind == "interview" and status == "awaiting_answer" else None,
-                feedback=feedback.strip() if kind == "interview" and session["question_count"] and not skipped else None,
-                evidence=tuple(dict.fromkeys(evidence)) if kind == "interview" else (),
+                session["id"], session["version"], raw, "active", 0,
             )
             if not committed:
                 outcome = "interrupted"
                 return {"interrupted": True, "session": self.store.get(session["id"], kind)}
             outcome = "completed"
-            return {"message": content, "session": self.store.get(session["id"], kind)}
+            return {"message": raw, "session": self.store.get(session["id"], kind)}
         except RunSuperseded:
             outcome = "interrupted"
             return {"interrupted": True, "session": self.store.get(session["id"], kind)}

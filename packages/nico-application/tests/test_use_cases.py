@@ -1,11 +1,14 @@
 import asyncio
+import json
 import unittest
 
 from nico_application import (
     ChatUseCases,
+    InterviewUseCases,
     MaterialUseCases,
     MemoryUseCases,
     UseCaseError,
+    commit_interview_result,
 )
 
 
@@ -93,6 +96,123 @@ class FakeModel:
 class FakeCatalog:
     def get(self, model_id):
         return FakeModel()
+
+
+class InterviewFakeStore:
+    def __init__(self, status="new", question_count=0):
+        self.session = {
+            "id": "interview-1", "kind": "interview", "status": status,
+            "version": 1, "question_count": question_count, "max_questions": 1,
+        }
+        self.items = []
+        self.latest_message = None
+        self.finish_calls = []
+        self.commit = True
+
+    def get(self, session_id, kind):
+        if session_id != self.session["id"] or kind != "interview":
+            return None
+        return dict(self.session)
+
+    def interview_report(self, session_id):
+        if session_id != self.session["id"]:
+            return None
+        return {"items": list(self.items)}
+
+    def messages(self, session_id, kind, limit=None):
+        if self.latest_message is None:
+            return []
+        return [dict(self.latest_message)]
+
+    def claim_run(self, session_id, kind, expected, user_text=None, expected_question=None):
+        if self.session["status"] != expected:
+            return None
+        self.session["status"] = "running"
+        self.session["version"] += 1
+        return dict(self.session)
+
+    def finish_run(self, session_id, version, content, status, question_count,
+                   question=None, feedback=None, evidence=()):
+        self.finish_calls.append((session_id, version, content, status, question_count,
+                                  question, feedback, evidence))
+        if not self.commit:
+            return False
+        self.session.update(status=status, question_count=question_count)
+        if question is not None:
+            self.items.append({"number": question_count, "question": question,
+                               "answer": None, "feedback": feedback,
+                               "skipped": False, "evidence": list(evidence)})
+        return True
+
+
+class InterviewResultTests(unittest.TestCase):
+    def setUp(self):
+        self.store = InterviewFakeStore("running")
+
+    def test_result_uses_one_version_protected_commit(self):
+        session = dict(self.store.session)
+        result = commit_interview_result(
+            self.store, session,
+            json.dumps({"feedback": "", "question": "请介绍项目", "finished": False,
+                        "evidence": []}),
+        )
+        self.assertEqual(result["message"], "第 1 题：请介绍项目")
+        self.assertEqual(len(self.store.finish_calls), 1)
+        self.assertEqual(self.store.finish_calls[0][1], session["version"])
+
+    def test_invalid_result_does_not_commit(self):
+        session = {**self.store.session, "question_count": 1}
+        self.store.items.append({"number": 1, "question": "题目", "answer": "回答",
+                                 "feedback": None, "skipped": False, "evidence": []})
+        self.store.latest_message = {"role": "user", "content": "原始回答"}
+        with self.assertRaisesRegex(ValueError, "原文短句"):
+            commit_interview_result(
+                self.store, session,
+                json.dumps({"feedback": "评价", "question": "", "finished": True,
+                            "evidence": ["虚构证据"], "summary": "总结"}),
+            )
+        self.assertEqual(self.store.finish_calls, [])
+
+    def test_stale_commit_returns_interrupted_after_one_commit_attempt(self):
+        self.store.commit = False
+        result = commit_interview_result(
+            self.store, dict(self.store.session),
+            json.dumps({"feedback": "", "question": "请介绍项目", "finished": False,
+                        "evidence": []}),
+        )
+        self.assertTrue(result["interrupted"])
+        self.assertEqual(len(self.store.finish_calls), 1)
+
+
+class InterviewUseCaseTests(unittest.TestCase):
+    def test_fake_runner_uses_application_result_handler(self):
+        store = InterviewFakeStore()
+        runs = []
+
+        async def run(session, result_handler):
+            runs.append(session["version"])
+            return result_handler(session, json.dumps({
+                "feedback": "", "question": "请介绍项目", "finished": False,
+                "evidence": [],
+            }))
+
+        interviews = InterviewUseCases(store, FakeCatalog(), run, lambda _: None)
+        result = asyncio.run(interviews.start("interview-1"))
+        self.assertEqual(result["message"], "第 1 题：请介绍项目")
+        self.assertEqual(runs, [2])
+        self.assertEqual(len(store.finish_calls), 1)
+
+    def test_illegal_skip_does_not_write(self):
+        store = InterviewFakeStore()
+
+        async def run(session, result_handler):
+            return result_handler(session, "{}")
+
+        interviews = InterviewUseCases(store, FakeCatalog(), run, lambda _: None)
+        with self.assertRaises(UseCaseError):
+            asyncio.run(interviews.skip("interview-1", 1))
+        self.assertEqual(store.finish_calls, [])
+        self.assertEqual(store.session["status"], "new")
 
 
 class UseCaseTests(unittest.TestCase):

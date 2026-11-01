@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from nico_application import ChatUseCases, MemoryUseCases, UseCaseError
+from nico_application import ChatUseCases, InterviewUseCases, MemoryUseCases, UseCaseError
 
 from .channels import (
     ChannelDeliveryError,
@@ -36,11 +36,14 @@ def session_banner(store: Store, session: dict) -> str:
 
 
 async def complete_session(session: dict, store: Store, catalog: ModelCatalog,
-                           mcp: MCPServers, plugins: LocalPlugins) -> dict:
+                           mcp: MCPServers, plugins: LocalPlugins,
+                           result_handler=None) -> dict:
     provider = catalog.get(session.get("model_id", "default"))
     if provider.configuration_error():
         raise ValueError(provider.configuration_error())
-    return await AgentRuntime(store, provider, mcp, plugins).run(session)
+    return await AgentRuntime(store, provider, mcp, plugins).run(
+        session, result_handler=result_handler,
+    )
 
 
 async def run_channel(channel: TextChannel, store: Store, model_id: str = "default",
@@ -123,82 +126,56 @@ async def discover_mcp(mcp: MCPServers) -> list[dict]:
 
 async def run_interview_action(args, store: Store, catalog: ModelCatalog,
                                mcp: MCPServers, plugins: LocalPlugins) -> dict:
+    interviews = InterviewUseCases(
+        store, catalog,
+        lambda session, result_handler: complete_session(
+            session, store, catalog, mcp, plugins, result_handler,
+        ),
+        AgentRuntime.cancel_session_runs,
+    )
     if args.action == "create":
-        goal = args.goal.strip()
-        if not goal:
-            raise ValueError("岗位目标不能为空")
-        if len(goal) > 500 or len(args.material) > 5 or len(args.claim) > 10:
-            raise ValueError("岗位目标或关联资源数量超出限制")
-        provider = catalog.get(args.model)
-        if provider.configuration_error():
-            raise ValueError(provider.configuration_error())
-        session = store.create(
-            "interview", goal, tuple(args.material), tuple(args.claim),
-            args.questions, args.model,
-        )
-        return {"session": session}
+        return {"session": interviews.create(
+            args.goal, tuple(args.material), tuple(args.claim), args.questions, args.model,
+        )}
     if args.action == "list":
-        return {"sessions": store.list_sessions("interview", args.query)}
+        return {"sessions": interviews.list(args.query)}
 
-    session = store.get(args.session_id, "interview")
-    if session is None:
-        raise ValueError("面试会话不存在")
-    if args.action == "start":
-        running = store.claim_run(session["id"], "interview", "new")
-        if running is None:
-            raise ValueError("面试已经开始或状态不允许开始")
-        return await complete_session(running, store, catalog, mcp, plugins)
-    if args.action == "answer":
-        text = args.text.strip()
-        if not text:
-            raise ValueError("回答不能为空")
-        if len(text) > 12000:
-            raise ValueError("回答不能超过 12000 字")
-        if not session["question_count"]:
-            raise ValueError("面试尚未生成题目")
-        running = store.claim_run(
-            session["id"], "interview", "awaiting_answer", text,
-            expected_question=session["question_count"],
-        )
-        if running is None:
-            raise ValueError("当前题目已变化或状态不允许回答")
-        return await complete_session(running, store, catalog, mcp, plugins)
-    if args.action == "skip":
-        if args.question_number < 1:
-            raise ValueError("题号必须大于 0")
-        running = store.skip_interview_question(session["id"], args.question_number)
-        if running is None:
-            raise ValueError("当前题目已变化，无法跳过")
-        return await complete_session(running, store, catalog, mcp, plugins)
-    if args.action == "pause":
-        paused = store.interrupt(session["id"], "interview")
-        if paused is None:
-            raise ValueError("当前不能暂停")
-        return {"session": paused}
-    if args.action == "cancel":
-        cancelled = store.cancel_interview(session["id"])
-        if cancelled is None:
-            raise ValueError("当前不能结束面试")
-        return {"session": cancelled}
-    if args.action == "resume":
-        resumed = store.resume(session["id"])
-        if resumed is None:
-            raise ValueError("当前不能恢复")
-        resumed_session, needs_run = resumed
-        return (await complete_session(resumed_session, store, catalog, mcp, plugins)
-                if needs_run else {"session": resumed_session})
-    if args.action == "report":
-        report = store.interview_report(session["id"])
-        if report is None:
-            raise ValueError("面试不存在")
-        return {"report": report}
-    if args.action == "practice":
-        if args.question_number < 1:
-            raise ValueError("题号必须大于 0")
-        practice = store.create_practice(session["id"], args.question_number)
-        running = store.claim_run(practice["id"], "interview", "new")
-        return await complete_session(running, store, catalog, mcp, plugins)
-    raise ValueError("未知面试命令")
+    try:
+        if args.action == "start":
+            return await interviews.start(args.session_id)
+        if args.action == "answer":
+            return await interviews.answer_current(args.session_id, args.text)
+        if args.action == "skip":
+            return await interviews.skip(args.session_id, args.question_number)
+        if args.action == "pause":
+            return {"session": interviews.pause(args.session_id)}
+        if args.action == "cancel":
+            return {"session": interviews.cancel(args.session_id)}
+        if args.action == "resume":
+            return await interviews.resume(args.session_id)
+        if args.action == "report":
+            return {"report": interviews.report(args.session_id)}
+        if args.action == "practice":
+            return await interviews.practice(args.session_id, args.question_number)
+        raise ValueError("未知面试命令")
+    except UseCaseError as exc:
+        if exc.kind == "invalid":
+            message = str(exc)
+        elif exc.kind == "not_found":
+            message = "面试会话不存在"
+        else:
+            message = {
+                "start": "面试已经开始或状态不允许开始",
+                "answer": ("面试尚未生成题目" if str(exc) == "面试尚未生成题目"
+                           else "当前题目已变化或状态不允许回答"),
+                "skip": "当前题目已变化，无法跳过",
+                "pause": "当前不能暂停",
+                "cancel": "当前不能结束面试",
+                "resume": "当前不能恢复",
+                "report": "面试不存在",
+                "practice": "只能复练已完成面试中有反馈的题目",
+            }.get(args.action, str(exc))
+        raise ValueError(message) from exc
 
 
 async def run_interview(args, store: Store, catalog: ModelCatalog,
