@@ -67,7 +67,7 @@ python -m career_agent.cli interview practice <SESSION_ID> <题号>
 
 `candidate list|show|create|edit|confirm|delete` 管理记忆候选；`memory list|add|delete` 管理已确认长期记忆；`tools list|grant|revoke` 查看并按聊天或面试会话授权只读外部工具，授权时可指定 `--kind interview`。命令输出包含会话 ID、状态、模型和工具授权，模型错误使用稳定错误码。
 
-本地渠道边界位于 `career_agent/channels.py`。每条文字消息携带发送者、渠道会话和消息 ID；`ChannelRouter` 在运行模型前校验允许发送者和会话归属，并对入站 ID 去重。投递失败会保留已生成的回复，重试时复用同一 delivery ID，避免再次运行模型。当前实现和去重记录在单个本机进程内生命周期中有效；选择具体第二聊天渠道后再增加平台适配，不预装 SDK。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
+本地渠道边界由 `nico-cli`、`nico-application` 和 `nico-adapters` 组成，`career_agent/channels.py` 保留兼容导入。每条文字消息携带发送者、渠道会话和消息 ID；`ChannelRouter` 在运行模型前校验允许发送者和会话归属，并将绑定、入站认领、回复和投递状态写入 SQLite。相同入站消息跨进程重启不会再次运行模型；投递失败会保留已生成回复，重试时复用同一 delivery ID。若进程在模型结果保存前退出，消息保持处理状态且不会自动重跑。当前只有 Console 渠道；选择具体第二聊天渠道后再增加平台适配，不预装 SDK。启用 `AUTH_REQUIRED=true` 后，CLI 会拒绝直接打开数据库，请使用账户隔离的 Web API。
 
 本地插件示例位于 `examples/echo_plugin.py` 和 `examples/plugins.json`。设置 `LOCAL_PLUGINS_PATH=./examples/plugins.json` 后启动服务，`GET /api/tools` 可发现 `plugin_echo_plugin_echo`；按上文的会话工具接口授权，再在聊天中请模型调用该工具。插件需要提供 `TOOLS` 列表，每项包括 `name`、`description`、`parameters`（JSON Schema 对象）、可选的 `read_only` 和同步 `run(arguments)` 函数；插件代码在启动时执行且只在当前进程生命周期内有效，只配置自己信任的文件。插件与 MCP 使用相同的会话授权、非只读拒绝和参数校验入口。只有 `read_only` 为 true 的工具（MCP 工具由服务端的 `readOnlyHint` 标注）会提供给模型；连续只读调用可并行，其他调用按出现顺序单独串行执行。插件异常返回 `plugin_tool_failed`；超过 10 秒返回 `plugin_timeout` 并标记后台线程可能仍在运行，不能视为副作用已取消。内置读取工具均为只读。测试命令：`python -m unittest discover -s tests -q`。
 
@@ -129,6 +129,6 @@ GitHub Actions 会在 Python 3.11 和 3.13 上运行同一套测试；真实模�
 
 ## 当前边界
 
-账户模式提供基本的数据隔离和按账户登录失败限流，尚无密码重置流程，不应直接作为公网生产服务。扫描版 PDF 没有文本层时需先进行 OCR；目前不解析音频。聊天固定备注需由用户维护；长期记忆候选可由 Agent 提议，但不会自动确认或自动注入模型，仍需用户逐条确认。本地渠道身份、去重和投递重试状态仅保存在运行进程内，应用重启后的跨进程幂等仍需要渠道自身或持久化账本支持。用户确认经历不等于独立事实核验，回答证据的原文匹配也不等于反馈事实正确。真实模型效果尚未验证。兼容端点不返回 token 用量时无法强制执行累计 token 阈值；真实货币费用上限需要模型价格和计费数据。语音、实时转写、第二聊天渠道、日程、外部搜索和更多 Provider 属于后续阶段。
+账户模式提供基本的数据隔离和按账户登录失败限流，尚无密码重置流程，不应直接作为公网生产服务。扫描版 PDF 没有文本层时需先进行 OCR；目前不解析音频。聊天固定备注需由用户维护；长期记忆候选可由 Agent 提议，但不会自动确认或自动注入模型，仍需用户逐条确认。渠道回复的 SQLite 账本可跨进程重启恢复；消息处理状态不确定时不会自动重跑模型，跨平台传输不承诺 exactly-once 投递。用户确认经历不等于独立事实核验，回答证据的原文匹配也不等于反馈事实正确。真实模型效果尚未验证。兼容端点不返回 token 用量时无法强制执行累计 token 阈值；真实货币费用上限需要模型价格和计费数据。语音、实时转写、第二聊天渠道、日程、外部搜索和更多 Provider 属于后续阶段。
 
 完整产品定义见 [项目定义.md](docs/项目定义.md)。

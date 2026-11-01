@@ -29,6 +29,7 @@ class Migration:
 
 _BUSINESS_MIGRATIONS = (
     Migration(1, resources.files("nico_storage.migrations").joinpath("001_business.sql").read_text(encoding="utf-8")),
+    Migration(2, resources.files("nico_storage.migrations").joinpath("002_channels.sql").read_text(encoding="utf-8")),
 )
 _AUTH_MIGRATIONS = (
     Migration(1, resources.files("nico_storage.migrations").joinpath("001_auth.sql").read_text(encoding="utf-8")),

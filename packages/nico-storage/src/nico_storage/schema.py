@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 
-BUSINESS_SCHEMA_VERSION = 1
+BUSINESS_SCHEMA_VERSION = 2
 AUTH_SCHEMA_VERSION = 1
 
 BUSINESS_TABLES = {
@@ -23,6 +23,10 @@ BUSINESS_TABLES = {
     "interview_items": {"session_id", "number", "question", "answer", "feedback", "skipped"},
     "interview_evidence": {"session_id", "number", "quote"},
     "practice_sessions": {"session_id", "source_session_id", "question_number"},
+    "channel_bindings": {"channel_name", "conversation_id", "sender_id", "session_id", "created_at"},
+    "channel_messages": {"channel_name", "conversation_id", "message_id", "sender_id", "session_id",
+                         "message_hash", "status", "response", "delivery_id", "delivery_error",
+                         "created_at", "updated_at"},
 }
 AUTH_TABLES = {
     "users": {"id", "username", "salt", "password_hash"},
@@ -34,6 +38,7 @@ BUSINESS_INDEXES = {
     "events_session_id",
     "memory_candidates_session_id",
     "memory_candidate_sources_message_id",
+    "channel_bindings_session_id",
 }
 BUSINESS_LEGACY_COLUMNS = {
     "sessions": {"max_questions", "run_started", "chat_memory", "title", "model_id"},
@@ -50,7 +55,10 @@ RESTORE_OPTIONAL_TABLES = {
 }
 LEGACY_RESTORE_MARKERS = {"sessions", "materials", "claims", "interview_items"}
 BUSINESS_SCHEMA_HISTORY = {
-    1: ({table: set(columns) for table, columns in BUSINESS_TABLES.items()}, set(BUSINESS_INDEXES)),
+    1: ({table: set(columns) for table, columns in BUSINESS_TABLES.items()
+         if table not in {"channel_bindings", "channel_messages"}},
+        BUSINESS_INDEXES - {"channel_bindings_session_id"}),
+    2: ({table: set(columns) for table, columns in BUSINESS_TABLES.items()}, set(BUSINESS_INDEXES)),
 }
 AUTH_SCHEMA_HISTORY = {
     1: ({table: set(columns) for table, columns in AUTH_TABLES.items()}, set()),

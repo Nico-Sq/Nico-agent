@@ -2,6 +2,8 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from importlib import resources
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,10 +36,33 @@ class StorageTests(unittest.TestCase):
         session = store.create("chat")
         self.assertEqual(store.get(session["id"], "chat")["id"], session["id"])
         with database(path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
 
         Store(path)
         self.assertFalse((self.root / "migration-backups").exists())
+
+    def test_schema_v1_upgrades_to_v2_without_losing_data(self):
+        path = self.root / "career_agent.sqlite3"
+        with database(path) as db:
+            sql = resources.files("nico_storage.migrations").joinpath(
+                "001_business.sql",
+            ).read_text(encoding="utf-8")
+            db.executescript(sql)
+            db.execute("PRAGMA user_version = 1")
+            db.execute(
+                "INSERT INTO sessions(id, kind, status, created_at) VALUES (?, ?, ?, ?)",
+                ("existing-chat", "chat", "active", "2026-01-01"),
+            )
+
+        migrated = Store(path)
+        self.assertEqual(migrated.get("existing-chat", "chat")["id"], "existing-chat")
+        with database(path) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT count(*) FROM channel_messages").fetchone()[0], 0)
+        backups = list((self.root / "migration-backups").glob("*.pre-v1-to-v2-*.sqlite3"))
+        self.assertEqual(len(backups), 1)
+        with database(backups[0]) as backup:
+            self.assertEqual(backup.execute("PRAGMA user_version").fetchone()[0], 1)
 
     def test_historical_database_is_migrated_with_a_safety_copy(self):
         path = self.root / "legacy.sqlite3"
@@ -67,7 +92,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(store.list_materials()[0]["content"], "原始内容")
         self.assertEqual(store.list_claims()[0]["text"], "原始经历")
         with database(path) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
         backups = list((self.root / "migration-backups").glob("*.sqlite3"))
         self.assertEqual(len(backups), 1)
         with database(backups[0]) as backup:
@@ -98,7 +123,10 @@ class StorageTests(unittest.TestCase):
                 INSERT INTO sessions VALUES ('legacy-chat', 'chat', 'active', '', 0, 0, '2026-01-01');
             """)
         before = path.read_bytes()
-        bad_history = (Migration(1, "CREATE TABLE migration_probe (value TEXT);\nTHIS IS NOT SQL;"),)
+        bad_history = (
+            Migration(1, "CREATE TABLE migration_probe (value TEXT);\nTHIS IS NOT SQL;"),
+            Migration(2, "CREATE TABLE channel_probe (value TEXT);"),
+        )
 
         with patch("nico_storage.schema_migrations._BUSINESS_MIGRATIONS", bad_history):
             with self.assertRaises(sqlite3.Error):
@@ -112,7 +140,7 @@ class StorageTests(unittest.TestCase):
         path = self.root / "career_agent.sqlite3"
         Store(path)
         with database(path) as db:
-            db.execute("PRAGMA user_version = 2")
+            db.execute("PRAGMA user_version = 3")
         before = path.read_bytes()
 
         with self.assertRaisesRegex(DatabaseSchemaError, "newer than supported version"):
@@ -166,13 +194,59 @@ class StorageTests(unittest.TestCase):
         account_session = account_store.create("chat")
 
         self.assertNotEqual(root_session["id"], account_session["id"])
-        for path in (
-            root_store.path,
-            account_store.path,
-            auth_store.path,
-        ):
+        for path in (root_store.path, account_store.path):
             with database(path) as db:
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+        with database(auth_store.path) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+
+    def test_channel_ledger_survives_reopen_and_reuses_delivery_id(self):
+        path = self.root / "career_agent.sqlite3"
+        store = Store(path)
+        session = store.create("chat")
+        binding = store.bind_channel("console", "console", "local", session["id"])
+        self.assertEqual(binding["session_id"], session["id"])
+        claimed, event = store.claim_inbound(
+            "console", "console", "message-1", "local", session["id"], "sha256:payload",
+        )
+        self.assertTrue(claimed)
+        self.assertEqual(event["status"], "processing")
+
+        reopened = Store(path)
+        duplicate, event = reopened.claim_inbound(
+            "console", "console", "message-1", "local", session["id"], "sha256:payload",
+        )
+        self.assertFalse(duplicate)
+        self.assertEqual(event["status"], "processing")
+        event = reopened.store_channel_reply(
+            "console", "console", "message-1", "生成一次", "console:console:message-1:reply",
+        )
+        reopened.mark_delivery_failed(event["delivery_id"], "ConnectionError")
+
+        after_failure = Store(path).channel_message("console", "console", "message-1")
+        self.assertEqual(after_failure["status"], "delivery_failed")
+        self.assertEqual(after_failure["response"], "生成一次")
+        self.assertEqual(after_failure["delivery_id"], "console:console:message-1:reply")
+        Store(path).mark_delivered(after_failure["delivery_id"])
+        self.assertEqual(Store(path).channel_message("console", "console", "message-1")["status"], "completed")
+
+        reopened = Store(path)
+        reopened.delete_session(session["id"], "chat")
+        self.assertIsNone(reopened.channel_binding("console", "console")["session_id"])
+        self.assertEqual(reopened.channel_message("console", "console", "message-1")["response"], "生成一次")
+
+    def test_concurrent_inbound_claim_has_one_winner(self):
+        path = self.root / "career_agent.sqlite3"
+        session = Store(path).create("chat")
+
+        def claim():
+            return Store(path).claim_inbound(
+                "console", "console", "same-id", "local", session["id"], "sha256:payload",
+            )[0]
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claimed = list(pool.map(lambda _: claim(), range(2)))
+        self.assertEqual(claimed.count(True), 1)
 
     def test_historical_auth_database_is_upgraded_without_losing_users(self):
         path = self.root / "auth.sqlite3"
@@ -218,7 +292,7 @@ class StorageTests(unittest.TestCase):
         restored = Store(target)
         self.assertEqual(restored.list_materials()[0]["content"], "旧备份内容")
         with database(target) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
 
     def test_restore_migrates_a_partial_known_legacy_schema(self):
         backup = self.root / "legacy-backup.sqlite3"
@@ -248,7 +322,7 @@ class StorageTests(unittest.TestCase):
         restored = Store(target)
         self.assertEqual(restored.list_materials()[0]["content"], "旧备份内容")
         with database(target) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
 
     def test_restore_rejects_an_empty_database_snapshot(self):
         backup = self.root / "empty.sqlite3"

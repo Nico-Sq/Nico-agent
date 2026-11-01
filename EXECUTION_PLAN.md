@@ -166,6 +166,9 @@ flowchart LR
 | Akashic-agent：`E:/Akashic-agent/akashic-agent/agent/tools/registry.py`、`agent/tool_hooks/executor.py`、`prompts/agent.py` | Registry 统一登记工具风险、来源和声明；执行器先允许拒绝/确定最终参数，再调用实现，提示词只要求调用当前可见工具 | **调整后采用**同一会话授权快照生成模型声明与执行映射，并在调用前校验；不复制动态搜索、hook 平台或其完整提示词 |
 | nanobot：`E:/nanobot/nanobot/agent/tools/registry.py`、`agent/tools/base.py`、`agent/runner.py`、`templates/agent/tool_contract.md` | Registry 提供稳定工具声明、参数准备/校验和统一执行入口；Runner 承担调用批次，契约提示说明读写及验证顺序 | **调整后采用**通用 adapter 端口、目录快照和同一执行边界；保留 Nico 严格 JSON Schema 拒绝行为，不采用错误后自动换法重试的提示 |
 | Pi：`E:/Agent/Pi-agent/pi/packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/coding-agent/src/core/mcp-servers.ts`、`packages/coding-agent/src/extensions/mcp/runtime.ts`、`packages/coding-agent/src/core/extensions/loader.ts` | Agent loop 在工具列表中校验后执行；提示声明按选中工具生成；MCP server 注册副本隔离，关闭可取消连接；扩展加载失败会丢弃本次注册 | **调整后采用**目录与执行使用同一只读快照、资源释放和最小插件生命周期；本阶段只保留本地 stdio，不引入远端 MCP/OAuth、热重载或完整扩展框架 |
+| Akashic：`E:/Akashic-agent/akashic-agent/infra/channels/base.py`、`infra/channels/telegram_channel.py`、`bootstrap/channels.py` | 渠道接口和 host 装配独立；sender 到 session 的索引持久写入 session metadata，但入站 `MessageDeduper` 是有界内存集合 | **调整后采用**渠道适配器与路由分离；Nico 的 sender/conversation 绑定和 inbound 幂等键写入业务 SQLite，不复制进程内滑动窗口 |
+| nanobot：`E:/nanobot/nanobot/channels/base.py`、`channels/manager.py`、`session/manager.py` | channel 提供 start/stop/send 生命周期；manager 的 origin/message 重复抑制为进程内字典；session history 独立持久化 | **调整后采用**最小 receive/send 合约和显式适配器装配；不引入 MessageBus、多平台管理器或把内存缓存误当持久幂等 |
+| Pi：`E:/Agent/Pi-agent/pi/packages/durable/src/storage/sqlite/schema.ts`、`storage.ts`、`migrations.ts` 及 `packages/durable/test/sqlite-migrations.test.ts` | SQLite 表/索引集中定义，批量写入在事务中提交，迁移历史有序且测试未来版本拒绝和失败回滚；没有平台消息账本 | **调整后采用**显式 v2 迁移、唯一约束和原子认领；只将 Nico 渠道账本加到现有业务库，不照搬通用 durable store |
 
 ## 5. 目标架构
 
@@ -805,6 +808,15 @@ API/CLI/数据兼容：
 - 实际验证：`D:\anaconda3\python.exe -m unittest discover -s tests -q`（139 项通过，包含 core、API、MCP、兼容、扩展和账户/备份恢复回归）；`D:\anaconda3\python.exe -m unittest discover -s packages\nico-adapters\tests -q`（4 项通过）；`D:\anaconda3\python.exe -m compileall -q career_agent packages\nico-domain\src packages\nico-application\src packages\nico-adapters\src scripts`；`D:\anaconda3\python.exe scripts\check_dependency_graph.py`（无环，领域、application 层依赖检查通过）；`D:\anaconda3\python.exe scripts\build_wheels.py --all --out dist`（6 个 wheel 构建成功）；`D:\anaconda3\python.exe scripts\verify_wheel_install.py --all`（仓库外临时 venv 安装和导入 6 个 wheel 成功，并验证 `stdio_mcp`、`trusted_local_plugins` entry point）；`git diff --check` 通过。wheel 安装日志中的 pip 更新提示不影响安装结果。
 - 阶段实现提交：`87dd7f3`（`refactor: extract tool adapters and authorization boundary`）；未 push。
 - 未验证/后续条件：没有外部 MCP 服务或第三方插件源用于实网验收；未来不可信插件若需支持，仍须独立子进程和资源/终止边界。真实模型端点不阻塞本阶段。
+
+阶段 7 调研与实施前决策（2026-11-01）：
+
+- 现状：`career_agent/channels.py` 的 `ChannelRouter.bindings/events`、`career_agent/channels.py` 的 sender/conversation 绑定、`ConsoleChannel.sent_delivery_ids` 都是内存状态；`nico_application.use_cases.ChannelLedgerPort` 目前只有未接线的占位协议；`nico-storage` 业务 schema 为 v1，迁移器已支持有序、原子升级。
+- Akashic：检查 `E:\Akashic-agent\akashic-agent\infra\channels\base.py` 的 `SessionIdentityIndex`/`MessageDeduper`、`infra\channels\telegram_channel.py` 的 `(chat_id, message_id)` 入站键及 `bootstrap\channels.py` 装配。采用持久 identity 绑定和消息 ID 作为去重键；内存窗口只作平台侧优化，不能作为 Nico 的可靠幂等依据。
+- nanobot：检查 `E:\nanobot\nanobot\channels\base.py`、`channels\manager.py` 的生命周期/发送与 outbound fingerprint 缓存、`session\manager.py` 的会话持久化。采用渠道收发边界与业务路由分离；不引入 MessageBus、额外重试平台或把不同 session history 当作投递账本。
+- Pi：检查 `E:\Agent\Pi-agent\pi\packages\durable\src\storage\sqlite\schema.ts`、`storage\sqlite\storage.ts` 和 `test\sqlite-migrations.test.ts`。其 durable 包没有外部渠道收发账本；仅采用其唯一约束、事务提交、不可变迁移顺序和失败回滚模式。
+- 实施决定：只把现有 Console 渠道做成 adapter，并将当前 router 规则迁入 application；建立 schema v2 的持久 sender/conversation 绑定与 `(channel, conversation, message_id)` 入站账本。消息先原子认领为 `processing`，成功后保存完整回复和稳定 delivery ID，再发送并记录 delivered；发送失败保留回复，重投复用原 ID。重启后已有 `processing` 记录绝不自动再次调用模型；若回复已持久化则允许原 ID 重投。该契约保证模型执行至多一次，不宣称所有传输均可实现 exactly-once 投递。
+- 范围约束：`nico-cli` 只接收组合后的 application use cases 和 `TextChannel` contract；SQLite、Provider、MCP、插件只在现有根入口装配。阶段只迁移 Console 与渠道账本，不接第二平台、不预装 SDK、不改流式或写工具策略。Chat/Interview 命令、帮助、错误输出、`/retry`、`/exit` 和 `AUTH_REQUIRED` 拒绝行为保持兼容。
 
 ## 16. 给后续执行 AI 的直接指令
 

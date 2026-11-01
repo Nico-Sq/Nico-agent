@@ -176,6 +176,54 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         self.assertEqual(len(delivered), 1)
         self.assertEqual(len(self.store.list_sessions("chat")), 1)
 
+    def test_channel_duplicate_after_store_and_router_restart_is_not_reprocessed(self):
+        router = ChannelRouter(self.store, "test", {"alice"})
+        message = TextMessage("alice", "restart-conversation", "stable-message", "你好")
+        calls = []
+        delivery_ids = []
+
+        async def handler(session, incoming):
+            calls.append(incoming.message_id)
+            return "只生成一次"
+
+        async def fail_send(conversation_id, text, delivery_id):
+            delivery_ids.append(delivery_id)
+            raise ConnectionError("断开连接")
+
+        with self.assertRaises(ChannelDeliveryError):
+            asyncio.run(router.process(message, handler, fail_send))
+        restarted_store = Store(self.store.path)
+        restarted_router = ChannelRouter(restarted_store, "test", {"alice"})
+
+        async def send(conversation_id, text, delivery_id):
+            delivery_ids.append(delivery_id)
+
+        async def unexpected_handler(*_):
+            self.fail("已完成的入站消息不能再次运行模型")
+
+        retried = asyncio.run(restarted_router.process(message, unexpected_handler, send))
+        completed_router = ChannelRouter(Store(self.store.path), "test", {"alice"})
+        duplicate = asyncio.run(completed_router.process(message, unexpected_handler, send))
+
+        self.assertEqual(retried.response, "只生成一次")
+        self.assertTrue(retried.delivered)
+        self.assertTrue(duplicate.duplicate)
+        self.assertEqual(duplicate.response, retried.response)
+        self.assertEqual(delivery_ids[0], delivery_ids[1])
+        self.assertEqual(len(delivery_ids), 2)
+        self.assertEqual(calls, ["stable-message"])
+
+    def test_console_can_explicitly_select_another_existing_session(self):
+        router = ChannelRouter(self.store, "console", {"local"})
+        first = self.store.create("chat")
+        second = self.store.create("chat")
+
+        router.bind("local", "console", first["id"])
+        selected = router.bind("local", "console", second["id"])
+
+        self.assertEqual(selected["id"], second["id"])
+        self.assertEqual(router.session_id("local", "console"), second["id"])
+
     def test_channel_delivery_failure_retries_without_rerunning_handler(self):
         router = ChannelRouter(self.store, "test", {"alice"})
         message = TextMessage("alice", "conversation", "message-2", "你好")

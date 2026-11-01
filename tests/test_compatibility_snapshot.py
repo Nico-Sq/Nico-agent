@@ -16,7 +16,8 @@ from career_agent.channels import (
     ChannelResult as LegacyChannelResult,
     TextMessage as LegacyTextMessage,
 )
-from career_agent.cli import build_parser
+from career_agent.cli import build_parser, discover_mcp, run_chat
+from nico_cli import build_parser as PackageCLIBuildParser
 from career_agent.events import Usage as LegacyUsage
 from career_agent.provider import ModelError as LegacyProviderModelError
 from career_agent.providers import ModelError as LegacyProvidersModelError
@@ -122,6 +123,7 @@ class CompatibilitySnapshotTests(unittest.TestCase):
         self.assertIs(LegacyPlugins, AdapterPlugins)
 
     def test_cli_top_level_commands_are_stable(self):
+        self.assertIs(build_parser, PackageCLIBuildParser)
         parser = build_parser()
         subparsers = next(
             action for action in parser._actions
@@ -134,6 +136,10 @@ class CompatibilitySnapshotTests(unittest.TestCase):
         parsed = parser.parse_args(["interview", "create", "后端开发", "--questions", "2"])
         self.assertEqual((parsed.command, parsed.action, parsed.questions),
                          ("interview", "create", 2))
+
+    def test_legacy_cli_helpers_remain_importable(self):
+        self.assertTrue(callable(run_chat))
+        self.assertTrue(callable(discover_mcp))
 
     def test_api_data_paths_and_account_layout_are_stable(self):
         code = r"""

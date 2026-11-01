@@ -5,10 +5,39 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nico_adapters.plugins import LocalPlugins
-from nico_adapters.registry import load_tool_adapters
+from nico_adapters.registry import load_channels, load_tool_adapters
 
 
 class ToolAdapterTests(unittest.TestCase):
+    def test_only_requested_channel_entry_points_are_loaded(self):
+        loaded = []
+
+        class Console:
+            pass
+
+        class ThirdParty:
+            pass
+
+        class EntryPoint:
+            def __init__(self, name, distribution, target):
+                self.name = name
+                self.dist = SimpleNamespace(name=distribution)
+                self.target = target
+
+            def load(self):
+                loaded.append(self.name)
+                return self.target
+
+        points = [
+            EntryPoint("console", "nico-adapters", Console),
+            EntryPoint("external", "third-party-channel", ThirdParty),
+        ]
+        with patch("nico_adapters.registry.entry_points", return_value=points):
+            selected = load_channels(("console",))
+
+        self.assertEqual(selected, {"console": Console})
+        self.assertEqual(loaded, ["console"])
+
     def test_only_requested_entry_points_are_loaded_and_can_be_removed(self):
         loaded = []
 

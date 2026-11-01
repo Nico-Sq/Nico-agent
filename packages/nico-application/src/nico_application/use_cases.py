@@ -39,12 +39,6 @@ class AuthPort(Protocol):
     def username(self, user_id: str) -> str | None: ...
 
 
-class ChannelLedgerPort(Protocol):
-    def claim_inbound(self, sender_id: str, conversation_id: str, message_id: str) -> bool: ...
-    def store_reply(self, message_id: str, response: str, delivery_id: str) -> None: ...
-    def mark_delivered(self, delivery_id: str) -> None: ...
-
-
 class ChatSessionReader(RepositoryPort, Protocol):
     pass
 
@@ -129,10 +123,14 @@ class ChatUseCases:
         self.cancel_runs = cancel_runs
 
     def create(self, model_id: str = "default") -> dict:
-        model = self.model_catalog.get(model_id)
-        if model.configuration_error():
-            raise ValueError(model.configuration_error())
+        self.validate_model(model_id)
         return self.store.create("chat", model_id=model_id)
+
+    def validate_model(self, model_id: str) -> None:
+        model = self.model_catalog.get(model_id)
+        error = model.configuration_error()
+        if error:
+            raise ValueError(error)
 
     def require_session(self, session_id: str) -> dict:
         session = self.store.get(session_id, "chat")

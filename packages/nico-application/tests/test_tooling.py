@@ -10,6 +10,9 @@ class FakeStore:
     def tool_grants(self, session_id):
         return list(self.grants)
 
+    def get(self, session_id, kind):
+        return None
+
     def set_tool_grants(self, session_id, names):
         self.grants = sorted(set(names))
         return list(self.grants)
@@ -78,6 +81,11 @@ class ToolingTests(unittest.TestCase):
             grants.replace("session", ["missing"], available)
         self.assertEqual(error.exception.kind, "unavailable")
         self.assertEqual(grants.revoke("session", "read"), [])
+
+    def test_tool_grant_use_case_keeps_missing_session_error(self):
+        grants = ToolGrantUseCases(FakeStore())
+        with self.assertRaisesRegex(ValueError, "需要现有chat会话 ID"):
+            grants.require_session("missing", "chat")
 
 
 if __name__ == "__main__":

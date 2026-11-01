@@ -6,6 +6,7 @@ from .base import (
     normalize_memory_content,
     now,
 )
+from .channels import ChannelRepositoryMixin
 from .materials import MaterialRepositoryMixin
 from .memory import MemoryRepositoryMixin
 from .runs import RunRepositoryMixin
@@ -15,6 +16,7 @@ from nico_application.use_cases import RepositoryPort, UnitOfWorkPort
 
 class Store(
     SessionRepositoryMixin,
+    ChannelRepositoryMixin,
     MaterialRepositoryMixin,
     MemoryRepositoryMixin,
     RunRepositoryMixin,

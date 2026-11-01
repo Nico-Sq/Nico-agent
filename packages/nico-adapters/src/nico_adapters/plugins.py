@@ -116,6 +116,9 @@ class LocalPlugins:
     def discover(self) -> list[dict]:
         return [json.loads(item.definition) for item in self._active_tools.values()]
 
+    def status(self) -> dict[str, str]:
+        return {}
+
     async def call(self, item: dict, arguments: dict) -> dict:
         tool = self._active_tools.get(item.get("name"))
         if tool is None:

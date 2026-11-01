@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from collections.abc import Awaitable, Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -12,12 +13,14 @@ from nico_domain import tool_is_read_only
 
 
 class ToolGrantPort(Protocol):
+    def get(self, session_id: str, kind: str) -> dict | None: ...
     def tool_grants(self, session_id: str) -> list[str]: ...
     def set_tool_grants(self, session_id: str, names: list[str]) -> list[str]: ...
 
 
 class ToolAdapterPort(Protocol):
     def discover(self) -> list[dict] | Awaitable[list[dict]]: ...
+    def status(self) -> dict[str, str]: ...
     async def call(self, tool: dict, arguments: dict) -> dict: ...
     async def close(self) -> None: ...
 
@@ -118,6 +121,12 @@ class ToolGrantUseCases:
     def __init__(self, store: ToolGrantPort):
         self.store = store
 
+    def require_session(self, session_id: str, kind: str) -> dict:
+        session = self.store.get(session_id, kind)
+        if session is None:
+            raise ValueError(f"需要现有{kind}会话 ID")
+        return session
+
     def list(self, session_id: str) -> list[str]:
         return self.store.tool_grants(session_id)
 
@@ -143,3 +152,19 @@ class ToolGrantUseCases:
         names = set(self.store.tool_grants(session_id))
         names.discard(name)
         return self.store.set_tool_grants(session_id, sorted(names))
+
+
+class ToolDiscoveryUseCases:
+    def __init__(self, adapters: Iterable[ToolAdapterPort]):
+        self.adapters = tuple(adapters)
+
+    async def list(self) -> tuple[list[dict], dict[str, str]]:
+        tools = []
+        statuses = {}
+        for adapter in self.adapters:
+            discovered = adapter.discover()
+            if inspect.isawaitable(discovered):
+                discovered = await discovered
+            tools.extend(discovered)
+            statuses.update(adapter.status())
+        return tools, statuses
