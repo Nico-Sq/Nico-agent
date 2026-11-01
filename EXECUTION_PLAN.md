@@ -716,7 +716,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [x] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
 - [x] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
 - [x] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
-- [ ] 阶段 8：性能/可靠性基线与超预算优化。
+- [x] 阶段 8：性能/可靠性基线与超预算优化。
 - [ ] 阶段 9：唯一组合根、兼容层、WebUI 收口和全 wheel 安装验收。
 
 ### 13.2 条件任务
@@ -826,6 +826,23 @@ API/CLI/数据兼容：
 - `python scripts/build_wheels.py --all --out dist` 构建 7 个物化包；最终改动后 `--changed` 重建 application、adapters、storage、CLI；`python scripts/verify_wheel_install.py --all --wheel-dir dist` 在仓库外临时 venv 安装和 smoke test 全部 7 个 wheel，并验证 Console channel entry point 与 v2 数据库初始化。API 路由、DATA_DIR/账户目录、CLI 命令和旧公开导入、备份恢复由兼容快照及根测试覆盖。所有迁移测试仅使用临时数据库，未打开或搬迁真实 `data/`。
 - 阶段实现提交：`5a028ed`（`refactor: extract CLI and persist channel ledger`）；未 push。阶段 7 不需要真实模型验收，因此没有下载模型或占用模型磁盘空间。
 - 未验证/后续条件：没有接入第二渠道；跨渠道投递确认和远端 exactly-once 不在本阶段保证。真实商业端点、流式输出、写工具和第二渠道仍按前述条件任务处理。
+
+阶段 8 调研与实施前决策（2026-11-01）：
+
+- Akashic：检查 `E:\Akashic-agent\akashic-agent\memory2\retriever.py`、`memory2\store.py` 与 `tests\test_memory2_retrieval_baseline.py`。其检索融合 keyword/vector lane 并用 RRF 排序，测试把已支持行为与排序边界分开记录。**调整后采用**固定 query/label 集和 Recall@10 正确性断言；不接入 embedding/vector 检索，因为当前 Nico 上限为 200 条，先看真实字面检索证据。
+- nanobot：检查 `E:\nanobot\nanobot\agent\memory.py` 与 `session\manager.py`。记忆由 Markdown/JSONL 文件维护，默认历史上限 1,000 条，session 文件有 2,000 条硬上限并按尾部构造上下文。**调整后采用**按容量点固定生成并测 tail-context 读取；保留 Nico 的 SQLite schema 与上下文规则，不引入文件存储或整理器。
+- Pi：检查 `E:\Agent\Pi-agent\pi\packages\durable\src\storage\sqlite\schema.ts`、`storage.ts` 的倒序/限量 entries 查询和 `test\sqlite-migrations.test.ts`。其查询使用 conversation+id 索引与 cursor/limit，迁移测试在临时库验证重复应用、失败回滚和数据保留。**调整后采用**固定数据规模、正确性对照和临时迁移库；不在未测超预算前重写当前查询或改 schema。
+- 实施决定：`benchmarks/` 使用固定种子数据、临时 SQLite、确定性本地假 HTTP 模型和 JSON 原始样本；覆盖执行计划列出的查询、消息、上下文、记忆、授权、备份、迁移、启动、HTTP 与并发写入场景，记录 P50/P95/P99、吞吐、RSS、锁等待及错误。只有测量超过已锁定预算或正确性/召回断言失败时才做最小优化；每项改动需保留同一 harness 的前后结果。
+
+阶段 8 实施与验收记录（2026-11-01）：
+
+- 新增 `benchmarks/run_baseline.py` 固定种子基准和 `tests/test_benchmarks.py` smoke 覆盖。基准仅使用 `nico-benchmark-*` 临时目录、合成 SQLite 数据和 `127.0.0.1` 假 HTTP；记录带原始样本的 JSON 至 `benchmarks/results/stage8-baseline.json`，测试确认临时目录清理、固定数据量、Recall@10、假 HTTP 成功与稳定错误码。Windows RSS 使用显式 Win32 API ctypes 声明采集，避免静默记为 null。
+- 环境：Windows 11 build 26100，CPython 3.13.9，SQLite 3.51.0，16 个逻辑 CPU；E: 为 NTFS 固定卷，SAMSUNG MZAL81T0HDLB-00BL2 SSD/NVMe。数据含 1,000 个会话、分别有 100/1,000/10,000 条消息的三个会话（合计 11,100 条）、50/200 条记忆、10 个固定查询，正式测量 20 次、迁移/备份/启动各 3 次，并发每 worker 写 40 次。执行命令：`python -m benchmarks.run_baseline --output benchmarks/results/stage8-baseline.json`。
+- 已锁定预算全部通过：10,000 条消息会话最近 16 条上下文 P95 为 4.5499 ms（≤150 ms）；1,000 会话标题/消息关键词查询 P95 分别为 17.4828/18.4408 ms（≤300 ms）；4 会话 SQLite 锁等待 P95 为 0.7970 ms（≤50 ms，0 错误）；备份 P95 为 45.2032 ms（≤2 s）；进程 RSS 为 75,001,856 bytes（71.53 MiB，≤512 MiB）。200 条记忆检索 P95 为 2.1486 ms，固定 10 条查询 Recall@10 在 50/200 条记忆下均为 1.0。无超预算项，因此没有加入查询优化、FTS5、缓存、队列或数据库改动。
+- 其余关键观测也保存在原始结果中：10,000 条消息全量读取 P95 37.2863 ms，授权读取 2.0206 ms，迁移 P95 212.2475 ms，现有 Store 打开 P95 37.0413 ms，新/现有库启动 P95 为 2,552.238/2,486.9986 ms；1/4/16 worker 写入的锁等待 P95 为 0.4817/0.7970/0.7161 ms，均无错误，吞吐为 119.13/122.95/95.58 次每秒。
+- 本机假 HTTP 的 `post_json` P95 为 1,882.4954 ms（P99 2,300.1177 ms）。独立诊断中，复用异步 HTTPX 客户端的三次 loopback 请求为 2.1–4.4 ms，而生产 `post_json` 每次新建客户端仍明显更慢；这不是实际模型服务测量，也没有为该项设定预算。真实模型端点验收仍是条件任务，因此不据此改传输层，待选定端点后再测连接复用收益。基准未请求外部模型端点、未下载模型，也未触碰真实库或凭据。
+- 验收：基准 smoke 测试通过；根目录全套测试 143 项通过（含 API、CLI、账户和备份/恢复）；7 个包独立测试共 59 项通过；`python -m compileall -q career_agent packages tests scripts benchmarks`、`python scripts/check_dependency_graph.py`（依赖图无环，领域/application 禁止依赖检查通过）和 `git diff --check` 通过。所有基准数据库在临时目录，退出后自动清理。
+- 阶段实现与数据结果分别提交；不 push。写入此记录时阶段 9 尚未开始。
 
 ## 16. 给后续执行 AI 的直接指令
 
