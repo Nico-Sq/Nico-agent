@@ -32,25 +32,43 @@ function renderMessages(kind, messages) {
     if (kind === "chat") {
       const empty = document.createElement("div");
       empty.className = "chat-empty";
+      const mark = document.createElement("span");
+      mark.className = "welcome-mark";
+      mark.setAttribute("aria-hidden", "true");
       const heading = document.createElement("h2");
-      heading.textContent = "从一个问题开始";
+      heading.textContent = "你好，今天想从哪里开始？";
       const description = document.createElement("p");
-      description.textContent = "整理岗位要求、打磨经历表达，或讨论刚结束的面试反馈。";
+      description.textContent = "说说你的目标，我们一起把下一步理清楚。";
       const starters = document.createElement("div");
       starters.className = "chat-starters";
-      for (const [label, prompt] of [
-        ["分析目标岗位", "帮我梳理目标岗位最看重的能力，以及我应该先准备什么。"],
-        ["打磨项目经历", "我想把一段项目经历讲清楚。请先问我做了什么、为什么做、结果如何。"],
-        ["规划面试准备", "根据我的目标岗位，帮我列一个可执行的面试准备顺序。"],
+      for (const [label, detail, prompt] of [
+        ["分析目标岗位", "看清岗位要求与准备重点", "帮我梳理目标岗位最看重的能力，以及我应该先准备什么。"],
+        ["打磨项目经历", "把行动、思路和结果讲清楚", "我想把一段项目经历讲清楚。请先问我做了什么、为什么做、结果如何。"],
+        ["规划面试准备", "整理一个可执行的练习顺序", "根据我的目标岗位，帮我列一个可执行的面试准备顺序。"],
       ]) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "chat-starter";
-        button.textContent = label;
+        const title = document.createElement("strong");
+        title.textContent = label;
+        const hint = document.createElement("small");
+        hint.textContent = detail;
+        button.append(title, hint);
         button.onclick = () => { $("chat-text").value = prompt; $("chat-text").focus(); };
         starters.append(button);
       }
-      empty.append(heading, description, starters);
+      const shortcuts = document.createElement("div");
+      shortcuts.className = "chat-shortcuts";
+      const interview = document.createElement("button");
+      interview.type = "button";
+      interview.textContent = "开始模拟面试";
+      interview.onclick = () => switchKind("interview");
+      const reference = document.createElement("button");
+      reference.type = "button";
+      reference.textContent = "引用已有材料";
+      reference.onclick = () => { $("chat-context").open = true; $("chat-resource").focus(); };
+      shortcuts.append(interview, reference);
+      empty.append(mark, heading, description, starters, shortcuts);
       box.append(empty);
     } else {
       const empty = document.createElement("p");

@@ -98,6 +98,7 @@ async function loadModels() {
 }
 function setHistoryOpen(open) {
   $("sidebar-history").classList.toggle("open", open);
+  document.querySelector(".sidebar").classList.toggle("mobile-open", open);
   $("history-toggle").setAttribute("aria-expanded", String(open));
   $("history-toggle").textContent = `${open ? "收起" : "展开"}${state.kind === "chat" ? "历史对话" : "历史面试"}`;
 }
@@ -146,7 +147,7 @@ function renderSessionList() {
     button.append(detail);
     button.onclick = async () => {
       await selectSession(session.id);
-      if (window.matchMedia("(max-width: 760px)").matches) {
+      if (window.matchMedia("(max-width: 960px)").matches) {
         setHistoryOpen(false);
         $("workspace-title").scrollIntoView({ block: "start" });
       }
@@ -210,7 +211,7 @@ async function switchKind(kind, fresh = false) {
   $("session-search").value = state.sessionQueries[kind];
   setHistoryOpen(false);
   $("history-heading").textContent = kind === "chat" ? "历史对话" : "历史面试";
-  $("new-session").textContent = kind === "chat" ? "新建对话" : "新建面试";
+  $("new-session").querySelector("span").textContent = kind === "chat" ? "新建对话" : "新建面试";
   $("tab-chat").classList.toggle("active", kind === "chat");
   $("tab-interview").classList.toggle("active", kind === "interview");
   if (kind === "chat") { $("tab-chat").setAttribute("aria-current", "page"); $("tab-interview").removeAttribute("aria-current"); }

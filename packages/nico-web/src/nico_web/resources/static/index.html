@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nico · 求职 Agent</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/redesign.css">
 </head>
 <body>
   <section id="auth-panel" class="auth-panel" hidden>
@@ -22,30 +23,36 @@
   <div id="shell" class="shell" hidden>
     <a class="skip-link" href="#main-content">跳转到主要内容</a>
     <aside class="sidebar" aria-label="入口与历史记录">
-      <div class="sidebar-brand"><span class="brand-mark" aria-hidden="true">N</span><div><strong>Nico</strong><small>求职 Agent</small></div></div>
-      <nav class="tabs" aria-label="选择入口">
-        <button type="button" id="tab-chat" class="active" aria-current="page">新对话</button>
-        <button type="button" id="tab-interview">AI 面试</button>
-      </nav>
-      <button id="history-toggle" class="secondary history-toggle" type="button" aria-expanded="false" aria-controls="sidebar-history">展开历史对话</button>
-      <div id="sidebar-history" class="sidebar-history">
-        <div class="side-title"><h2 id="history-heading">历史对话</h2><button id="new-session" type="button" class="secondary">新建</button></div>
-        <label class="session-search-label" for="session-search">查找会话</label>
-        <input id="session-search" type="search" placeholder="名称、消息或 ID" autocomplete="off" maxlength="100">
-        <p id="session-count" class="session-count" role="status" aria-live="polite"></p>
-        <div class="session-actions">
-          <button id="rename-session" type="button" class="secondary" hidden>重命名</button>
-          <button id="delete-session" type="button" class="secondary danger" hidden>删除当前会话</button>
-        </div>
-        <form id="session-title-form" class="session-title-form" hidden>
-          <label for="session-title">会话名称（留空恢复默认）</label>
-          <input id="session-title" maxlength="80" aria-describedby="session-title-error">
-          <p id="session-title-error" role="alert" hidden></p>
-          <div><button type="button" id="cancel-session-title" class="secondary">取消</button><button type="submit">保存</button></div>
-        </form>
-        <div id="sessions" class="sessions"></div>
+      <div class="sidebar-rail">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <nav class="tabs" aria-label="选择入口">
+          <button type="button" id="tab-chat" class="active" aria-current="page" title="新对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-2 2v-9.5a7.5 7.5 0 0 1 7.5-7.5h2A7.5 7.5 0 0 1 20 11.5Z"/><path d="M8 10h7M8 14h4"/></svg><span class="nav-label">对话</span></button>
+          <button type="button" id="tab-interview" title="AI 面试"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M9 5V3m6 2V3M8 11h8m-8 4h5"/></svg><span class="nav-label">面试</span></button>
+        </nav>
+        <button id="history-toggle" class="secondary history-toggle" type="button" aria-expanded="false" aria-controls="sidebar-history">展开历史对话</button>
       </div>
-      <div class="sidebar-footer"><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
+      <div class="sidebar-content">
+        <div class="sidebar-brand"><strong>Nico</strong><small>求职 Agent</small></div>
+        <button id="new-session" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建对话</span></button>
+        <div id="sidebar-history" class="sidebar-history">
+          <div class="side-title"><h2 id="history-heading">历史对话</h2></div>
+          <label class="session-search-label" for="session-search">查找会话</label>
+          <input id="session-search" type="search" placeholder="搜索会话" autocomplete="off" maxlength="100">
+          <p id="session-count" class="session-count" role="status" aria-live="polite"></p>
+          <div class="session-actions">
+            <button id="rename-session" type="button" class="secondary" hidden>重命名</button>
+            <button id="delete-session" type="button" class="secondary danger" hidden>删除当前会话</button>
+          </div>
+          <form id="session-title-form" class="session-title-form" hidden>
+            <label for="session-title">会话名称（留空恢复默认）</label>
+            <input id="session-title" maxlength="80" aria-describedby="session-title-error">
+            <p id="session-title-error" role="alert" hidden></p>
+            <div><button type="button" id="cancel-session-title" class="secondary">取消</button><button type="submit">保存</button></div>
+          </form>
+          <div id="sessions" class="sessions"></div>
+        </div>
+        <div class="sidebar-footer"><a class="button-link" href="/api/data/backup" download="nico-agent-backup.sqlite3">下载数据备份</a><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
+      </div>
     </aside>
     <div class="main-column">
       <header class="topbar"><div><h1 id="workspace-title">新对话</h1><p id="workspace-subtitle">聊聊岗位、经历或下一步准备</p></div><div class="topbar-actions"><span id="provider" class="badge">读取模型配置中</span><button id="open-settings" type="button" class="secondary">平台设置</button></div></header>
@@ -69,10 +76,10 @@
             </details>
           </div>
           <form id="chat-form" class="composer">
-            <label for="chat-model">对话模型</label><select id="chat-model" aria-describedby="chat-model-help"></select><p id="chat-model-help" class="field-help">创建对话后固定模型；可在平台设置查看配置状态。</p>
             <label class="sr-only" for="chat-text">你的消息</label>
             <textarea id="chat-text" rows="3" maxlength="12000" placeholder="今天想聊什么？例如：帮我梳理目标岗位的准备重点" required></textarea>
-            <div class="composer-actions"><button type="button" id="chat-retry" class="secondary" hidden>重试上条消息</button><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div>
+            <div class="composer-toolbar"><div class="model-choice"><label for="chat-model">对话模型</label><select id="chat-model" aria-describedby="chat-model-help"></select></div><div class="composer-actions"><button type="button" id="chat-retry" class="secondary" hidden>重试上条消息</button><button type="button" id="chat-interrupt" class="secondary">中断运行</button><button type="submit">发送消息</button></div></div>
+            <p id="chat-model-help" class="field-help">创建对话后固定模型；可在平台设置查看配置状态。</p>
           </form>
         </div>
         <div id="interview-panel" hidden>
