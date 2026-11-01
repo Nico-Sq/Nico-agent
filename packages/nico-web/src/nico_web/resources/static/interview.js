@@ -1,5 +1,5 @@
 function renderInterviewState(session) {
-  state.interviewQuestion = session?.question_count || 0;
+  nicoState.interviewQuestion = session?.question_count || 0;
   $("copy-interview-id").hidden = !session;
   $("interview-export").hidden = !session;
   if (session) $("interview-export").href = `/api/interview/sessions/${session.id}/export.md`;
@@ -11,15 +11,15 @@ function renderInterviewState(session) {
     (session.status === "running" && session.question_count > 0));
   $("answer-form").querySelector("button[type=submit]").textContent = session?.status === "running" ? "提交修正" : "提交回答";
   $("skip-question").hidden = !session || session.status !== "awaiting_answer";
-  $("skip-question").disabled = !state.modelReady;
+  $("skip-question").disabled = !nicoState.modelReady;
   $("resume-actions").hidden = !session || session.status !== "paused";
-  $("resume-button").disabled = !state.modelReady;
+  $("resume-button").disabled = !nicoState.modelReady;
   const names = { new: "尚未开始", running: "正在生成回复", awaiting_answer: `等待回答 · 第 ${session?.question_count ?? 0} 题`, paused: "已暂停", finished: "已完成", cancelled: "已结束" };
   $("interview-status").textContent = session ? `${session.goal} · ${names[session.status]} / 共 ${session.max_questions} 题` : "创建一场面试";
 }
 
 function openResourceEditor(kind, resource) {
-  state.editing = { kind, id: resource.id };
+  nicoState.editing = { kind, id: resource.id };
   const material = kind === "material";
   $("resource-editor-heading").textContent = material ? "编辑材料" : "编辑经历";
   $("resource-edit-title-label").hidden = !material;
@@ -34,9 +34,9 @@ function openResourceEditor(kind, resource) {
 }
 
 async function loadPreparation() {
-  const sequence = state.selectionSeq;
+  const sequence = nicoState.selectionSeq;
   const [materials, claims] = await Promise.all([api("/materials"), api("/claims")]);
-  if (sequence !== state.selectionSeq || state.kind !== "interview") return;
+  if (sequence !== nicoState.selectionSeq || nicoState.kind !== "interview") return;
   const materialBox = $("material-list");
   const claimBox = $("claim-list");
   const selectedMaterials = new Set([...materialBox.querySelectorAll("input:checked")].map((item) => item.value));
@@ -89,6 +89,7 @@ async function loadPreparation() {
     if (claim.status === "confirmed") {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox"; checkbox.value = claim.id; checkbox.checked = selectedClaims.has(claim.id);
+      checkbox.setAttribute("aria-label", text.textContent);
       row.append(checkbox);
     } else {
       const confirm = document.createElement("button");
@@ -161,7 +162,7 @@ function renderReport(report) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = "复练这题";
-      button.disabled = !state.modelReady;
+      button.disabled = !nicoState.modelReady;
       button.onclick = () => startPractice(report.session_id, item.number);
       row.append(button);
     }
@@ -170,19 +171,18 @@ function renderReport(report) {
 }
 
 function startPractice(sourceId, questionNumber) {
-  if (!state.modelReady) return;
+  if (!nicoState.modelReady) return;
   action("interview", async () => {
     const session = await api(`/interview/sessions/${sourceId}/practice`, {
       method: "POST", body: JSON.stringify({ question_number: questionNumber }),
     });
-    state.ids.interview = session.id;
+    nicoState.ids.interview = session.id;
     localStorage.setItem(sessionKey("interview"), session.id);
     try {
-      const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
       await selectSession(session.id);
-      await run;
+      await runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
     }
-    finally { if (state.kind === "interview" && state.ids.interview === session.id) await selectSession(session.id); }
+    finally { if (nicoState.kind === "interview" && nicoState.ids.interview === session.id) await selectSession(session.id); }
   });
 }
 
@@ -200,11 +200,11 @@ $("material-file").onchange = async (event) => {
   finally { event.target.value = ""; }
 };
 $("resource-edit-cancel").onclick = () => $("resource-editor").close();
-$("resource-editor").onclose = () => { state.editing = null; };
+$("resource-editor").onclose = () => { nicoState.editing = null; };
 $("resource-editor-form").onsubmit = async (event) => {
   event.preventDefault();
-  if (!state.editing) return;
-  const { kind, id } = state.editing;
+  if (!nicoState.editing) return;
+  const { kind, id } = nicoState.editing;
   const content = $("resource-edit-content").value.trim();
   const title = $("resource-edit-title").value.trim();
   const errorBox = $("resource-edit-error");
@@ -252,7 +252,7 @@ $("claim-form").onsubmit = (event) => {
 };
 $("interview-setup").onsubmit = (event) => {
   event.preventDefault();
-  if (!state.modelReady) return;
+  if (!nicoState.modelReady) return;
   action("interview", async () => {
     const goal = $("interview-goal").value.trim();
     if (!goal) return;
@@ -260,23 +260,22 @@ $("interview-setup").onsubmit = (event) => {
     const material_ids = [...$("material-list").querySelectorAll("input:checked")].map((item) => item.value);
     const claim_ids = [...$("claim-list").querySelectorAll("input:checked")].map((item) => item.value);
     const session = await api("/interview/sessions", { method: "POST", body: JSON.stringify({ goal, max_questions, material_ids, claim_ids, model_id: $("interview-model").value }) });
-    state.ids.interview = session.id;
+    nicoState.ids.interview = session.id;
     localStorage.setItem(sessionKey("interview"), session.id);
     try {
-      const run = runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
       await selectSession(session.id);
-      await run;
+      await runRequest("interview", session.id, `/interview/sessions/${session.id}/start`);
     }
-    finally { if (state.kind === "interview" && state.ids.interview === session.id) await selectSession(session.id); }
+    finally { if (nicoState.kind === "interview" && nicoState.ids.interview === session.id) await selectSession(session.id); }
   });
 };
 $("answer-form").onsubmit = async (event) => {
   event.preventDefault();
-  if (!state.modelReady) return;
+  if (!nicoState.modelReady) return;
   const text = $("answer-text").value.trim();
-  if (!text || state.busy.interview) return;
-  const id = state.ids.interview;
-  const question_number = state.interviewQuestion;
+  if (!text || nicoState.busy.interview) return;
+  const id = nicoState.ids.interview;
+  const question_number = nicoState.interviewQuestion;
   setBusy("interview", true);
   let claimed;
   try {
@@ -286,18 +285,17 @@ $("answer-form").onsubmit = async (event) => {
   } catch (error) { notice(error.message); return; }
   finally { setBusy("interview", false); }
   $("answer-text").value = "";
-  if (state.pending.interview?.id === id) state.pending.interview.controller.abort();
-  const seq = ++state.interviewSeq;
+  if (nicoState.pending.interview?.id === id) nicoState.pending.interview.controller.abort();
+  const seq = ++nicoState.interviewSeq;
   let errorMessage = "";
   try {
-    const run = runRequest("interview", id, `/interview/sessions/${id}/answers/run`, { version: claimed.version });
-    if (state.kind === "interview" && state.ids.interview === id) await selectSession(id);
+    if (nicoState.kind === "interview" && nicoState.ids.interview === id) await selectSession(id);
     notice("正在评估本题；需要更正时可再次提交回答。");
-    await run;
+    await runRequest("interview", id, `/interview/sessions/${id}/answers/run`, { version: claimed.version });
   } catch (error) {
     if (error.name !== "AbortError") errorMessage = error.message;
   } finally {
-    if (seq === state.interviewSeq && state.kind === "interview" && state.ids.interview === id) {
+    if (seq === nicoState.interviewSeq && nicoState.kind === "interview" && nicoState.ids.interview === id) {
       await selectSession(id);
       if (errorMessage) notice(errorMessage);
     }
@@ -305,34 +303,36 @@ $("answer-form").onsubmit = async (event) => {
 };
 async function pauseInterview() {
   try {
-    await api(`/interview/sessions/${state.ids.interview}/pause`, { method: "POST" });
-    if (state.pending.interview?.id === state.ids.interview) state.pending.interview.controller.abort();
-    await selectSession(state.ids.interview);
+    await api(`/interview/sessions/${nicoState.ids.interview}/pause`, { method: "POST" });
+    if (nicoState.pending.interview?.id === nicoState.ids.interview) nicoState.pending.interview.controller.abort();
+    await selectSession(nicoState.ids.interview);
   }
   catch (error) { notice(error.message); }
 }
 $("pause-button").onclick = pauseInterview;
 $("pause-running").onclick = pauseInterview;
 $("skip-question").onclick = () => action("interview", async () => {
-  const id = state.ids.interview;
-  const question_number = state.interviewQuestion;
+  const id = nicoState.ids.interview;
+  const question_number = nicoState.interviewQuestion;
   try {
-    const run = runRequest("interview", id, `/interview/sessions/${id}/skip`, { question_number });
     await selectSession(id);
-    await run;
-  } finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
+    await runRequest("interview", id, `/interview/sessions/${id}/skip`, { question_number });
+  } finally { if (nicoState.kind === "interview" && nicoState.ids.interview === id) await selectSession(id); }
 });
 $("cancel-interview").onclick = async () => {
-  const id = state.ids.interview;
+  const id = nicoState.ids.interview;
   if (!id || !window.confirm("结束本轮面试？已保存的回答和反馈会保留。")) return;
   try {
     await api(`/interview/sessions/${id}/cancel`, { method: "POST" });
-    if (state.pending.interview?.id === id) state.pending.interview.controller.abort();
+    if (nicoState.pending.interview?.id === id) nicoState.pending.interview.controller.abort();
     await selectSession(id);
   } catch (error) { notice(error.message); }
 };
 $("resume-button").onclick = () => action("interview", async () => {
-  const id = state.ids.interview;
-  try { await runRequest("interview", id, `/interview/sessions/${id}/resume`); }
-  finally { if (state.kind === "interview" && state.ids.interview === id) await selectSession(id); }
+  const id = nicoState.ids.interview;
+  try {
+    await selectSession(id);
+    await runRequest("interview", id, `/interview/sessions/${id}/resume`);
+  }
+  finally { if (nicoState.kind === "interview" && nicoState.ids.interview === id) await selectSession(id); }
 });

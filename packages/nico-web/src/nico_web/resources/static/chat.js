@@ -1,7 +1,11 @@
 async function loadChatResources() {
-  const sequence = state.selectionSeq;
-  const [materials, sessions] = await Promise.all([api("/materials"), api("/interview/sessions")]);
-  if (sequence !== state.selectionSeq || state.kind !== "chat") return;
+  const sequence = nicoState.selectionSeq;
+  const [materials, claims, sessions] = await Promise.all([
+    api("/materials"),
+    api("/claims"),
+    api("/interview/sessions"),
+  ]);
+  if (sequence !== nicoState.selectionSeq || nicoState.kind !== "chat") return;
   const select = $("chat-resource");
   select.replaceChildren(new Option("选择要讨论的内容", ""));
   for (const material of materials) {
@@ -14,6 +18,30 @@ async function loadChatResources() {
     option.dataset.kind = "interview";
     select.append(option);
   }
+  const confirmedClaims = claims.filter((item) => item.status === "confirmed");
+  nicoState.careerResources = { claims, materials, sessions };
+  const inventory = document.querySelector(".career-inventory");
+  if (inventory) {
+    const feedbackCount = sessions.filter((item) => item.has_feedback).length;
+    inventory.textContent = materials.length || confirmedClaims.length || sessions.length
+      ? `${materials.length} 份材料 · ${confirmedClaims.length} 条经历 · ${sessions.length} 轮面试 · ${feedbackCount} 份反馈`
+      : "还没有准备记录，从岗位定焦开始";
+  }
+  const completed = [
+    materials.some((item) => item.kind === "job_description"),
+    confirmedClaims.length > 0,
+    sessions.length > 0,
+    sessions.some((item) => item.has_feedback),
+  ];
+  const currentStep = completed.findIndex((done) => !done);
+  document.querySelectorAll(".career-step").forEach((step, index) => {
+    const state = completed[index] ? "complete" : index === currentStep ? "current" : "todo";
+    step.dataset.state = state;
+    const label = step.getAttribute("aria-label")?.replace(/，已完成$|，建议下一步$/, "") || "";
+    step.setAttribute("aria-label", state === "complete" ? `${label}，已完成` : state === "current" ? `${label}，建议下一步` : label);
+    if (state === "current") step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
   $("chat-insert-resource").disabled = true;
 }
 function insertChatReference(id, kind) {
@@ -27,49 +55,122 @@ function insertChatReference(id, kind) {
 }
 function renderMessages(kind, messages) {
   const box = $(`${kind}-messages`);
+  const chainMount = document.getElementById("career-chain-mount");
   box.replaceChildren();
+  if (chainMount) {
+    chainMount.replaceChildren();
+    chainMount.hidden = true;
+  }
   if (!messages.length) {
     if (kind === "chat") {
       const empty = document.createElement("div");
-      empty.className = "chat-empty";
-      const mark = document.createElement("span");
-      mark.className = "welcome-mark";
-      mark.setAttribute("aria-hidden", "true");
+      empty.className = "chat-empty career-home";
+      const intro = document.createElement("section");
+      intro.className = "career-intro";
       const heading = document.createElement("h2");
-      heading.textContent = "你好，今天想从哪里开始？";
+      heading.textContent = "今天先推进哪一段求职证据？";
       const description = document.createElement("p");
-      description.textContent = "说说你的目标，我们一起把下一步理清楚。";
-      const starters = document.createElement("div");
-      starters.className = "chat-starters";
-      for (const [label, detail, prompt] of [
-        ["分析目标岗位", "看清岗位要求与准备重点", "帮我梳理目标岗位最看重的能力，以及我应该先准备什么。"],
-        ["打磨项目经历", "把行动、思路和结果讲清楚", "我想把一段项目经历讲清楚。请先问我做了什么、为什么做、结果如何。"],
-        ["规划面试准备", "整理一个可执行的练习顺序", "根据我的目标岗位，帮我列一个可执行的面试准备顺序。"],
-      ]) {
+      description.textContent = "告诉我目标岗位，或从证据链选择起点。";
+      const jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "career-jump";
+      jump.textContent = "直接开始";
+      jump.onclick = () => {
+        $("chat-text").scrollIntoView({ block: "center", behavior: "smooth" });
+        $("chat-text").focus();
+      };
+      intro.append(heading, description, jump);
+      empty.append(intro);
+      box.append(empty);
+
+      const path = document.createElement("section");
+      path.className = "career-path";
+      path.setAttribute("aria-labelledby", "career-path-title");
+      const pathHead = document.createElement("div");
+      pathHead.className = "career-path-head";
+      const pathTitle = document.createElement("h3");
+      pathTitle.id = "career-path-title";
+      pathTitle.textContent = "求职证据链";
+      const inventory = document.createElement("p");
+      inventory.className = "career-inventory";
+      inventory.textContent = "读取准备记录…";
+      pathHead.append(pathTitle, inventory);
+      const steps = document.createElement("div");
+      steps.className = "career-steps";
+      const definitions = [
+        {
+          number: "01",
+          title: "定焦岗位",
+          detail: "JD 与能力要求",
+          prompt: "帮我分析一个目标岗位。请先问我岗位名称和职位描述，再把要求整理成需要证明的能力清单。",
+        },
+        {
+          number: "02",
+          title: "梳理经历",
+          detail: "事实、行动与结果",
+          prompt: "帮我把一段真实项目经历整理成可核实的面试回答。请先逐项问我背景、行动、结果和证据。",
+        },
+        {
+          number: "03",
+          title: "模拟面试",
+          detail: "逐题追问与反馈",
+          interview: true,
+        },
+        {
+          number: "04",
+          title: "回到复盘",
+          detail: "定位缺口再练习",
+          review: true,
+        },
+      ];
+      for (const definition of definitions) {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "chat-starter";
+        button.className = "career-step";
+        button.setAttribute("aria-label", `${definition.title}：${definition.detail}`);
+        const number = document.createElement("span");
+        number.className = "career-step-number";
+        number.setAttribute("aria-hidden", "true");
+        number.textContent = definition.number;
+        const copy = document.createElement("span");
+        copy.className = "career-step-copy";
         const title = document.createElement("strong");
-        title.textContent = label;
-        const hint = document.createElement("small");
-        hint.textContent = detail;
-        button.append(title, hint);
-        button.onclick = () => { $("chat-text").value = prompt; $("chat-text").focus(); };
-        starters.append(button);
+        title.textContent = definition.title;
+        const detail = document.createElement("small");
+        detail.textContent = definition.detail;
+        copy.append(title, detail);
+        button.append(number, copy);
+        if (definition.prompt) {
+          button.onclick = () => {
+            $("chat-text").value = definition.prompt;
+            $("chat-text").focus();
+          };
+        } else if (definition.interview) {
+          button.onclick = async () => {
+            await switchKind("interview");
+            $("interview-goal").focus();
+          };
+        } else {
+          button.onclick = async () => {
+            await switchKind("interview");
+            const feedback = nicoState.careerResources.sessions.find((item) => item.has_feedback);
+            if (feedback) await selectSession(feedback.id);
+            else {
+              notice("完成一轮模拟面试后，就可以在这里复盘反馈。");
+              $("interview-goal").focus();
+            }
+          };
+        }
+        steps.append(button);
       }
-      const shortcuts = document.createElement("div");
-      shortcuts.className = "chat-shortcuts";
-      const interview = document.createElement("button");
-      interview.type = "button";
-      interview.textContent = "开始模拟面试";
-      interview.onclick = () => switchKind("interview");
-      const reference = document.createElement("button");
-      reference.type = "button";
-      reference.textContent = "引用已有材料";
-      reference.onclick = () => { $("chat-context").open = true; $("chat-resource").focus(); };
-      shortcuts.append(interview, reference);
-      empty.append(mark, heading, description, starters, shortcuts);
-      box.append(empty);
+      const privacy = document.createElement("p");
+      privacy.className = "career-privacy";
+      privacy.textContent = "材料只在你明确引用后进入本轮对话。";
+      path.append(pathHead, steps, privacy);
+      if (chainMount) {
+        chainMount.append(path);
+        chainMount.hidden = false;
+      }
     } else {
       const empty = document.createElement("p");
       empty.className = "empty";
@@ -101,7 +202,7 @@ function renderMessages(kind, messages) {
     }
     box.append(item);
   }
-  box.scrollTop = box.scrollHeight;
+  box.scrollTop = messages.length ? box.scrollHeight : 0;
 }
 
 function renderRunHistory(kind, events, hasSession) {
@@ -152,18 +253,17 @@ function renderRunHistory(kind, events, hasSession) {
 }
 
 async function performChatRun(id, path, body) {
-  if (state.pending.chat?.id === id) state.pending.chat.controller.abort();
-  const seq = ++state.chatSeq;
+  if (nicoState.pending.chat?.id === id) nicoState.pending.chat.controller.abort();
+  const seq = ++nicoState.chatSeq;
   let errorMessage = "";
   try {
-    const run = runRequest("chat", id, path, body);
-    if (state.kind === "chat" && state.ids.chat === id) await selectSession(id);
+    if (nicoState.kind === "chat" && nicoState.ids.chat === id) await selectSession(id);
     notice("正在生成回复，可以继续发送补充消息。");
-    await run;
+    await runRequest("chat", id, path, body);
   } catch (error) {
     if (error.name !== "AbortError") errorMessage = error.message;
   } finally {
-    if (seq === state.chatSeq && state.kind === "chat" && state.ids.chat === id) {
+    if (seq === nicoState.chatSeq && nicoState.kind === "chat" && nicoState.ids.chat === id) {
       await selectSession(id);
       if (errorMessage) notice(errorMessage);
       if ($("platform-settings").open) await loadMemoryCandidateSettings();
@@ -172,15 +272,15 @@ async function performChatRun(id, path, body) {
 }
 
 $("chat-retry").onclick = async () => {
-  const id = state.ids.chat;
+  const id = nicoState.ids.chat;
   if (!id) return;
   $("chat-retry").disabled = true;
   try { await performChatRun(id, `/chat/sessions/${id}/retry`); }
-  finally { $("chat-retry").disabled = !state.modelReady; }
+  finally { $("chat-retry").disabled = !nicoState.modelReady; }
 };
 $("chat-memory-form").onsubmit = (event) => {
   event.preventDefault();
-  const id = state.ids.chat;
+  const id = nicoState.ids.chat;
   if (!id) return;
   action("chat", async () => {
     await api(`/chat/sessions/${id}/memory`, {
@@ -191,16 +291,16 @@ $("chat-memory-form").onsubmit = (event) => {
 };
 $("chat-form").onsubmit = async (event) => {
   event.preventDefault();
-  if (!state.modelReady) return;
+  if (!nicoState.modelReady) return;
   const text = $("chat-text").value.trim();
-  if (!text || state.busy.chat) return;
-  let id = state.ids.chat;
+  if (!text || nicoState.busy.chat) return;
+  let id = nicoState.ids.chat;
   setBusy("chat", true);
   let claimed;
   try {
     if (!id) {
       id = (await api("/chat/sessions", { method: "POST", body: JSON.stringify({ model_id: $("chat-model").value }) })).id;
-      state.ids.chat = id;
+      nicoState.ids.chat = id;
       localStorage.setItem(sessionKey("chat"), id);
     }
     claimed = await api(`/chat/sessions/${id}/messages/claim`, { method: "POST", body: JSON.stringify({ text }) });
@@ -210,11 +310,11 @@ $("chat-form").onsubmit = async (event) => {
   await performChatRun(id, `/chat/sessions/${id}/messages/run`, { version: claimed.version });
 };
 $("chat-interrupt").onclick = async () => {
-  if (!state.ids.chat) return;
+  if (!nicoState.ids.chat) return;
   try {
-    await api(`/chat/sessions/${state.ids.chat}/interrupt`, { method: "POST" });
-    if (state.pending.chat?.id === state.ids.chat) state.pending.chat.controller.abort();
-    await selectSession(state.ids.chat);
+    await api(`/chat/sessions/${nicoState.ids.chat}/interrupt`, { method: "POST" });
+    if (nicoState.pending.chat?.id === nicoState.ids.chat) nicoState.pending.chat.controller.abort();
+    await selectSession(nicoState.ids.chat);
   }
   catch (error) { notice(error.message); }
 };

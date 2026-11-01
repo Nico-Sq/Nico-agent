@@ -2,7 +2,7 @@ function settingsNotice(message = "") { $("settings-notice").textContent = messa
 function renderModelSettings() {
   const box = $("settings-model-list");
   box.replaceChildren();
-  for (const model of state.models) {
+  for (const model of nicoState.models) {
     const row = document.createElement("div");
     row.className = "settings-row";
     const content = document.createElement("div");
@@ -19,16 +19,16 @@ function renderModelSettings() {
 async function loadToolSettings() {
   const box = $("settings-tool-list");
   box.replaceChildren();
-  const id = state.ids[state.kind];
+  const id = nicoState.ids[nicoState.kind];
   if (!id) {
     box.textContent = "先创建或打开一个会话，再授权外部工具。";
     $("save-tool-grants").disabled = true;
     return;
   }
-  const kind = state.kind;
+  const kind = nicoState.kind;
   try {
     const [tools, grants] = await Promise.all([api("/tools"), api(`/${kind}/sessions/${id}/tools`)]);
-    if (state.ids[state.kind] !== id || state.kind !== kind) return;
+    if (nicoState.ids[nicoState.kind] !== id || nicoState.kind !== kind) return;
     if (!tools.length) box.textContent = "当前没有配置外部工具。";
     for (const [index, tool] of tools.entries()) {
       const readOnly = tool.read_only === true;
@@ -69,8 +69,8 @@ function setCandidateBusy(form, busy) {
 async function loadMemoryCandidateSettings() {
   const box = $("settings-memory-candidate-list");
   const sequence = ++memoryCandidateLoadSeq;
-  const kind = state.kind;
-  const chatId = state.ids.chat;
+  const kind = nicoState.kind;
+  const chatId = nicoState.ids.chat;
   box.replaceChildren();
   if (kind !== "chat") {
     box.textContent = "切换到“新对话”后查看该会话的待确认记忆。";
@@ -86,7 +86,7 @@ async function loadMemoryCandidateSettings() {
   box.append(loading);
   try {
     const candidates = await api(`/memory-candidates?session_id=${encodeURIComponent(chatId)}&status=pending`);
-    if (sequence !== memoryCandidateLoadSeq || state.kind !== kind || state.ids.chat !== chatId) return;
+    if (sequence !== memoryCandidateLoadSeq || nicoState.kind !== kind || nicoState.ids.chat !== chatId) return;
     box.replaceChildren();
     if (!candidates.length) {
       const empty = document.createElement("p");
@@ -198,7 +198,7 @@ async function loadMemoryCandidateSettings() {
       box.append(form);
     }
   } catch (error) {
-    if (sequence !== memoryCandidateLoadSeq || state.kind !== kind || state.ids.chat !== chatId) return;
+    if (sequence !== memoryCandidateLoadSeq || nicoState.kind !== kind || nicoState.ids.chat !== chatId) return;
     box.replaceChildren();
     const failed = document.createElement("p");
     failed.className = "empty";
@@ -245,12 +245,12 @@ $("open-settings").onclick = async () => {
 };
 $("close-settings").onclick = () => $("platform-settings").close();
 $("save-tool-grants").onclick = async () => {
-  const id = state.ids[state.kind];
+  const id = nicoState.ids[nicoState.kind];
   if (!id) return;
   const names = [...$("settings-tool-list").querySelectorAll("input:checked")].map((item) => item.value);
   $("save-tool-grants").disabled = true;
   try {
-    await api(`/${state.kind}/sessions/${id}/tools`, { method: "PUT", body: JSON.stringify({ names }) });
+    await api(`/${nicoState.kind}/sessions/${id}/tools`, { method: "PUT", body: JSON.stringify({ names }) });
     settingsNotice("工具授权已保存，将在下次运行时生效。");
   } catch (error) { settingsNotice(error.message); }
   finally { $("save-tool-grants").disabled = false; }

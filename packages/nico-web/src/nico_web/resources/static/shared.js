@@ -1,26 +1,26 @@
-const state = { kind: "chat", username: null, modelReady: true, models: [], ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, selectionSeq: 0, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null };
+const nicoState = { kind: "chat", username: null, modelReady: true, models: [], ids: { chat: null, interview: null }, busy: { chat: false, interview: false }, pending: { chat: null, interview: null }, sessionLists: { chat: [], interview: [] }, sessionQueries: { chat: "", interview: "" }, sessionSearchSeq: { chat: 0, interview: 0 }, selectionSeq: 0, chatSeq: 0, interviewSeq: 0, interviewQuestion: 0, editing: null, careerResources: { materials: [], sessions: [] } };
 const $ = (id) => document.getElementById(id);
-const sessionKey = (kind) => `${kind}Session${state.username ? `:${state.username}` : ""}`;
+const sessionKey = (kind) => `${kind}Session${nicoState.username ? `:${nicoState.username}` : ""}`;
 let sessionSearchTimer;
 
 function showAuth() {
   clearTimeout(sessionSearchTimer);
-  state.selectionSeq++;
+  nicoState.selectionSeq++;
   $("shell").hidden = true;
   $("auth-panel").hidden = false;
-  for (const kind of ["chat", "interview"]) state.pending[kind]?.controller.abort();
-  state.pending = { chat: null, interview: null };
-  state.chatSeq++;
-  state.interviewSeq++;
+  for (const kind of ["chat", "interview"]) nicoState.pending[kind]?.controller.abort();
+  nicoState.pending = { chat: null, interview: null };
+  nicoState.chatSeq++;
+  nicoState.interviewSeq++;
   setBusy("chat", false);
   setBusy("interview", false);
-  state.ids = { chat: null, interview: null };
-  state.sessionLists = { chat: [], interview: [] };
-  state.sessionQueries = { chat: "", interview: "" };
-  state.sessionSearchSeq.chat++;
-  state.sessionSearchSeq.interview++;
-  state.username = null;
-  state.models = [];
+  nicoState.ids = { chat: null, interview: null };
+  nicoState.sessionLists = { chat: [], interview: [] };
+  nicoState.sessionQueries = { chat: "", interview: "" };
+  nicoState.sessionSearchSeq.chat++;
+  nicoState.sessionSearchSeq.interview++;
+  nicoState.username = null;
+  nicoState.models = [];
   for (const id of ["chat-form", "answer-form", "material-form", "claim-form", "interview-setup", "chat-memory-form"]) $(id).reset();
   if ($("resource-editor").open) $("resource-editor").close();
   if ($("platform-settings").open) $("platform-settings").close();
@@ -31,7 +31,7 @@ function showAuth() {
   renderSelectedResources(null);
   $("session-search").value = "";
   $("session-count").textContent = "";
-  $("workspace-title").textContent = "新对话";
+  $("workspace-title").textContent = "求职工作台";
   $("chat-notes").hidden = true;
   $("chat-notes").open = false;
   $("chat-export").hidden = true;
@@ -52,8 +52,8 @@ function showAuth() {
 }
 
 function showApp(username = null) {
-  state.username = username;
-  state.ids = { chat: localStorage.getItem(sessionKey("chat")), interview: localStorage.getItem(sessionKey("interview")) };
+  nicoState.username = username;
+  nicoState.ids = { chat: localStorage.getItem(sessionKey("chat")), interview: localStorage.getItem(sessionKey("interview")) };
   $("auth-panel").hidden = true;
   $("shell").hidden = false;
 }
@@ -73,22 +73,22 @@ async function api(path, options = {}) {
 
 function notice(message = "") { $("notice").textContent = message; }
 function updateModelReadiness() {
-  const selected = $(state.kind === "chat" ? "chat-model" : "interview-model").value;
-  const model = state.models.find((item) => item.id === selected);
-  state.modelReady = Boolean(model && !model.config_error);
+  const selected = $(nicoState.kind === "chat" ? "chat-model" : "interview-model").value;
+  const model = nicoState.models.find((item) => item.id === selected);
+  nicoState.modelReady = Boolean(model && !model.config_error);
   $("provider").textContent = model ? model.provider === "demo" ? "演示模式" : `模型：${model.model}` : "模型不可用";
   $("provider-data-notice").hidden = !model || model.provider === "demo";
-  $("model-config-notice").hidden = state.modelReady;
-  $("model-config-notice").textContent = state.modelReady ? "" : model?.config_error || "所选模型已移除，请创建新会话并选择可用模型。";
-  setBusy("chat", state.busy.chat);
-  setBusy("interview", state.busy.interview);
+  $("model-config-notice").hidden = nicoState.modelReady;
+  $("model-config-notice").textContent = nicoState.modelReady ? "" : model?.config_error || "所选模型已移除，请创建新会话并选择可用模型。";
+  setBusy("chat", nicoState.busy.chat);
+  setBusy("interview", nicoState.busy.interview);
 }
 async function loadModels() {
-  state.models = await api("/models");
+  nicoState.models = await api("/models");
   for (const id of ["chat-model", "interview-model"]) {
     const select = $(id);
     select.replaceChildren();
-    for (const model of state.models) {
+    for (const model of nicoState.models) {
       const option = new Option(`${model.id} · ${model.provider === "demo" ? "演示模式" : model.model}${model.config_error ? "（未就绪）" : ""}`, model.id);
       select.append(option);
     }
@@ -100,32 +100,32 @@ function setHistoryOpen(open) {
   $("sidebar-history").classList.toggle("open", open);
   document.querySelector(".sidebar").classList.toggle("mobile-open", open);
   $("history-toggle").setAttribute("aria-expanded", String(open));
-  $("history-toggle").textContent = `${open ? "收起" : "展开"}${state.kind === "chat" ? "历史对话" : "历史面试"}`;
+  $("history-toggle").textContent = `${open ? "收起" : "展开"}${nicoState.kind === "chat" ? "历史对话" : "历史面试"}`;
 }
 async function copyId(id) {
   try { await navigator.clipboard.writeText(id); notice("ID 已复制"); }
   catch { notice(`ID：${id}`); }
 }
 function setBusy(kind, value) {
-  state.busy[kind] = value;
+  nicoState.busy[kind] = value;
   document.querySelectorAll(`#${kind === "chat" ? "chat-panel" : "interview-panel"} button[type=submit]`).forEach((button) => {
-    button.disabled = value || (!state.modelReady && Boolean(button.closest("#chat-form, #interview-setup, #answer-form")));
+    button.disabled = value || (!nicoState.modelReady && Boolean(button.closest("#chat-form, #interview-setup, #answer-form")));
   });
 }
 async function loadSessions() {
-  const kind = state.kind;
-  const query = state.sessionQueries[kind];
-  const sequence = ++state.sessionSearchSeq[kind];
+  const kind = nicoState.kind;
+  const query = nicoState.sessionQueries[kind];
+  const sequence = ++nicoState.sessionSearchSeq[kind];
   const sessions = await api(`/${kind}/sessions${query ? `?q=${encodeURIComponent(query)}` : ""}`);
-  if (sequence !== state.sessionSearchSeq[kind] || query !== state.sessionQueries[kind]) return;
-  state.sessionLists[kind] = sessions;
-  if (state.kind === kind) renderSessionList();
+  if (sequence !== nicoState.sessionSearchSeq[kind] || query !== nicoState.sessionQueries[kind]) return;
+  nicoState.sessionLists[kind] = sessions;
+  if (nicoState.kind === kind) renderSessionList();
 }
 
 function renderSessionList() {
-  const kind = state.kind;
-  const sessions = state.sessionLists[kind];
-  const query = state.sessionQueries[kind];
+  const kind = nicoState.kind;
+  const sessions = nicoState.sessionLists[kind];
+  const query = nicoState.sessionQueries[kind];
   $("session-count").textContent = query ? `找到 ${sessions.length} 个会话` : `${sessions.length} 个会话`;
   const box = $("sessions");
   box.replaceChildren();
@@ -139,8 +139,8 @@ function renderSessionList() {
   for (const session of sessions) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = session.id === state.ids[kind] ? "selected" : "";
-    if (session.id === state.ids[kind]) button.setAttribute("aria-current", "true");
+    button.className = session.id === nicoState.ids[kind] ? "selected" : "";
+    if (session.id === nicoState.ids[kind]) button.setAttribute("aria-current", "true");
     button.textContent = session.title || (kind === "chat" ? `聊天 ${session.id.slice(0, 6)}` : session.goal);
     const detail = document.createElement("small");
     detail.textContent = kind === "chat" ? new Date(session.created_at).toLocaleString() : `${session.question_count} 题 · ${session.status}`;
@@ -157,9 +157,9 @@ function renderSessionList() {
 }
 
 async function selectSession(id) {
-  const kind = state.kind;
-  const sequence = ++state.selectionSeq;
-  state.ids[kind] = id;
+  const kind = nicoState.kind;
+  const sequence = ++nicoState.selectionSeq;
+  nicoState.ids[kind] = id;
   $("session-title-form").hidden = true;
   $("session-title-error").hidden = true;
   $("rename-session").hidden = !id;
@@ -167,12 +167,12 @@ async function selectSession(id) {
   if (id) localStorage.setItem(sessionKey(kind), id);
   else localStorage.removeItem(sessionKey(kind));
   const view = id ? await api(`/${kind}/sessions/${id}`) : null;
-  const current = () => sequence === state.selectionSeq && state.kind === kind && state.ids[kind] === id;
+  const current = () => sequence === nicoState.selectionSeq && nicoState.kind === kind && nicoState.ids[kind] === id;
   if (!current()) return;
-  $("workspace-title").textContent = view?.session.title || (kind === "chat" ? "新对话" : "AI 面试");
-  $("workspace-subtitle").textContent = kind === "chat" ? "聊聊岗位、经历或下一步准备" : "每次聚焦一题，保留完整练习记录";
+  $("workspace-title").textContent = view?.session.title || (kind === "chat" ? "求职工作台" : "AI 面试");
+  $("workspace-subtitle").textContent = kind === "chat" ? "岗位 → 经历 → 面试 → 复盘" : "每次聚焦一题，保留完整练习记录";
   const modelSelect = $(kind === "chat" ? "chat-model" : "interview-model");
-  if (view && !state.models.some((item) => item.id === view.session.model_id)) {
+  if (view && !nicoState.models.some((item) => item.id === view.session.model_id)) {
     modelSelect.append(new Option(`${view.session.model_id}（已移除）`, view.session.model_id));
   }
   modelSelect.value = view?.session.model_id || "default";
@@ -185,7 +185,7 @@ async function selectSession(id) {
     if (!view) $("chat-notes").open = false;
     $("chat-memory").value = view?.session.chat_memory || "";
     $("chat-retry").hidden = !view || view.session.status !== "active" || view.messages.at(-1)?.role !== "user";
-    $("chat-retry").disabled = !state.modelReady;
+    $("chat-retry").disabled = !nicoState.modelReady;
     $("chat-interrupt").hidden = !view || view.session.status !== "running";
   }
   renderMessages(kind, view?.messages || []);
@@ -205,10 +205,10 @@ async function selectSession(id) {
 
 async function switchKind(kind, fresh = false) {
   clearTimeout(sessionSearchTimer);
-  state.kind = kind;
-  const previousId = state.ids[kind];
+  nicoState.kind = kind;
+  const previousId = nicoState.ids[kind];
   const id = fresh ? null : previousId;
-  $("session-search").value = state.sessionQueries[kind];
+  $("session-search").value = nicoState.sessionQueries[kind];
   setHistoryOpen(false);
   $("history-heading").textContent = kind === "chat" ? "历史对话" : "历史面试";
   $("new-session").querySelector("span").textContent = kind === "chat" ? "新建对话" : "新建面试";
@@ -220,35 +220,118 @@ async function switchKind(kind, fresh = false) {
   $("interview-panel").hidden = kind !== "interview";
   try { await selectSession(id); }
   catch (error) {
-    if (!$("auth-panel").hidden || state.kind !== kind || state.ids[kind] !== id) return;
-    state.ids[kind] = null;
+    if (!$("auth-panel").hidden || nicoState.kind !== kind || nicoState.ids[kind] !== id) return;
+    nicoState.ids[kind] = null;
     await selectSession(null);
     notice(previousId && error.message === "会话不存在" ? "上次的会话已不存在，已打开新建界面。" : error.message);
   }
-  if (kind === "chat" && state.kind === kind && !$("shell").hidden) {
+  if (kind === "chat" && nicoState.kind === kind && !$("shell").hidden) {
     try { await loadChatResources(); }
     catch (error) { notice(error.message); }
   }
 }
 
 async function action(kind, work) {
-  if (state.busy[kind]) return;
+  if (nicoState.busy[kind]) return;
   setBusy(kind, true); notice();
-  try { await work(); } catch (error) { if (error.name !== "AbortError" && state.kind === kind) notice(error.message); } finally { setBusy(kind, false); }
+  try { await work(); } catch (error) { if (error.name !== "AbortError" && nicoState.kind === kind) notice(error.message); } finally { setBusy(kind, false); }
+}
+
+function beginStreamMessage(kind) {
+  const box = $(kind + "-messages");
+  box.querySelector(".chat-empty, .empty")?.remove();
+  const item = document.createElement("div");
+  item.className = "message assistant";
+  item.setAttribute("aria-live", "off");
+  const role = document.createElement("span");
+  role.className = "role";
+  role.textContent = kind === "chat" ? "聊天助手" : "面试官";
+  const status = document.createElement("span");
+  status.textContent = "正在生成回复…";
+  const content = document.createElement("span");
+  item.append(role, status, content);
+  box.append(item);
+  box.scrollTop = box.scrollHeight;
+  return { box, status, content };
+}
+
+async function readStream(response, bubble) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed = false;
+  const handle = (block) => {
+    const data = block.split("\n").filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart()).join("\n");
+    if (!data) return;
+    let event;
+    try { event = JSON.parse(data); }
+    catch { throw new Error("模型流返回了无效事件"); }
+    if (event.type === "text_delta" && typeof event.text === "string") {
+      bubble.status.hidden = true;
+      bubble.content.textContent += event.text;
+      bubble.box.scrollTop = bubble.box.scrollHeight;
+    } else if (event.type === "tool_start" && typeof event.name === "string") {
+      bubble.status.hidden = false;
+      bubble.status.textContent = "正在使用工具：" + event.name;
+      notice("正在使用工具：" + event.name);
+    } else if (event.type === "error") {
+      throw new Error(typeof event.detail === "string" ? event.detail : "模型运行失败，请稍后重试");
+    } else if (event.type === "done") {
+      completed = true;
+    }
+  };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        handle(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) handle(buffer);
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally { reader.releaseLock(); }
+  if (!completed) throw new Error("流式连接提前结束；请刷新会话查看运行状态。");
 }
 
 async function runRequest(kind, id, path, body) {
   const controller = new AbortController();
-  state.pending[kind] = { id, controller };
-  try { return await api(path, { method: "POST", body: JSON.stringify(body), signal: controller.signal }); }
-  finally { if (state.pending[kind]?.controller === controller) state.pending[kind] = null; }
+  nicoState.pending[kind] = { id, controller };
+  const bubble = beginStreamMessage(kind);
+  try {
+    const response = await fetch("/api" + path, {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal,
+    });
+    const contentType = response.headers.get("Content-Type") || "";
+    if (response.status === 401 && !path.startsWith("/auth/")) showAuth();
+    if (!response.ok || !contentType.toLowerCase().includes("text/event-stream")) {
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const detail = payload?.detail;
+        const message = typeof detail === "string" ? detail
+          : Array.isArray(detail) ? "输入不符合要求，请检查必填项、长度和格式。" : "请求失败 (" + response.status + ")";
+        throw new Error(message);
+      }
+      return payload;
+    }
+    await readStream(response, bubble);
+    return true;
+  }
+  finally { if (nicoState.pending[kind]?.controller === controller) nicoState.pending[kind] = null; }
 }
 
 $("tab-chat").onclick = () => switchKind("chat", true);
 $("tab-interview").onclick = () => switchKind("interview");
-$("copy-interview-id").onclick = () => { if (state.ids.interview) copyId(state.ids.interview); };
+$("copy-interview-id").onclick = () => { if (nicoState.ids.interview) copyId(nicoState.ids.interview); };
 $("discuss-report").onclick = async () => {
-  const id = state.ids.interview;
+  const id = nicoState.ids.interview;
   if (!id) return;
   await switchKind("chat");
   insertChatReference(id, "interview");
@@ -263,18 +346,22 @@ $("chat-insert-resource").onclick = () => {
 };
 $("new-session").onclick = async () => {
   await selectSession(null);
+  if (nicoState.kind === "chat") {
+    try { await loadChatResources(); }
+    catch (error) { notice(error.message); }
+  }
   setHistoryOpen(false);
-  (state.kind === "chat" ? $("chat-text") : $("interview-goal")).focus();
+  (nicoState.kind === "chat" ? $("chat-text") : $("interview-goal")).focus();
 };
 $("history-toggle").onclick = () => setHistoryOpen($("history-toggle").getAttribute("aria-expanded") !== "true");
 $("session-search").oninput = () => {
-  const kind = state.kind;
+  const kind = nicoState.kind;
   const query = $("session-search").value.trim();
-  state.sessionQueries[kind] = query;
+  nicoState.sessionQueries[kind] = query;
   $("session-count").textContent = "正在查找…";
   clearTimeout(sessionSearchTimer);
   sessionSearchTimer = setTimeout(() => loadSessions().catch((error) => {
-    if (state.kind === kind && state.sessionQueries[kind] === query) {
+    if (nicoState.kind === kind && nicoState.sessionQueries[kind] === query) {
       $("session-count").textContent = "查找失败，请重试。";
       $("sessions").replaceChildren();
       notice(error.message);
@@ -282,7 +369,7 @@ $("session-search").oninput = () => {
   }), 200);
 };
 $("rename-session").onclick = () => {
-  const session = state.sessionLists[state.kind].find((item) => item.id === state.ids[state.kind]);
+  const session = nicoState.sessionLists[nicoState.kind].find((item) => item.id === nicoState.ids[nicoState.kind]);
   if (!session) return;
   $("session-title").value = session.title;
   $("session-title-error").hidden = true;
@@ -292,8 +379,8 @@ $("rename-session").onclick = () => {
 $("cancel-session-title").onclick = () => { $("session-title-form").hidden = true; };
 $("session-title-form").onsubmit = async (event) => {
   event.preventDefault();
-  const kind = state.kind;
-  const id = state.ids[kind];
+  const kind = nicoState.kind;
+  const id = nicoState.ids[kind];
   if (!id) return;
   const title = $("session-title").value.trim();
   const submit = $("session-title-form").querySelector("button[type=submit]");
@@ -301,9 +388,9 @@ $("session-title-form").onsubmit = async (event) => {
   $("session-title-error").hidden = true;
   try {
     await api(`/${kind}/sessions/${id}/title`, { method: "PUT", body: JSON.stringify({ title }) });
-    if (state.kind === kind && state.ids[kind] === id) {
+    if (nicoState.kind === kind && nicoState.ids[kind] === id) {
       $("session-title-form").hidden = true;
-      $("workspace-title").textContent = title || (kind === "chat" ? "新对话" : "AI 面试");
+      $("workspace-title").textContent = title || (kind === "chat" ? "求职工作台" : "AI 面试");
       await loadSessions();
       notice(title ? "会话名称已保存。" : "已恢复默认会话名称。");
     }
@@ -313,13 +400,33 @@ $("session-title-form").onsubmit = async (event) => {
   } finally { submit.disabled = false; }
 };
 $("delete-session").onclick = async () => {
-  const kind = state.kind;
-  const id = state.ids[kind];
+  const kind = nicoState.kind;
+  const id = nicoState.ids[kind];
   if (!id || !window.confirm("删除当前会话及其记录？删除面试会同时删除由它创建的复练。")) return;
   try {
     await api(`/${kind}/sessions/${id}`, { method: "DELETE" });
-    if (state.pending[kind]?.id === id) state.pending[kind].controller.abort();
+    if (nicoState.pending[kind]?.id === id) nicoState.pending[kind].controller.abort();
     await selectSession(null);
     notice("会话已删除。");
   } catch (error) { notice(error.message); }
 };
+
+function applyTheme(theme) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const toggle = $("theme-toggle");
+  toggle.setAttribute("aria-label", dark ? "切换浅色主题" : "切换深色主题");
+  toggle.setAttribute("title", dark ? "切换浅色主题" : "切换深色主题");
+}
+
+const savedTheme = localStorage.getItem("nicoTheme");
+const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+applyTheme(savedTheme || (systemPrefersDark.matches ? "dark" : "light"));
+$("theme-toggle").onclick = () => {
+  const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  localStorage.setItem("nicoTheme", theme);
+  applyTheme(theme);
+};
+systemPrefersDark.addEventListener?.("change", (event) => {
+  if (!localStorage.getItem("nicoTheme")) applyTheme(event.matches ? "dark" : "light");
+});
