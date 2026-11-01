@@ -66,10 +66,40 @@
     ],
     "finding": "IF-10 的输出同时带有多余下一题和空 evidence。解析器现会丢弃终止轮次的多余问题；提示词进一步说明，即使没有项目事实也必须引用用户对不确定性的原话，引用不等于事实核验。"
   },
+  "after_evidence_rule_retest": {
+    "runtime_code_commit": "95615dc",
+    "prompt_text_revision": "df5da96",
+    "flow": "前端 SSE：start -> answers/claim -> answers/run",
+    "cases": [
+      {
+        "id": "IF-04",
+        "start_attempts": ["model_invalid_response", "success", "model_invalid_response", "success"],
+        "answer_completed": false,
+        "cleanup": true
+      },
+      {
+        "id": "IF-10",
+        "start_error": null,
+        "answer_error": null,
+        "report_status": "finished",
+        "feedback": "目前无法判断候选人在该项目中具体如何使用 Redis，建议候选人检查代码并提供具体实例，例如使用的 Redis 命令或配置。",
+        "evidence": ["我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。"],
+        "cleanup": true
+      },
+      {
+        "id": "IF-10",
+        "flow": "JSON API",
+        "answer_status": 502,
+        "answer_code": "model_invalid_output",
+        "cleanup": true
+      }
+    ],
+    "finding": "提示词 v7 下 IF-10 的真实 SSE 流程通过，JSON API 仍有输出校验失败；IF-04 的 SSE 首题响应存在间歇性无效响应。运行时现对无工具副作用的面试无效响应/输出尝试一次纠正重试，待启动新进程后验证。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "IF-04 的开始请求走 JSON API，回答请求走 SSE；IF-08 与 IF-10 的开始和回答均走 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏 JSON；证据规则提示词已加强，需重启后再次复测。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏 JSON；运行时单次纠正重试刚加入，待重启后复测。"
   ]
 }

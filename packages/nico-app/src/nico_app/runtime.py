@@ -1,6 +1,8 @@
 import asyncio
 import inspect
 import json
+import logging
+import time
 from collections.abc import Callable
 
 import jsonschema
@@ -38,6 +40,8 @@ from nico_adapters.mcp import MCPServers
 from nico_adapters.plugins import LocalPlugins, PluginTimeout
 from nico_application.tools import READ_ONLY_TOOLS, call as run_internal, record, schemas, tool_message
 from nico_storage import Store
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
@@ -202,8 +206,22 @@ class AgentRuntime:
                 trace=trace,
                 on_event=on_event,
             )
-            content = await self.core.run(request)
-            result = self._finalize_run_result(session, content, result_handler)
+            retried = False
+            try:
+                content = await self.core.run(request)
+            except ModelError as exc:
+                if (kind != "interview" or exc.code != "model_invalid_response"
+                        or trace.tool_names):
+                    raise
+                retried = True
+                content = await self._retry_interview_response(request, trace, exc)
+            try:
+                result = self._finalize_run_result(session, content, result_handler)
+            except ValueError as exc:
+                if kind != "interview" or retried or trace.tool_names:
+                    raise
+                content = await self._retry_interview_response(request, trace, exc)
+                result = self._finalize_run_result(session, content, result_handler)
             trace.outcome = "interrupted" if result.get("interrupted") else "completed"
             return result
         except RunSuperseded:
@@ -221,6 +239,31 @@ class AgentRuntime:
         finally:
             AgentCore.finish_session_run(session["id"], session["version"], task)
             self.store.event(session["id"], "model_run", trace.event())
+
+    async def _retry_interview_response(self, request: AgentRunRequest,
+                                        trace: AgentRunTrace,
+                                        error: Exception) -> str:
+        remaining = MAX_RUN_SECONDS - (time.perf_counter() - trace.started_at)
+        if remaining <= 0:
+            raise ModelError("run_timeout", "本次模型运行超时", 504) from error
+        request.messages.append({
+            "role": "user",
+            "content": (
+                f"[INTERVIEW_OUTPUT_RETRY]\n上一条面试结果未通过校验：{error}\n"
+                "请依据同一题目和同一回答重新生成完整 JSON。回答未包含具体项目事实时，"
+                "也要引用用户表达不确定或待核实的原句；引用不代表项目事实已验证。"
+                "达到题数上限时 finished 必须为 true，question 必须为空。不要添加 JSON 以外的文字。"
+            ),
+        })
+        trace.error_code = None
+        trace.outcome = "running"
+        logger.warning("Retrying interview model response once: code=%s",
+                       classify_run_error(error))
+        try:
+            async with asyncio.timeout(remaining):
+                return await self.core.run(request)
+        except TimeoutError as exc:
+            raise ModelError("run_timeout", "本次模型运行超时", 504) from exc
 
     def _finalize_run_result(self, session: dict, raw: str,
                              result_handler: Callable[[dict, str], dict] | None) -> dict:

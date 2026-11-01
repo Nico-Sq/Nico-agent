@@ -361,7 +361,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("演示模式已收到：", result["message"])
         self.assertEqual(self.store.get(chat["id"], "chat")["status"], "active")
 
-    def test_interview_rejects_next_question_after_last_answer(self):
+    def test_interview_discards_next_question_after_last_answer(self):
         class InvalidFinalProvider:
             async def complete(self, messages, tools):
                 return {"content": json.dumps({
@@ -373,11 +373,53 @@ class CoreTests(unittest.TestCase):
         first = self.store.claim_run(interview["id"], "interview", "new")
         run_demo(self.runtime.run(first))
         answer = self.store.claim_run(interview["id"], "interview", "awaiting_answer", "原始回答")
-        with self.assertRaisesRegex(ValueError, "结束时不能生成下一题"):
-            run_demo(AgentRuntime(self.store, InvalidFinalProvider()).run(answer))
+        result = run_demo(AgentRuntime(self.store, InvalidFinalProvider()).run(answer))
         report = self.store.interview_report(interview["id"])
+        self.assertEqual(result["session"]["status"], "finished")
+        self.assertEqual(report["status"], "finished")
         self.assertEqual(report["items"][0]["answer"], "原始回答")
-        self.assertIsNone(report["items"][0]["feedback"])
+        self.assertEqual(report["items"][0]["feedback"], "回答有依据")
+
+    def test_interview_retries_invalid_output_once_without_tools(self):
+        answer_text = "我用过 Redis，但需要查代码确认具体用途。"
+        valid = json.dumps({
+            "feedback": "当前无法确认具体用途，请查阅代码后补充实例。",
+            "question": "", "finished": True, "evidence": [answer_text],
+            "summary": "本轮已完成。",
+        }, ensure_ascii=False)
+        invalid = json.dumps({
+            "feedback": "当前无法确认具体用途。", "question": "下一题？",
+            "finished": True, "evidence": [], "summary": "本轮已完成。",
+        }, ensure_ascii=False)
+
+        for first_failure in ("invalid_output", "invalid_response"):
+            with self.subTest(first_failure=first_failure):
+                class RepairingProvider:
+                    def __init__(self):
+                        self.calls = 0
+                        self.messages = []
+
+                    async def complete(self, messages, tools):
+                        self.calls += 1
+                        self.messages.append(list(messages))
+                        if self.calls == 1 and first_failure == "invalid_response":
+                            raise ModelError("model_invalid_response", "模型服务返回了无效响应")
+                        return {"content": invalid if self.calls == 1 else valid}
+
+                interview = self.store.create("interview", "后端工程师", max_questions=1)
+                first = self.store.claim_run(interview["id"], "interview", "new")
+                run_demo(self.runtime.run(first))
+                answer = self.store.claim_run(
+                    interview["id"], "interview", "awaiting_answer", answer_text,
+                )
+                provider = RepairingProvider()
+                result = run_demo(AgentRuntime(self.store, provider).run(answer))
+                report = self.store.interview_report(interview["id"])
+
+                self.assertEqual(provider.calls, 2)
+                self.assertIn("[INTERVIEW_OUTPUT_RETRY]", provider.messages[1][-1]["content"])
+                self.assertEqual(result["session"]["status"], "finished")
+                self.assertEqual(report["items"][0]["evidence"], [answer_text])
 
     def test_chat_memory_survives_context_window(self):
         chat = self.store.create("chat")
