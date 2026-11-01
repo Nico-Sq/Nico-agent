@@ -2,7 +2,21 @@
 
 from .channels import ChannelResult, TextChannel, TextMessage
 from .errors import ChannelAccessError, ChannelDeliveryError, ModelError
-from .events import MAX_RUN_TOKENS, USAGE_KEYS, RunEvent, Usage, run_event
+from .events import (
+    MAX_RUN_TOKENS,
+    USAGE_KEYS,
+    RunCompletedEvent,
+    RunErrorEvent,
+    RunEvent,
+    RunEventSink,
+    RunStartedEvent,
+    RunStreamEvent,
+    RunUpdateEvent,
+    TextDeltaEvent,
+    ToolStartEvent,
+    Usage,
+    run_event,
+)
 from .messages import AgentMessage, MessageRole, ToolCall, ToolFunctionCall
 from .models import ModelAdapter, ModelReply, UsageReport
 from .tools import ToolDefinition, ToolFunctionDefinition
@@ -18,9 +32,17 @@ __all__ = [
     "ModelError",
     "ModelReply",
     "RunEvent",
+    "RunEventSink",
+    "RunStreamEvent",
+    "RunUpdateEvent",
+    "RunStartedEvent",
+    "RunCompletedEvent",
+    "RunErrorEvent",
     "TextChannel",
     "TextMessage",
     "ToolCall",
+    "TextDeltaEvent",
+    "ToolStartEvent",
     "ToolDefinition",
     "ToolFunctionCall",
     "ToolFunctionDefinition",

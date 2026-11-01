@@ -23,11 +23,16 @@ class ContractServer(ThreadingHTTPServer):
 
 
 class ContractHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length))
         self.server.record(self.path, self.headers.items(), payload)
         if self.path == "/v1/chat/completions":
+            if payload.get("stream"):
+                self.openai_stream(payload)
+                return
             body = self.openai_response(payload)
         elif self.path == "/v1/messages":
             body = self.anthropic_response(payload)
@@ -40,6 +45,42 @@ class ContractHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    def openai_stream(self, payload):
+        if payload["messages"][-1]["role"] == "tool":
+            chunks = [
+                {"choices": [{"delta": {"content": "已查到"}, "finish_reason": None}]},
+                {"choices": [{"delta": {"content": "你的 Python 记忆"}, "finish_reason": None}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": {
+                    "prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9,
+                }},
+            ]
+        else:
+            chunks = [
+                {"choices": [{"delta": {"tool_calls": [{
+                    "index": 0, "id": "call-memory", "type": "function",
+                    "function": {"name": "search_memories", "arguments": "{\"query\":"},
+                }]}, "finish_reason": None}]},
+                {"choices": [{"delta": {"tool_calls": [{
+                    "index": 0, "function": {"arguments": "\"Python\"}"},
+                }]}, "finish_reason": None}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+                {"choices": [], "usage": {
+                    "prompt_tokens": 6, "completion_tokens": 3, "total_tokens": 9,
+                }},
+            ]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        for chunk in chunks + ["[DONE]"]:
+            data = chunk if isinstance(chunk, str) else json.dumps(chunk, ensure_ascii=False)
+            encoded = f"data: {data}\n\n".encode("utf-8")
+            self.wfile.write(f"{len(encoded):X}\r\n".encode("ascii") + encoded + b"\r\n")
+            self.wfile.flush()
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
 
     @staticmethod
     def openai_response(payload):
@@ -146,6 +187,41 @@ class ModelContractTests(unittest.TestCase):
         detail = json.loads(event["detail"])
         self.assertEqual(detail["usage"]["request_count"], 2)
         self.assertEqual(detail["usage_coverage"], "unavailable")
+
+    def test_openai_compatible_streaming_tool_cycle_over_http(self):
+        self.store.add_memory("熟悉 Python 和 SQL")
+        provider = Provider(mode="openai_compatible", model="contract-chat", base_url=self.base_url)
+        chat = self.store.create("chat", model_id="contract-chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "查找我的 Python 记忆")
+        updates = []
+
+        result = asyncio.run(AgentRuntime(self.store, provider).run(
+            running, on_event=updates.append,
+        ))
+
+        self.assertIn("Python 记忆", result["message"])
+        self.assertEqual([item["type"] for item in updates],
+                         ["tool_start", "text_delta", "text_delta"])
+        self.assertEqual(updates[0], {"type": "tool_start", "name": "search_memories"})
+        self.assertNotIn("Python", repr(updates[0]))
+        self.assertTrue(all(request["payload"]["stream"] for request in self.server.requests))
+        event = next(item for item in self.store.events(chat["id"], "chat")
+                     if item["kind"] == "model_run")
+        detail = json.loads(event["detail"])
+        self.assertEqual(detail["usage"]["request_count"], 2)
+        self.assertEqual(detail["usage_coverage"], "exact")
+
+    def test_openai_root_url_normalizes_and_sends_temperature(self):
+        root_url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        provider = Provider(
+            mode="openai", model="gpt-4o-mini", base_url=root_url,
+            api_key="fake-openai-key", temperature=0.7,
+        )
+        asyncio.run(provider.complete([{"role": "user", "content": "hello"}], []))
+        request = self.server.requests[-1]
+        self.assertEqual(request["path"], "/v1/chat/completions")
+        self.assertEqual(request["payload"]["temperature"], 0.7)
+        self.assertEqual(request["headers"]["Authorization"], "Bearer fake-openai-key")
 
 
 if __name__ == "__main__":

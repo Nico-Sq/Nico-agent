@@ -7,7 +7,7 @@ from pathlib import Path
 
 from nico_contracts.channels import ChannelResult, TextMessage
 from nico_contracts.errors import ChannelAccessError, ChannelDeliveryError, ModelError
-from nico_contracts.events import Usage
+from nico_contracts.events import RunStreamEvent, RunUpdateEvent, Usage
 from nico_contracts.models import ModelAdapter
 
 from career_agent.channels import (
@@ -18,7 +18,11 @@ from career_agent.channels import (
 )
 from career_agent.cli import build_parser, discover_mcp, run_chat
 from nico_cli import build_parser as PackageCLIBuildParser
-from career_agent.events import Usage as LegacyUsage
+from career_agent.events import (
+    RunStreamEvent as LegacyRunStreamEvent,
+    RunUpdateEvent as LegacyRunUpdateEvent,
+    Usage as LegacyUsage,
+)
 from career_agent.provider import ModelError as LegacyProviderModelError
 from career_agent.providers import ModelError as LegacyProvidersModelError
 from career_agent.providers.base import Adapter as LegacyAdapter
@@ -108,6 +112,8 @@ class CompatibilitySnapshotTests(unittest.TestCase):
 
     def test_legacy_imports_are_the_contract_objects(self):
         self.assertIs(LegacyUsage, Usage)
+        self.assertIs(LegacyRunUpdateEvent, RunUpdateEvent)
+        self.assertIs(LegacyRunStreamEvent, RunStreamEvent)
         self.assertIs(LegacyProviderModelError, ModelError)
         self.assertIs(LegacyProvidersModelError, ModelError)
         self.assertIs(LegacyErrorsModelError, ModelError)

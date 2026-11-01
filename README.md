@@ -23,6 +23,20 @@ python -m career_agent
 
 真实模型模式会将本次聊天消息、面试回答及获授权读取的材料发送到配置的模型服务。请先确认该服务符合你的数据使用要求。
 
+用户选定的 OpenAI 配置：
+
+官方状态核对：OpenAI 将 gpt-4o-mini 标记为 deprecated；DeepSeek 的更新记录列出 deepseek-flash 并说明旧 deepseek-chat 已停服。参见 [OpenAI 模型页](https://developers.openai.com/api/docs/models/gpt-4o-mini) 和 [DeepSeek 更新记录](https://api-docs.deepseek.com/updates/)。
+
+```powershell
+$env:MODEL_PROVIDER = "openai"
+$env:MODEL_API_BASE_URL = "https://api.openai.com"
+$env:OPENAI_API_KEY = "你的密钥"
+$env:MODEL_NAME = "gpt-4o-mini"
+$env:MODEL_TEMPERATURE = "0.7"
+```
+
+DeepSeek 可将 Provider 配为 `deepseek`、模型配为 `deepseek-flash`、Base URL 配为 `https://api.deepseek.com`，密钥放在 `DEEPSEEK_API_KEY`。上面的 Provider 与模型都可通过 `MODEL_CATALOG_PATH` 配置为新会话可选项。
+
 ```powershell
 $env:MODEL_PROVIDER = "openai_compatible"
 $env:MODEL_API_BASE_URL = "https://api.openai.com/v1"
@@ -33,18 +47,20 @@ python -m career_agent
 
 真实模型模式至少要设置 `MODEL_NAME`，`MODEL_API_BASE_URL` 要是有效的 HTTP(S) 地址；本机兼容服务若不要求认证，`MODEL_API_KEY` 可以不设置。配置不完整时页面会显示原因，并暂时禁用聊天发送和开始面试；修改环境变量后重启应用。兼容接口若报告输出截断或其他非正常结束，本轮不会采纳回复或执行其中的工具调用；已提交的聊天消息或面试回答会保留，调整请求后可重试。
 
-`MODEL_PROVIDER` 可选 `demo`、`openai`、`openai_compatible` 和 `anthropic`。`openai` 使用 OpenAI Chat Completions，`openai_compatible` 使用同协议的自定义接口，`anthropic` 使用原生 Anthropic Messages 协议；`openai` 和 `anthropic` 需设置 `MODEL_API_KEY`，本地兼容接口可不设。Anthropic 的默认地址为 `https://api.anthropic.com/v1`。各模式均使用工具调用；具体模型必须具备工具调用能力。单次输出上限默认 2048，可用 `MODEL_MAX_OUTPUT_TOKENS` 或模型目录中的 `max_output_tokens` 调整，范围 256–8192。每个协议一个适配器（`career_agent/providers/`），运行时只依赖统一的 `complete` 接口、共用的重试与错误码映射，新增厂商不需要改运行时。
+`MODEL_PROVIDER` 可选 `demo`、`openai`、`deepseek`、`openai_compatible` 和 `anthropic`。`openai`、`deepseek` 和 `openai_compatible` 使用 OpenAI Chat Completions；`anthropic` 使用 Anthropic Messages。OpenAI 默认读取 `OPENAI_API_KEY`（兼容旧配置 `MODEL_API_KEY`），DeepSeek 读取 `DEEPSEEK_API_KEY`，Anthropic 仍读取 `MODEL_API_KEY`；无需认证的本地兼容接口可不设密钥。OpenAI 根地址 `https://api.openai.com` 自动补为 `/v1`；DeepSeek 根地址为 `https://api.deepseek.com`。用户选定的 OpenAI 模型为 `gpt-4o-mini`、温度为 `0.7`；该模型当前已标记为 deprecated，后续实际可用性取决于服务端。DeepSeek 模型配置为 `deepseek-flash`。兼容协议支持工具调用和 SSE；Web 聊天与面试通过 `Accept: text/event-stream` 协商 SSE，其他请求保持 JSON。温度可由 `MODEL_TEMPERATURE` 或模型目录中的 `temperature` 设置，范围 0–2。各模式要求模型支持工具调用。单次输出上限默认 2048，可用 `MODEL_MAX_OUTPUT_TOKENS` 或模型目录中的 `max_output_tokens` 调整，范围 256–8192。运行时通过可选的 Provider `stream` 能力接收增量，Agent 循环保留统一工具流程。
 
 需要在新会话中选择不同模型时，设置 `MODEL_CATALOG_PATH` 指向本地 JSON 文件，例如：
 
 ```json
 [
   {"id":"local","provider":"openai_compatible","model":"your-local-model","base_url":"http://127.0.0.1:1234/v1","supports_tools":true},
+  {"id":"openai","provider":"openai","model":"gpt-4o-mini","base_url":"https://api.openai.com","api_key_env":"OPENAI_API_KEY","temperature":0.7,"supports_tools":true},
+  {"id":"deepseek","provider":"deepseek","model":"deepseek-flash","base_url":"https://api.deepseek.com","api_key_env":"DEEPSEEK_API_KEY","supports_tools":true},
   {"id":"claude","provider":"anthropic","model":"your-claude-model","api_key_env":"MODEL_CLAUDE_KEY","supports_tools":true,"max_output_tokens":4096}
 ]
 ```
 
-启动前设置 `MODEL_CLAUDE_KEY`。目录中的 `api_key_env` 是环境变量名，不写入密钥；`max_output_tokens` 可选，缺省沿用环境变量或 2048。缺少必需密钥、非法地址、输出上限越界或未声明工具能力会在启动时报错。`GET /api/models` 列出可选模型及其 `max_output_tokens`，创建聊天会话时提交 `{"model_id":"claude"}`，创建面试会话时在原请求体增加 `model_id`。不传时使用 `default`（上述环境变量配置）。会话创建后固定其模型，复练继承原面试模型。
+示例同时列出 OpenAI、DeepSeek 和 Anthropic；目录加载时会校验每个条目，因此请为每个外部模型设置其 `api_key_env` 对应变量，或删去暂不配置的条目。此例对应 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY` 和 `MODEL_CLAUDE_KEY`。`api_key_env` 只存环境变量名，不存密钥；`max_output_tokens` 可选，缺省沿用环境变量或 2048。缺少必需密钥、非法地址、输出上限越界或未声明工具能力会在启动时报错。`GET /api/models` 列出可选模型及其 `max_output_tokens`，创建聊天会话时提交 `{"model_id":"claude"}`，创建面试会话时在原请求体增加 `model_id`。不传时使用 `default`（上述环境变量配置）。会话创建后固定其模型，复练继承原面试模型。
 
 本地 MCP 服务器可通过 `MCP_SERVERS_PATH` 配置（当前支持 stdio 与 `2025-11-25` 握手协议）：
 

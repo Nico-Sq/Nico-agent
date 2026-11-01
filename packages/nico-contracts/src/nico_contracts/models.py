@@ -22,7 +22,7 @@ class ModelReply(TypedDict, total=False):
 
 class ModelAdapter(Protocol):
     def request(self, model: str, messages: list[AgentMessage], tools: list[ToolDefinition],
-                max_tokens: int) -> tuple[str, dict, dict]:
+                max_tokens: int, temperature: float | None = None) -> tuple[str, dict, dict]:
         """Translate one normalized request to a wire request."""
         ...
 

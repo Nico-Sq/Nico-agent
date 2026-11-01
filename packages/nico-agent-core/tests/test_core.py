@@ -54,6 +54,60 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual(request.trace.tool_names, ["lookup"])
         self.assertEqual(request.trace.usage.request_count, 2)
 
+    def test_stream_events_include_text_and_tool_names_without_arguments(self):
+        call = {"id": "call-1", "function": {"name": "lookup", "arguments": "{\"secret\":\"value\"}"}}
+        replies = [
+            {"content": None, "tool_calls": [call], "finish_reason": "tool_calls"},
+            {"content": "complete", "finish_reason": "stop"},
+        ]
+
+        class StreamingModel:
+            async def complete(self, messages, tools):
+                raise AssertionError("streaming path should be used")
+
+            async def stream(self, messages, tools, on_delta):
+                reply = replies.pop(0)
+                if reply["content"]:
+                    on_delta(reply["content"])
+                return reply
+
+        events = []
+        request = self.request(StreamingModel())
+        request.on_event = events.append
+        result = asyncio.run(AgentCore().run(request))
+        self.assertEqual(result, "complete")
+        self.assertEqual(events, [
+            {"type": "tool_start", "name": "lookup"},
+            {"type": "text_delta", "text": "complete"},
+        ])
+        self.assertNotIn("secret", repr(events))
+
+    def test_streaming_run_cancellation_is_recorded(self):
+        started = asyncio.Event()
+
+        class WaitingModel:
+            async def complete(self, messages, tools):
+                raise AssertionError("streaming path should be used")
+
+            async def stream(self, messages, tools, on_delta):
+                started.set()
+                await asyncio.Event().wait()
+
+        async def cancel_run():
+            request = self.request(WaitingModel())
+            request.on_event = lambda _: None
+            task = asyncio.create_task(AgentCore().run(request))
+            await started.wait()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return request.trace
+
+        trace = asyncio.run(cancel_run())
+        self.assertEqual((trace.outcome, trace.error_code), ("cancelled", "cancelled"))
+
     def test_truncated_reply_never_executes_tools(self):
         reply = FakeModel({"content": None, "tool_calls": [{
             "id": "call-1", "function": {"name": "lookup", "arguments": "{}"},

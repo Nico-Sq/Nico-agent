@@ -10,9 +10,9 @@ PROTOCOL_VERSION = "2026-10-21"
 
 
 def request(model: str, messages: list[AgentMessage], tools: list[ToolDefinition],
-            max_tokens: int) -> tuple[str, dict, dict]:
+            max_tokens: int, temperature: float | None = None) -> tuple[str, dict, dict]:
     return "messages", {"anthropic-version": PROTOCOL_VERSION}, request_payload(
-        model, messages, tools, max_tokens)
+        model, messages, tools, max_tokens, temperature)
 
 
 def parse(data: dict) -> ModelReply:
@@ -20,7 +20,8 @@ def parse(data: dict) -> ModelReply:
 
 
 def request_payload(model: str, messages: list[AgentMessage],
-                    tools: list[ToolDefinition], max_tokens: int) -> dict:
+                    tools: list[ToolDefinition], max_tokens: int,
+                    temperature: float | None = None) -> dict:
     system = "\n\n".join(message["content"] for message in messages if message["role"] == "system")
     converted = []
     for message in messages:
@@ -47,6 +48,8 @@ def request_payload(model: str, messages: list[AgentMessage],
         else:
             converted.append({"role": role, "content": message["content"]})
     payload = {"model": model, "max_tokens": max_tokens, "system": system, "messages": converted}
+    if temperature is not None:
+        payload["temperature"] = temperature
     if tools:
         payload["tools"] = [{"name": item["function"]["name"],
                              "description": item["function"]["description"],

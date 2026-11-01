@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -47,6 +48,40 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(response.headers["referrer-policy"], "no-referrer")
         page = self.client.get("/")
         self.assertNotIn("no-store", page.headers.get("cache-control", ""))
+
+    def test_chat_and_interview_support_sse_without_changing_persistence(self):
+        headers = {"Accept": "text/event-stream"}
+        chat = self.client.post("/api/chat/sessions").json()
+        response = self.client.post(
+            f"/api/chat/sessions/{chat['id']}/messages", json={"text": "你好"},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/event-stream", response.headers["content-type"])
+        chat_events = [json.loads(line[6:]) for line in response.text.splitlines()
+                       if line.startswith("data: ")]
+        self.assertEqual(chat_events[0]["type"], "started")
+        self.assertTrue(any(event["type"] == "text_delta" for event in chat_events))
+        self.assertEqual(chat_events[-1]["type"], "done")
+        self.assertNotIn("result", chat_events[-1])
+        messages = self.client.get(f"/api/chat/sessions/{chat['id']}").json()["messages"]
+        self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
+
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "max_questions": 1,
+        }).json()
+        response = self.client.post(
+            f"/api/interview/sessions/{interview['id']}/start", headers=headers,
+        )
+        interview_events = [json.loads(line[6:]) for line in response.text.splitlines()
+                            if line.startswith("data: ")]
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any(event["type"] == "text_delta" for event in interview_events))
+        self.assertEqual(interview_events[-1]["type"], "done")
+        self.assertEqual(
+            self.client.get(f"/api/interview/sessions/{interview['id']}").json()["session"]["status"],
+            "awaiting_answer",
+        )
 
     def test_web_ui_exposes_memory_candidate_review_and_read_only_tool_state(self):
         page = self.client.get("/").text

@@ -26,12 +26,22 @@ class ModelCatalog:
                     raise ValueError(f"模型 ID 重复：{model_id}")
                 if entry.get("supports_tools") is not True:
                     raise ValueError(f"模型 {model_id} 必须声明支持工具调用")
-                key_name = entry.get("api_key_env", "MODEL_API_KEY")
-                if not isinstance(key_name, str) or not key_name.startswith("MODEL_"):
-                    raise ValueError("api_key_env 必须是 MODEL_ 开头的环境变量名")
+                provider_mode = entry.get("provider")
+                default_key = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}.get(
+                    provider_mode, "MODEL_API_KEY",
+                )
+                key_name = entry.get("api_key_env", default_key)
+                if not isinstance(key_name, str) or not (
+                    key_name.startswith("MODEL_") or key_name in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY")
+                ):
+                    raise ValueError("api_key_env 必须是 MODEL_、OPENAI_API_KEY 或 DEEPSEEK_API_KEY 环境变量名")
+                api_key = os.getenv(key_name, "")
+                if not api_key and key_name == "OPENAI_API_KEY":
+                    api_key = os.getenv("MODEL_API_KEY", "")
                 provider = Provider(mode=entry.get("provider"), model=entry.get("model"),
-                                    base_url=entry.get("base_url"), api_key=os.getenv(key_name, ""),
-                                    max_output=entry.get("max_output_tokens"))
+                                    base_url=entry.get("base_url"), api_key=api_key,
+                                    max_output=entry.get("max_output_tokens"),
+                                    temperature=entry.get("temperature"))
                 error = provider.configuration_error()
                 if error:
                     raise ValueError(f"模型 {model_id} 配置无效：{error}")

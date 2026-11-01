@@ -737,13 +737,13 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 
 以下决策用于解除阶段 1 和后续依赖中的歧义。它们不表示条件任务已经实现。
 
-1. **首个真实模型端点**：先验收一个支持工具调用的本地 OpenAI 兼容 Chat Completions 端点，覆盖普通回复和至少一轮工具调用；Anthropic 为第二协议验证。未指定商业服务时，真实商业端点为条件任务，不阻塞阶段 1。若以后选择需要 Responses API 才能进行工具调用的 OpenAI GPT-6 系列模型，应新增独立 `openai_responses` 适配器，不把协议差异写入 Agent 循环或业务用例。
-2. **流式输出**：不是阶段 1 的完成门槛，也不阻塞后端闭环；阶段 4 必须保留可扩展的运行事件边界，真实端点和阶段 8 基准证明需要改善首段响应后再实现 Provider、SSE/WebSocket、取消和前端更新。流式最终只展示可公开的最终文本、工具进度和状态，不暴露隐藏推理。实现时参考 OpenAI 官方 Streaming API 文档。
-3. **第二文字渠道**：当前暂缓具体平台，Console 与 WebUI 继续作为渠道基线。若后续必须接入第一个外部文字平台，默认选择 Telegram Bot long polling，因为它不要求公网 webhook 且具备稳定消息 ID；若主要使用场景明确迁移到飞书或企业工作流，再单独改变该决策。任何平台都不得以接入为理由复制聊天业务用例。
-4. **写工具**：继续默认拒绝。首次开放时只允许一个明确白名单工具，并采用逐次确认；必须记录最终参数和结果，为有副作用的调用提供幂等键，远端结果不确定时不得自动重试。会话级宽泛写入授权不作为默认能力。
+1. **首个商业真实模型端点**：用户指定 OpenAI Chat Completions、`gpt-4o-mini`、`https://api.openai.com`、温度 `0.7`；密钥只从 `OPENAI_API_KEY` 读取，根 URL 归一化为 `/v1/chat/completions`。官方模型页将 `gpt-4o-mini` 标为 deprecated，仍尊重用户指定，不静默换模型。此前阶段 4 的本机 Ollama 工具调用验收保留为历史记录；商业端点须在凭据可用时另行验收普通回复和工具调用。用户另选 DeepSeek 作为第二个**模型 Provider**（不是消息渠道）：Chat Completions 根 URL `https://api.deepseek.com`、模型 `deepseek-flash`、密钥只从 `DEEPSEEK_API_KEY` 读取。OpenAI 与 DeepSeek 共用 OpenAI Chat Completions wire adapter；GPT-6 系列若需 Responses API，应新增独立 `openai_responses` 适配器，不把差异写入 Agent 循环或业务用例。
+2. **流式输出**：初期不作为阶段 1 门槛；用户现在明确选择开启 SSE。Chat Completions 请求使用 `stream=true`，Web 聊天和面试仅在 `Accept: text/event-stream` 时返回 SSE，现有 JSON API 与 CLI 保持兼容。只发送可公开文本增量、工具名称进度、完成或错误状态，不发送工具参数、隐藏推理或敏感上下文；仅完整成功的最终结果进入现有持久化路径。浏览器断开时取消当前运行，不自动重试。
+3. **第二文字渠道**：当前暂缓具体消息平台，Console 与 WebUI 继续作为渠道基线。DeepSeek 是模型 Provider，不构成第二消息渠道。若之后必须接入首个外部文字平台，默认选择 Telegram Bot long polling，因为它不要求公网 webhook 且具备稳定消息 ID；若主要场景明确迁移到飞书或企业工作流，再单独改变该决策。任何平台都不得复制聊天业务用例。
+4. **写工具**：用户列出了写文件、删文件、改数据库、发邮件/发消息、执行 shell、提交代码和创建工单类别，并要求路径、表、命令、分支、渠道及速率限制；但数据库表、shell 命令、具体仓库/分支、收件对象/限频、工单系统等范围仍未给出，且 `/tmp/workspace` 与 `./output` 的运行路径语义尚需明确。因此执行器继续默认拒绝。首次开放时每次逐一确认；记录最终参数和结果，为有副作用的调用提供幂等键，远端结果不确定时不得自动重试。会话级宽泛写入授权不作为默认能力。
 5. **数据目录**：显式 `DATA_DIR` 永远优先且必须精确使用；源码/可信 editable 启动继续默认仓库 `data/`；安装后的 wheel 在 Windows 默认使用 `%LOCALAPPDATA%\Nico-agent`，其他平台使用 `$XDG_DATA_HOME/nico-agent` 或用户主目录下的 `.nico-agent`。不得静默搬迁旧库或生成空库替代旧数据；启动和 README 必须显示实际数据目录。
 6. **插件信任边界**：当前只加载用户逐一配置的可信本地插件，可信插件可以在应用进程内运行。来源不受信任、从网络下载或需要独立升级的插件必须迁移到独立子进程，带清单、权限声明、资源限制和可靠终止；在该隔离实现前不宣称插件是沙箱。
-7. **记忆检索升级**：当前保留 SQLite 字面检索，长期记忆上限仍为 200 条。阶段 8 在 50/200 条记忆及 10,000 条会话消息规模上测量；若检索 P95 超过 300 ms，或固定查询集 Top-10 召回明显不足，先升级 SQLite FTS5。只有标注查询集仍证明 FTS5 不足时再评估语义检索；自动候选生成仍要求用户明确触发并确认。
+7. **记忆检索升级**：当前保留 SQLite 字面检索，长期记忆上限仍为 200 条。阶段 8 已在 50/200 条记忆、10,000 条会话消息及 10 条固定查询规模测量：200 条记忆检索 P95 为 2.1486 ms，两种规模的 Recall@10 均为 1.0，10,000 条消息上下文 P95 为 4.5499 ms。若之后检索 P95 超过 300 ms，或固定查询集 Top-10 召回明显不足，先升级 SQLite FTS5；只有标注查询集仍证明 FTS5 不足时再评估语义检索。自动候选生成仍要求用户明确触发并确认。
 
 ## 15. 可更新任务清单
 
@@ -761,6 +761,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 7 CLI/channels/幂等 | 已完成（2026-11-01） | `5a028ed` | 根测试 142 项；契约/领域/core/application/adapters/storage/CLI 包测试共 59 项；依赖图无环；7 个 wheel 构建并在仓库外临时 venv 安装；API/CLI/账户/备份恢复与兼容快照通过；`git diff --check` | schema v2 迁移只在临时测试库验证；没有下载模型或接入第二渠道 |
 | 8 性能基线 | 已完成（2026-11-01） | `5311874`、`1020b56` | 固定种子基准与 smoke 通过；10,000 条消息上下文、1,000 会话检索、200 条记忆检索、并发写、备份、启动、迁移、RSS 均在预算内；结果保存在 `benchmarks/results/stage8-baseline.json` | 本机假 HTTP 不是商业模型延迟；商业端点仍待用户指定，未因假服务数据调整 transport |
 | 9 app/Web/安装收口 | 已完成（2026-11-01） | `4c14398`；UI 改版 `e2a39d8` | 根测试 143 项、独立包测试 60 项；依赖图、编译、静态 JS、桌面/375 px 移动浏览器 smoke 通过；九个 wheel 在仓库外安装验证；改版后新建 `nico-web` wheel 并确认 `redesign.css`、`chat.js`、`index.html` 均已打包 | 未触发商业端点、流式、第二渠道、写工具、远端 MCP、不可信插件和公网部署条件任务；本轮未下载模型 |
+| 10 OpenAI/DeepSeek Provider 与 Web SSE | 已完成实现与本地验证（2026-11-01） | 待提交 | 根测试 146 项、包测试 66 项通过；假 HTTP 验证工具调用分片、用量、SSE 结束标记与 Agent/HTTP 流式边界；九个 wheel 构建并在仓库外临时 venv 安装；依赖图无环、Python 编译、JS 语法和 `git diff --check` 通过 | 当前环境无 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，商业端点未实网验收；浏览器手工冒烟因 Computer Use 无法可靠确认 Chrome URL 而未运行；第二消息渠道及写工具仍未启用 |
 
 阶段更新模板：
 
@@ -859,6 +860,18 @@ API/CLI/数据兼容：
 - 验收通过：根目录回归测试 143 项；独立包测试 60 项；`python scripts/check_dependency_graph.py --require-all` 检查无环且分层限制通过；九个 wheel 全部构建，并在仓库外临时 venv 安装验证 API、静态/提示词资源、兼容导入、CLI/恢复入口和 wheel 默认数据目录；全 workspace editable 安装后仓库外 smoke 通过。`compileall`、各静态 JS 的 `node --check` 和 `git diff --check` 通过。
 - 浏览器 smoke 覆盖桌面、375 px 移动视口、面试与设置界面、键盘焦点环及键盘发送；移动视口无横向溢出，演示聊天正常往返。API、CLI、DATA_DIR、账户隔离、数据库和备份恢复既有兼容快照/回归均通过。
 - 未下载或运行本地模型，未请求商业模型端点；阶段 9 不以模型服务为前置条件。阶段 9 完成后提交，不 push。
+
+条件任务调研与当前触发决策（2026-11-01）：
+
+- 官方来源：[OpenAI GPT-4o mini](https://developers.openai.com/api/docs/models/gpt-4o-mini)、[DeepSeek 模型更新](https://api-docs.deepseek.com/updates/)、[OpenAI SSE](https://developers.openai.com/api/docs/guides/streaming-responses) 和 [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
+- OpenAI 官方 GPT-4o mini 模型页列出 Chat Completions、函数调用和 streaming 支持；同页将模型标记为 deprecated。按用户明确选择继续提供 `gpt-4o-mini` 配置，但真实请求需用环境变量密钥验证，后续模型关闭风险需对用户可见。OpenAI SSE 使用 Chat Completions 的 `stream=true`。
+- DeepSeek 官方变更记录说明旧 ID `deepseek-chat` 于 2026-07-24 停止服务；用户确认改用 `deepseek-flash`。官方 Chat Completions 接口沿用 OpenAI 形状，根 URL 为 `https://api.deepseek.com`，支持工具调用与 `stream=true` SSE；密钥仅从 `DEEPSEEK_API_KEY` 读取。
+- 调研 `E:\Akashic-agent\akashic-agent\agent\model_runtime\types.py`、`infra\providers\llm_provider.py` 与 `agent\tool_runtime.py`：请求类型以 `on_delta` 回调承载增量，工具 runtime 独立处理执行；采用显式增量回调与独立工具进度事件，不把供应商协议混入业务用例。
+- 调研 `E:\nanobot\nanobot\providers\openai_compat_provider.py`、`api\server.py`、`agent\loop.py` 与 `templates\agent\tool_contract.md`：兼容 Provider 负责协议，API 将增量编码为 SSE，Agent turn 上有单独的 `on_stream` 回调；工具输入由执行前结构校验和范围规则控制。采用 API 事件流与 Agent 回调边界，不复制其 OpenAI 格式 SSE chunk。
+- 调研 `E:\Agent\Pi-agent\pi\packages\agent\src\agent-loop.ts`、`stream-fn.ts`、`packages\durable\src\tools\write.ts`、`tools\path-utils.ts`：stream function 注入 Agent loop，文本消息与工具执行事件分开；写文件先解析工具路径，再通过文件变更队列串行化。采用可选 ModelPort streaming 与最终提交边界，写工具仍必须由 Nico 自己的确认、授权和幂等策略保护。
+- 当前实施顺序：先为 `openai` / `deepseek` 增加 Chat Completions 温度、密钥环境变量和 SSE 解析；再让 AgentCore、Web API 与 WebUI 透传可取消的 text/tool/done/error 事件。工具参数、推理内容和敏感上下文不得通过 SSE 输出；持久化只发生在完整运行成功后。标准 API 与 CLI 非流式路径保持兼容。
+- 用户授权了受限写工具类别，但精确数据库/表、shell 命令、仓库与分支、消息接收者/限频、工单系统范围尚待补充；这些执行器继续默认拒绝，直到范围明确并实现逐次确认、幂等和不确定结果不重试。
+- 当前进程没有 `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY`；不在代码、配置文件、命令输出或聊天消息中保存/显示密钥。未请求真实端点，先以假 HTTP 测协议与流式边界。
 
 ## 16. 给后续执行 AI 的直接指令
 

@@ -1,6 +1,7 @@
 """Stable run bookkeeping and token-usage contracts."""
 
-from typing import TypedDict
+from collections.abc import Callable
+from typing import Literal, TypedDict
 
 
 MAX_RUN_TOKENS = 16_000
@@ -60,6 +61,38 @@ class RunEvent(TypedDict):
     usage: dict
     usage_coverage: str
     elapsed_ms: int
+
+
+class TextDeltaEvent(TypedDict):
+    type: Literal["text_delta"]
+    text: str
+
+
+class ToolStartEvent(TypedDict):
+    type: Literal["tool_start"]
+    name: str
+
+
+RunUpdateEvent = TextDeltaEvent | ToolStartEvent
+RunEventSink = Callable[[RunUpdateEvent], None]
+
+
+class RunStartedEvent(TypedDict):
+    type: Literal["started"]
+
+
+class RunCompletedEvent(TypedDict):
+    type: Literal["done"]
+
+
+class RunErrorEvent(TypedDict):
+    type: Literal["error"]
+    detail: str
+    code: str
+    status: int
+
+
+RunStreamEvent = RunStartedEvent | RunUpdateEvent | RunCompletedEvent | RunErrorEvent
 
 
 def run_event(*, version: int, status: str, error_code: str | None, provider, model: str,

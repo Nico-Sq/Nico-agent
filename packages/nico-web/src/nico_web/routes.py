@@ -1,9 +1,12 @@
 """HTTP routes and request models for Nico-agent."""
 
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from nico_application import (
@@ -16,6 +19,7 @@ from nico_application import (
     UseCaseError,
 )
 from nico_contracts.errors import ModelError
+from nico_contracts.events import RunEventSink
 
 from .backend import active_backend, active_runtime as _active_runtime, active_store as _active_store
 
@@ -64,22 +68,76 @@ def http_interview_use_case_error(exc: UseCaseError) -> HTTPException:
     return http_use_case_error(exc)
 
 
-async def run_chat_session(session: dict) -> dict:
+async def run_chat_session(session: dict, on_event: RunEventSink | None = None) -> dict:
     backend = active_backend()
     selected = session.get("model_id", "default")
     run = active_runtime() if selected == "default" else backend.make_runtime(
         active_store(), backend.model_catalog().get(selected),
     )
-    return await run.run(session)
+    return await run.run(session, on_event=on_event)
 
 
-async def run_interview_session(session: dict, result_handler) -> dict:
+async def run_interview_session(session: dict, result_handler,
+                                on_event: RunEventSink | None = None) -> dict:
     backend = active_backend()
     selected = session.get("model_id", "default")
     run = active_runtime() if selected == "default" else backend.make_runtime(
         active_store(), backend.model_catalog().get(selected),
     )
-    return await run.run(session, result_handler=result_handler)
+    return await run.run(session, result_handler=result_handler, on_event=on_event)
+
+
+def wants_sse(request: Request) -> bool:
+    return "text/event-stream" in request.headers.get("accept", "").lower()
+
+
+def stream_response(operation: Callable[[RunEventSink], Awaitable[dict]]) -> StreamingResponse:
+    async def events():
+        queue = asyncio.Queue()
+        finished = object()
+
+        async def run():
+            try:
+                await operation(queue.put_nowait)
+                queue.put_nowait({"type": "done"})
+            except UseCaseError as exc:
+                status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
+                queue.put_nowait({"type": "error", "detail": str(exc), "code": "request_rejected",
+                                  "status": status})
+            except ModelError as exc:
+                queue.put_nowait({"type": "error", "detail": str(exc), "code": exc.code,
+                                  "status": exc.status_code})
+            except ValueError:
+                queue.put_nowait({"type": "error", "detail": "模型输出或上下文不符合要求",
+                                  "code": "model_invalid_output", "status": 502})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                queue.put_nowait({"type": "error", "detail": "模型运行失败，请稍后重试",
+                                  "code": "model_run_failed", "status": 502})
+            finally:
+                queue.put_nowait(finished)
+
+        task = asyncio.create_task(run())
+        try:
+            yield "data: {\"type\":\"started\"}\n\n"
+            while True:
+                event = await queue.get()
+                if event is finished:
+                    break
+                yield f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    return StreamingResponse(
+        events(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def complete_chat_request(result) -> dict | JSONResponse:
@@ -564,7 +622,11 @@ def update_chat_memory(session_id: str, body: ChatMemoryInput):
 
 
 @router.post("/api/chat/sessions/{session_id}/messages")
-async def chat_message(session_id: str, body: TextInput):
+async def chat_message(session_id: str, body: TextInput, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_chat_use_cases().send_message(
+            session_id, body.text, on_event,
+        ))
     try:
         return await complete_chat_request(
             active_chat_use_cases().send_message(session_id, body.text)
@@ -586,7 +648,11 @@ def claim_chat_message(session_id: str, body: TextInput):
 
 
 @router.post("/api/chat/sessions/{session_id}/messages/run")
-async def run_chat_message(session_id: str, body: ChatRunInput):
+async def run_chat_message(session_id: str, body: ChatRunInput, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_chat_use_cases().run_claimed_message(
+            session_id, body.version, on_event,
+        ))
     try:
         return await complete_chat_request(
             active_chat_use_cases().run_claimed_message(session_id, body.version)
@@ -596,7 +662,11 @@ async def run_chat_message(session_id: str, body: ChatRunInput):
 
 
 @router.post("/api/chat/sessions/{session_id}/retry")
-async def retry_chat_message(session_id: str):
+async def retry_chat_message(session_id: str, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_chat_use_cases().retry_message(
+            session_id, on_event,
+        ))
     try:
         return await complete_chat_request(
             active_chat_use_cases().retry_message(session_id)
@@ -644,12 +714,20 @@ def create_practice(session_id: str, body: PracticeInput):
 
 
 @router.post("/api/interview/sessions/{session_id}/start")
-async def start_interview(session_id: str):
+async def start_interview(session_id: str, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_interview_use_cases().start(
+            session_id, on_event,
+        ))
     return await complete_interview_request(active_interview_use_cases().start(session_id))
 
 
 @router.post("/api/interview/sessions/{session_id}/answers")
-async def answer_interview(session_id: str, body: TextInput):
+async def answer_interview(session_id: str, body: TextInput, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_interview_use_cases().answer(
+            session_id, body.text, on_event,
+        ))
     return await complete_interview_request(active_interview_use_cases().answer(session_id, body.text))
 
 
@@ -664,14 +742,22 @@ def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
 
 
 @router.post("/api/interview/sessions/{session_id}/answers/run")
-async def run_interview_answer(session_id: str, body: ChatRunInput):
+async def run_interview_answer(session_id: str, body: ChatRunInput, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_interview_use_cases().run_claimed_answer(
+            session_id, body.version, on_event,
+        ))
     return await complete_interview_request(
         active_interview_use_cases().run_claimed_answer(session_id, body.version)
     )
 
 
 @router.post("/api/interview/sessions/{session_id}/skip")
-async def skip_interview_question(session_id: str, body: PracticeInput):
+async def skip_interview_question(session_id: str, body: PracticeInput, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_interview_use_cases().skip(
+            session_id, body.question_number, on_event,
+        ))
     return await complete_interview_request(
         active_interview_use_cases().skip(session_id, body.question_number)
     )
@@ -694,5 +780,9 @@ def cancel_interview(session_id: str):
 
 
 @router.post("/api/interview/sessions/{session_id}/resume")
-async def resume_interview(session_id: str):
+async def resume_interview(session_id: str, request: Request):
+    if wants_sse(request):
+        return stream_response(lambda on_event: active_interview_use_cases().resume(
+            session_id, on_event,
+        ))
     return await complete_interview_request(active_interview_use_cases().resume(session_id))

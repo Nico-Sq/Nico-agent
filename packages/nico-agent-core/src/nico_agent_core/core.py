@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from nico_contracts.errors import ModelError
-from nico_contracts.events import Usage, run_event
+from nico_contracts.events import RunEventSink, Usage, run_event
 from nico_contracts.messages import AgentMessage
 from nico_contracts.tools import ToolDefinition
 
@@ -36,6 +36,7 @@ class AgentRunRequest:
     can_execute_in_parallel: Callable[[dict], bool]
     prepare_tools: Callable[[], Awaitable[None]]
     trace: "AgentRunTrace" = field(default_factory=lambda: AgentRunTrace())
+    on_event: RunEventSink | None = None
 
 
 @dataclass
@@ -138,7 +139,15 @@ class AgentCore:
             if not request.is_current():
                 raise RunSuperseded()
             request.trace.usage.request_count += 1
-            reply = await request.model.complete(request.messages, request.tools)
+            stream = getattr(request.model, "stream", None)
+            streaming = request.on_event is not None and callable(stream)
+            if streaming:
+                reply = await stream(
+                    request.messages, request.tools,
+                    lambda text: request.on_event({"type": "text_delta", "text": text}),
+                )
+            else:
+                reply = await request.model.complete(request.messages, request.tools)
             request.trace.usage.add(reply.get("usage"))
             if not request.is_current():
                 raise RunSuperseded()
@@ -161,12 +170,17 @@ class AgentCore:
                 content = reply.get("content")
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("模型未返回有效内容")
+                if request.on_event is not None and not streaming:
+                    request.on_event({"type": "text_delta", "text": content})
                 return content.strip()
             if request.trace.usage.exceeded:
                 raise ModelError("run_token_limit", "本次模型运行已达到用量上限")
             if len(request.trace.tool_names) + len(calls) > MAX_TOOL_CALLS:
                 raise ValueError("本次运行的工具调用超过上限")
             request.trace.tool_names.extend(call["function"]["name"] for call in calls)
+            if request.on_event is not None:
+                for call in calls:
+                    request.on_event({"type": "tool_start", "name": call["function"]["name"]})
             request.messages.append({"role": "assistant", "content": reply.get("content"),
                                      "tool_calls": calls})
             request.messages.extend(await self.execute_tools(

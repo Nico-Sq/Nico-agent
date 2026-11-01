@@ -7,6 +7,7 @@ from . import anthropic, demo, openai_chat, transport
 
 ADAPTERS: dict[str, Adapter] = {
     "openai": openai_chat,
+    "deepseek": openai_chat,
     "openai_compatible": openai_chat,
     "anthropic": anthropic,
 }

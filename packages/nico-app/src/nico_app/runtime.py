@@ -17,6 +17,7 @@ from nico_agent_core import (
     classify_run_error,
 )
 from nico_contracts.errors import ModelError
+from nico_contracts.events import RunEventSink
 from nico_contracts.messages import AgentMessage
 from nico_contracts.tools import ToolDefinition
 from nico_application import (
@@ -156,7 +157,8 @@ class AgentRuntime:
         return snapshot
 
     async def run(self, session: dict,
-                  result_handler: Callable[[dict, str], dict] | None = None) -> dict:
+                  result_handler: Callable[[dict, str], dict] | None = None,
+                  on_event: RunEventSink | None = None) -> dict:
         kind = session["kind"]
         if not self.store.begin_run(session["id"], session["version"]):
             current = self.store.get(session["id"], kind)
@@ -198,6 +200,7 @@ class AgentRuntime:
                 can_execute_in_parallel=lambda call: self._concurrency_safe(call, snapshot),
                 prepare_tools=prepare_tools,
                 trace=trace,
+                on_event=on_event,
             )
             content = await self.core.run(request)
             result = self._finalize_run_result(session, content, result_handler)

@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
+from nico_contracts.events import RunEventSink
 from nico_domain import (
     can_accept_chat_message,
     can_answer_interview,
@@ -115,7 +116,7 @@ class UseCaseError(ValueError):
 
 class ChatUseCases:
     def __init__(self, store: ChatStorePort, model_catalog: ModelCatalogPort,
-                 run: Callable[[dict], Awaitable[dict]],
+                 run: Callable[..., Awaitable[dict]],
                  cancel_runs: Callable[[str], object]):
         self.store = store
         self.model_catalog = model_catalog
@@ -161,25 +162,33 @@ class ChatUseCases:
         self.cancel_runs(session_id)
         return session
 
-    async def send_message(self, session_id: str, text: str) -> dict:
-        return await self.run(self._claim_message(session_id, text))
+    async def send_message(self, session_id: str, text: str,
+                           on_event: RunEventSink | None = None) -> dict:
+        return await self._run(self._claim_message(session_id, text), on_event)
+
+    async def _run(self, session: dict, on_event: RunEventSink | None = None) -> dict:
+        if on_event is None:
+            return await self.run(session)
+        return await self.run(session, on_event)
 
     def claim_message(self, session_id: str, text: str) -> dict:
         return self._claim_message(session_id, text)
 
-    async def run_claimed_message(self, session_id: str, version: int) -> dict:
+    async def run_claimed_message(self, session_id: str, version: int,
+                                  on_event: RunEventSink | None = None) -> dict:
         session = self.require_session(session_id)
         if not is_current_chat_run(session["status"], session["version"], version):
             return {"interrupted": True, "session": session}
-        return await self.run(session)
+        return await self._run(session, on_event)
 
-    async def retry_message(self, session_id: str) -> dict:
+    async def retry_message(self, session_id: str,
+                            on_event: RunEventSink | None = None) -> dict:
         self.require_session(session_id)
         session = self.store.retry_chat(session_id)
         if session is None:
             raise UseCaseError("conflict", "当前没有待重试的消息")
         self.cancel_runs(session_id)
-        return await self.run(session)
+        return await self._run(session, on_event)
 
     def interrupt(self, session_id: str) -> dict:
         self.require_session(session_id)
@@ -282,7 +291,7 @@ class MemoryUseCases:
 
 
 InterviewResultHandler = Callable[[dict, str], dict]
-InterviewRunner = Callable[[dict, InterviewResultHandler], Awaitable[dict]]
+InterviewRunner = Callable[..., Awaitable[dict]]
 
 
 def commit_interview_result(
@@ -344,10 +353,11 @@ class InterviewUseCases:
             raise UseCaseError("not_found", "面试不存在")
         return report
 
-    async def _run(self, session: dict) -> dict:
-        return await self.run(
-            session, lambda current, raw: commit_interview_result(self.store, current, raw),
-        )
+    async def _run(self, session: dict, on_event: RunEventSink | None = None) -> dict:
+        result_handler = lambda current, raw: commit_interview_result(self.store, current, raw)
+        if on_event is None:
+            return await self.run(session, result_handler)
+        return await self.run(session, result_handler, on_event)
 
     def claim_start(self, session_id: str) -> dict:
         session = self.require_session(session_id)
@@ -358,8 +368,8 @@ class InterviewUseCases:
             raise UseCaseError("conflict", "面试已开始")
         return running
 
-    async def start(self, session_id: str) -> dict:
-        return await self._run(self.claim_start(session_id))
+    async def start(self, session_id: str, on_event: RunEventSink | None = None) -> dict:
+        return await self._run(self.claim_start(session_id), on_event)
 
     def claim_answer(self, session_id: str, text: str,
                      expected_question: int | None = None) -> dict:
@@ -383,10 +393,12 @@ class InterviewUseCases:
         self.cancel_runs(session_id)
         return running
 
-    async def answer(self, session_id: str, text: str) -> dict:
-        return await self._run(self.claim_answer(session_id, text))
+    async def answer(self, session_id: str, text: str,
+                     on_event: RunEventSink | None = None) -> dict:
+        return await self._run(self.claim_answer(session_id, text), on_event)
 
-    async def answer_current(self, session_id: str, text: str) -> dict:
+    async def answer_current(self, session_id: str, text: str,
+                             on_event: RunEventSink | None = None) -> dict:
         session = self.require_session(session_id)
         try:
             text = required_text(text, "回答不能为空")
@@ -396,13 +408,14 @@ class InterviewUseCases:
             raise UseCaseError("invalid", "回答不能超过 12000 字")
         if session["question_count"] < 1:
             raise UseCaseError("conflict", "面试尚未生成题目")
-        return await self._run(self.claim_answer(session_id, text, session["question_count"]))
+        return await self._run(self.claim_answer(session_id, text, session["question_count"]), on_event)
 
-    async def run_claimed_answer(self, session_id: str, version: int) -> dict:
+    async def run_claimed_answer(self, session_id: str, version: int,
+                                 on_event: RunEventSink | None = None) -> dict:
         session = self.require_session(session_id)
         if not is_current_interview_run(session["status"], session["version"], version):
             return {"interrupted": True, "session": session}
-        return await self._run(session)
+        return await self._run(session, on_event)
 
     def claim_skip(self, session_id: str, question_number: int) -> dict:
         session = self.require_session(session_id)
@@ -416,8 +429,9 @@ class InterviewUseCases:
         self.cancel_runs(session_id)
         return running
 
-    async def skip(self, session_id: str, question_number: int) -> dict:
-        return await self._run(self.claim_skip(session_id, question_number))
+    async def skip(self, session_id: str, question_number: int,
+                   on_event: RunEventSink | None = None) -> dict:
+        return await self._run(self.claim_skip(session_id, question_number), on_event)
 
     def pause(self, session_id: str) -> dict:
         session = self.require_session(session_id)
@@ -439,7 +453,7 @@ class InterviewUseCases:
         self.cancel_runs(session_id)
         return cancelled
 
-    async def resume(self, session_id: str) -> dict:
+    async def resume(self, session_id: str, on_event: RunEventSink | None = None) -> dict:
         session = self.require_session(session_id)
         if not can_resume_interview(session["status"]):
             raise UseCaseError("conflict", "当前不能恢复")
@@ -447,7 +461,7 @@ class InterviewUseCases:
         if resumed is None:
             raise UseCaseError("conflict", "当前不能恢复")
         resumed_session, needs_run = resumed
-        return await self._run(resumed_session) if needs_run else {"session": resumed_session}
+        return await self._run(resumed_session, on_event) if needs_run else {"session": resumed_session}
 
     def create_practice(self, session_id: str, question_number: int) -> dict:
         session = self.require_session(session_id)
