@@ -37,6 +37,11 @@ async def post_json(base_url: str, endpoint: str, headers: dict, payload: dict) 
                 if status in (429, 503):
                     raise ModelError("model_busy", "模型服务繁忙，请稍后重试", 503) from exc
                 raise ModelError("model_unavailable", "模型服务暂时不可用") from exc
+            except httpx.ConnectError as exc:
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                    continue
+                raise ModelError("model_unavailable", "无法连接模型服务") from exc
             except httpx.RequestError as exc:
                 raise ModelError("model_unavailable", "无法连接模型服务") from exc
     raise ModelError("model_unavailable", "模型服务暂时不可用")
@@ -73,6 +78,11 @@ async def post_sse(base_url: str, endpoint: str, headers: dict, payload: dict):
                 if status in (429, 503):
                     raise ModelError("model_busy", "模型服务繁忙，请稍后重试", 503) from exc
                 raise ModelError("model_unavailable", "模型服务暂时不可用") from exc
+            except httpx.ConnectError as exc:
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                    continue
+                raise ModelError("model_unavailable", "无法连接模型服务") from exc
             except httpx.RequestError as exc:
                 raise ModelError("model_unavailable", "无法连接模型服务") from exc
     raise ModelError("model_unavailable", "模型服务暂时不可用")

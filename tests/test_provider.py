@@ -10,6 +10,7 @@ import httpx
 from career_agent.models import ModelCatalog
 from career_agent.provider import Provider
 from career_agent.providers import ModelError
+from nico_adapters.models.transport import post_sse
 
 
 class FakeClient:
@@ -138,6 +139,16 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(reply["content"], "retried")
 
+    def test_connect_error_is_retried_once(self):
+        client = FakeClient(
+            httpx.ConnectError("refused"), (200, openai_body("retried")),
+        )
+        provider = Provider(mode="openai", model="m", base_url="https://example.test/v1", api_key="k")
+        with patch("career_agent.providers.transport.asyncio.sleep", return_value=None):
+            reply = self.complete(provider, client)
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(reply["content"], "retried")
+
     def test_repeated_busy_status_maps_to_busy(self):
         client = FakeClient((429, {}), (503, {}))
         provider = Provider(mode="openai", model="m", base_url="https://example.test/v1", api_key="k")
@@ -167,9 +178,52 @@ class ProviderAdapterTests(unittest.TestCase):
             self.complete(provider, FakeClient(httpx.TimeoutException("slow")))
         self.assertEqual((caught.exception.code, caught.exception.status_code), ("model_timeout", 504))
 
-        with self.assertRaises(ModelError) as caught:
-            self.complete(provider, FakeClient(httpx.ConnectError("refused")))
+        with patch("career_agent.providers.transport.asyncio.sleep", return_value=None):
+            with self.assertRaises(ModelError) as caught:
+                self.complete(provider, FakeClient(
+                    httpx.ConnectError("refused"), httpx.ConnectError("refused"),
+                ))
         self.assertEqual(caught.exception.code, "model_unavailable")
+
+    def test_stream_connect_error_is_retried_once(self):
+        class Response:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            async def aiter_lines(self):
+                yield "data: [DONE]"
+
+        class StreamContext:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            async def __aenter__(self):
+                if isinstance(self.outcome, Exception):
+                    raise self.outcome
+                return Response()
+
+            async def __aexit__(self, *_):
+                return False
+
+        class StreamClient(FakeClient):
+            def stream(self, method, url, headers=None, json=None):
+                self.requests.append({"method": method, "url": url, "payload": json})
+                return StreamContext(self.outcomes.pop(0))
+
+        client = StreamClient(httpx.ConnectError("refused"), (200, {}))
+
+        async def collect():
+            return [item async for item in post_sse(
+                "https://example.test/v1", "chat/completions", {}, {},
+            )]
+
+        with patch("career_agent.providers.transport.httpx.AsyncClient", return_value=client):
+            with patch("career_agent.providers.transport.asyncio.sleep", return_value=None):
+                result = asyncio.run(collect())
+        self.assertEqual(len(client.requests), 2)
+        self.assertEqual(result, ["[DONE]"])
 
     def test_unexpected_body_maps_to_invalid_response(self):
         provider = Provider(mode="openai", model="m", base_url="https://example.test/v1", api_key="k")
