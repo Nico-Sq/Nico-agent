@@ -761,7 +761,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 7 CLI/channels/幂等 | 已完成（2026-11-01） | `5a028ed` | 根测试 142 项；契约/领域/core/application/adapters/storage/CLI 包测试共 59 项；依赖图无环；7 个 wheel 构建并在仓库外临时 venv 安装；API/CLI/账户/备份恢复与兼容快照通过；`git diff --check` | schema v2 迁移只在临时测试库验证；没有下载模型或接入第二渠道 |
 | 8 性能基线 | 已完成（2026-11-01） | `5311874`、`1020b56` | 固定种子基准与 smoke 通过；10,000 条消息上下文、1,000 会话检索、200 条记忆检索、并发写、备份、启动、迁移、RSS 均在预算内；结果保存在 `benchmarks/results/stage8-baseline.json` | 本机假 HTTP 不是商业模型延迟；商业端点仍待用户指定，未因假服务数据调整 transport |
 | 9 app/Web/安装收口 | 已完成（2026-11-01） | `4c14398`；UI 改版 `e2a39d8` | 根测试 143 项、独立包测试 60 项；依赖图、编译、静态 JS、桌面/375 px 移动浏览器 smoke 通过；九个 wheel 在仓库外安装验证；改版后新建 `nico-web` wheel 并确认 `redesign.css`、`chat.js`、`index.html` 均已打包 | 未触发商业端点、流式、第二渠道、写工具、远端 MCP、不可信插件和公网部署条件任务；本轮未下载模型 |
-| 10 OpenAI/DeepSeek Provider 与 Web SSE | 已完成实现与本地验证（2026-11-01） | 待提交 | 根测试 146 项、包测试 66 项通过；假 HTTP 验证工具调用分片、用量、SSE 结束标记与 Agent/HTTP 流式边界；九个 wheel 构建并在仓库外临时 venv 安装；依赖图无环、Python 编译、JS 语法和 `git diff --check` 通过 | 当前环境无 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，商业端点未实网验收；浏览器手工冒烟因 Computer Use 无法可靠确认 Chrome URL 而未运行；第二消息渠道及写工具仍未启用 |
+| 10 OpenAI/DeepSeek Provider 与 Web SSE | 已完成实现与本地验证（2026-11-01） | `2105274` | 根测试 146 项、包测试 66 项通过；假 HTTP 验证工具调用分片、用量、SSE 结束标记与 Agent/HTTP 流式边界；九个 wheel 构建并在仓库外临时 venv 安装，`nico-web` wheel 含 SSE 前端；依赖图无环、Python 编译、JS 语法和 `git diff --check` 通过 | 当前环境无 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，商业端点未实网验收；浏览器手工冒烟因 Computer Use 无法可靠确认 Chrome URL 而未运行；第二消息渠道及写工具仍未启用 |
 
 阶段更新模板：
 
