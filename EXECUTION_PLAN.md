@@ -748,7 +748,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
 | 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
-| 5 storage/schema/迁移 | 已完成（2026-11-01） | 本阶段提交记录见下文 | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
+| 5 storage/schema/迁移 | 已完成（2026-11-01） | `3b38d1b` | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
 | 6 tools/MCP/plugins | 待做 | — | — | — |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
 | 8 性能基线 | 待做 | — | — | — |
@@ -787,7 +787,7 @@ API/CLI/数据兼容：
 - Pi：检查 `E:\Agent\Pi-agent\pi\packages\durable\src\storage\sqlite\migrations.ts`、`schema.ts` 与 `test\sqlite-migrations.test.ts`。源码保留不可变、有序的迁移列表，应用迁移时原子提交并测试重复运行、未来版本拒绝和失败回滚。采用同类顺序与回滚保证；按 Nico 的计划改为包内 SQL 资源与 SQLite `user_version`，并给 schema manifest 保存版本快照。
 - nanobot：检查 `E:\nanobot\nanobot\session\manager.py`、`agent\memory.py` 与 `pairing\store.py`。相关实现以 JSONL、Markdown 和原子文件写入持久化，没有 SQLite schema 迁移；因 Nico 已有 SQLite 关系与事务，未照搬文件存储。存储边界没有直接相关的 Agent 提示词或工具描述。
 - 本阶段建立 `nico-storage`，把 Store 的事务基类、会话/事件/授权、材料/经历、记忆候选、运行状态、Auth、自动备份和恢复拆成模块；`career_agent.*` 保留兼容转发。新空库和已识别 `user_version=0` 历史库共用 v1 基线；迁移先在同目录副本验证，通过后备份原库并原子替换；未知 schema 与未来版本拒绝处理。业务表定义未重建或改动。
-- 根测试在临时 `DATA_DIR` 与假模型下运行（137 项通过）；`packages/nico-storage/tests`（12 项通过）覆盖历史库安全备份、未知库原样保留、失败回滚、未来版本、连续版本、认证/账户独立版本和旧备份恢复。`scripts/check_dependency_graph.py` 通过；`scripts/build_wheels.py --all --out dist` 构建 6 个包；`scripts/verify_wheel_install.py --all` 在仓库外临时 venv 安装 6 个 wheel，并从 wheel SQL 资源创建 v1 数据库；`git diff --check` 通过。没有读取或迁移真实 `data/`。
+- 实际命令与结果：根测试运行前通过 `TemporaryDirectory` 设置临时 `DATA_DIR`、假模型及全部包的 `PYTHONPATH`，执行 `D:\anaconda3\python.exe -m unittest discover -s tests -q`（137 项通过）；`D:\anaconda3\python.exe -m unittest discover -s packages/nico-storage/tests -q`（12 项通过），覆盖历史业务/认证库安全备份、未知库原样保留、失败回滚、未来版本、连续版本、账户隔离和旧备份恢复。`D:\anaconda3\python.exe scripts/check_dependency_graph.py` 通过；`E:\Agent\Nico-agent\.venv\Scripts\python.exe scripts/build_wheels.py --all --out dist` 构建 6 个包，最终 `--changed` 重建 application/storage；`D:\anaconda3\python.exe scripts/verify_wheel_install.py --all` 在仓库外临时 venv 安装并 smoke test 6 个 wheel，storage wheel 从自身 SQL 资源创建 v1 数据库；`git diff --check` 通过。没有读取或迁移真实 `data/`。
 - 阶段 7 再实现 ChannelLedger 的数据库表和跨重启幂等；本阶段只定义 application 端口。没有改变第二渠道、流式输出、记忆检索或工具授权策略。
 
 ## 16. 给后续执行 AI 的直接指令
