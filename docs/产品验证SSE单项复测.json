@@ -42,10 +42,33 @@
       }
     ]
   },
+  "after_prompt_retest": {
+    "code_commit": "71ddd27",
+    "interview_prompt_version": "0d9b5ed39c81",
+    "cases": [
+      {
+        "id": "IF-04",
+        "start_attempts": ["model_invalid_response", "success"],
+        "answer_attempted": false,
+        "cleanup": true
+      },
+      {
+        "id": "IF-10",
+        "start_status": 200,
+        "answer_error": "model_invalid_output",
+        "model_finished": true,
+        "model_returned_extra_question": true,
+        "evidence_matches_answer": true,
+        "summary_present": true,
+        "cleanup": true
+      }
+    ],
+    "finding": "IF-10 的失败是模型在题数已达上限时仍返回下一题；该题的反馈遵守了新的事实边界。解析器现会丢弃终止轮次的多余问题。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "IF-04 的开始请求走 JSON API，回答请求走 SSE；IF-08 与 IF-10 的开始和回答均走 SSE。",
-    "IF-04 与 IF-10 的流式反馈出现了没有具体行为或结果支撑的态度推断。",
-    "面试提示词已收紧此类判断规则；新提示词需要在重启服务后用这些案例复测。"
+    "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
+    "面试解析器与网页流式显示已修正，需在再次重启服务后复测。"
   ]
 }

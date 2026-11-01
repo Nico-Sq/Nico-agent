@@ -60,6 +60,16 @@ class InterviewRuleTests(unittest.TestCase):
         self.assertEqual(result.status, "finished")
         self.assertEqual(result.evidence, ("延迟下降 20%",))
 
+    def test_final_answer_discards_an_extra_question(self):
+        result = parse_interview_result(
+            {"question_count": 1, "max_questions": 1},
+            json.dumps({"feedback": "回答清楚", "question": "请继续介绍", "finished": True,
+                        "evidence": ["接口延迟下降 20%"], "summary": "本轮已完成"}),
+            "接口延迟下降 20%", False,
+        )
+        self.assertEqual(result.content, "本轮已完成")
+        self.assertEqual(result.status, "finished")
+
     def test_skipped_question_cannot_gain_feedback_or_evidence(self):
         with self.assertRaisesRegex(ValueError, "跳过的题目"):
             parse_interview_result(

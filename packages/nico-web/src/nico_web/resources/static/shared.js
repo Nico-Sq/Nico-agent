@@ -247,7 +247,7 @@ function beginStreamMessage(kind) {
   role.className = "role";
   role.textContent = kind === "chat" ? "聊天助手" : "面试官";
   const status = document.createElement("span");
-  status.textContent = "正在生成回复…";
+  status.textContent = kind === "chat" ? "正在生成回复…" : "正在生成面试内容…";
   const content = document.createElement("span");
   item.append(role, status, content);
   box.append(item);
@@ -255,7 +255,7 @@ function beginStreamMessage(kind) {
   return { box, status, content };
 }
 
-async function readStream(response, bubble) {
+async function readStream(response, bubble, kind) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -268,6 +268,7 @@ async function readStream(response, bubble) {
     try { event = JSON.parse(data); }
     catch { throw new Error("模型流返回了无效事件"); }
     if (event.type === "text_delta" && typeof event.text === "string") {
+      if (kind !== "chat") return;
       bubble.status.hidden = true;
       bubble.content.textContent += event.text;
       bubble.box.scrollTop = bubble.box.scrollHeight;
@@ -321,7 +322,7 @@ async function runRequest(kind, id, path, body) {
       }
       return payload;
     }
-    await readStream(response, bubble);
+    await readStream(response, bubble, kind);
     return true;
   }
   finally { if (nicoState.pending[kind]?.controller === controller) nicoState.pending[kind] = null; }

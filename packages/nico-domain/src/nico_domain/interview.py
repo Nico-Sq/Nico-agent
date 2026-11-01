@@ -74,20 +74,20 @@ def parse_interview_result(
             or not isinstance(data["finished"], bool) or not isinstance(evidence, list)
             or not isinstance(summary, str)):
         raise ValueError("面试模型输出字段格式错误")
+    old_count = session["question_count"]
+    max_questions = session["max_questions"]
+    if old_count >= max_questions:
+        question = ""
     if (len(question) > 1000 or len(feedback) > 4000 or len(summary) > 4000
             or len(evidence) > 5):
         raise ValueError("面试模型输出超过长度上限")
 
-    old_count = session["question_count"]
-    max_questions = session["max_questions"]
     if data["finished"] != (old_count >= max_questions):
         raise ValueError("面试模型完成状态与题数不符")
     if not old_count and (feedback.strip() or summary.strip()):
         raise ValueError("首题不能包含反馈或总结")
     if old_count < max_questions and summary.strip():
         raise ValueError("未结束时不能生成全场总结")
-    if old_count >= max_questions and question.strip():
-        raise ValueError("结束时不能生成下一题")
     if skipped and (feedback.strip() or evidence):
         raise ValueError("跳过的题目不能生成反馈或回答证据")
     if old_count and not skipped and not feedback.strip():
