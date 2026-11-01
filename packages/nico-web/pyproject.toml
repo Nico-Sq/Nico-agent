@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nico-web"
+version = "0.1.0"
+description = "FastAPI web interface for Nico-agent"
+requires-python = ">=3.11"
+dependencies = ["nico-contracts==0.1.0", "nico-application==0.1.0", "fastapi>=0.115", "python-multipart>=0.0.9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nico_web = ["py.typed", "resources/static/*"]

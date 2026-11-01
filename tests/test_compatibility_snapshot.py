@@ -156,12 +156,12 @@ with tempfile.TemporaryDirectory(prefix="nico-compat-") as data_dir:
     from career_agent import main
 
     routes = set()
-    for route in main.app.routes:
-        path = getattr(route, "path", "")
+    for path, operations in main.app.openapi()["paths"].items():
         if not path.startswith("/api"):
             continue
-        methods = set(getattr(route, "methods", None) or ()) - {"HEAD", "OPTIONS"}
-        routes.add(f"{','.join(sorted(methods))} {path}")
+        for method in operations:
+            if method.lower() in {"get", "post", "put", "patch", "delete", "options", "head"}:
+                routes.add(f"{method.upper()} {path}")
 
     client = TestClient(main.app)
     response = client.post("/api/auth/register", json={

@@ -50,7 +50,7 @@ class InterviewApiTests(unittest.TestCase):
 
     def test_web_ui_exposes_memory_candidate_review_and_read_only_tool_state(self):
         page = self.client.get("/").text
-        script = self.client.get("/static/app.js").text
+        script = self.client.get("/static/settings.js").text
         self.assertIn('id="settings-memory-candidates"', page)
         self.assertIn('id="settings-memory-candidate-list"', page)
         self.assertIn('id="settings-tool-list"', page)

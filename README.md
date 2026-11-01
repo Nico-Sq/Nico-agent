@@ -7,14 +7,17 @@
 需要 Python 3.11+。在此目录执行：
 
 ```powershell
-python -m pip install -e packages/nico-contracts
-python -m pip install -e packages/nico-domain
-python -m pip install -e packages/nico-application
-python -m pip install -e .
+python scripts/install_workspace.py
 python -m career_agent
 ```
 
 浏览器打开 `http://127.0.0.1:8000`。该命令只监听本机回环地址；开发时需要自动重载可运行 `python -m uvicorn career_agent.main:app --reload`。默认 `MODEL_PROVIDER=demo`，可以直接体验 1–10 题流程；演示聊天只回显输入的前 1000 字，演示反馈是固定文本，不代表真实评价。
+
+源码和 editable 安装默认继续使用仓库的 `data/`。安装 wheel 后，Windows 默认目录为 `%LOCALAPPDATA%\Nico-agent`，其他平台使用 `$XDG_DATA_HOME/nico-agent` 或 `~/.nico-agent`。显式设置 `DATA_DIR` 时始终使用指定目录。已有用户升级到 wheel 时，请将 `DATA_DIR` 指向原数据库目录；程序不会自动搬动或替换旧库。
+
+## Python 包结构
+
+仓库按依赖方向拆为九个独立发行包：`nico-contracts` 和 `nico-domain` 是底层；`nico-agent-core` 依赖 contracts；`nico-application` 依赖 contracts/domain；`nico-adapters`、`nico-storage`、`nico-cli`、`nico-web` 分别实现模型/工具、存储、命令行和 HTTP 界面；`packages/nico-app` 构建 `nico-agent` wheel，并作为唯一组合根装配其余包。`career_agent.*` 保留旧导入和 `python -m` 入口。
 
 接 OpenAI 兼容的聊天补全接口时，在启动前设置环境变量。请求使用 `max_tokens=2048`；所选端点需要支持该参数和工具调用协议：
 

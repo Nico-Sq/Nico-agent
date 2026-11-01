@@ -26,10 +26,11 @@ from nico_cli import (
     session_banner as _session_banner,
 )
 
-from .models import ModelCatalog
-from .providers import ModelError
+from nico_adapters.models.catalog import ModelCatalog
+from nico_contracts.errors import ModelError
 from .runtime import AgentRuntime
-from .store import Store
+from nico_storage import Store
+from .config import data_dir
 
 
 def session_banner(store: Store, session: dict) -> str:
@@ -82,7 +83,7 @@ async def discover_mcp(mcp) -> list[dict]:
 
 
 def _make_router(channel, store: Store, chat: ChatUseCases, model_id: str):
-    from .channels import ChannelRouter
+    from nico_application.channels import ChannelRouter
 
     sender_id = getattr(channel, "sender_id", "local")
     return ChannelRouter(
@@ -126,8 +127,7 @@ def main() -> None:
     if os.getenv("AUTH_REQUIRED", "false").lower() == "true":
         parser.error("启用账户登录时请通过 Web API 管理各账户数据")
 
-    root = Path(__file__).resolve().parent.parent
-    store = Store(Path(os.getenv("DATA_DIR", root / "data")) / "career_agent.sqlite3")
+    store = Store(data_dir() / "career_agent.sqlite3")
     catalog = ModelCatalog()
     adapter_types = load_tool_adapters(("stdio_mcp", "trusted_local_plugins"))
     mcp = adapter_types["stdio_mcp"]()

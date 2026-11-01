@@ -1,4 +1,4 @@
-﻿"""Prompt and message assembly for one run.
+"""Prompt and message assembly for one run.
 
 The runtime only asks this module for a ready message list, so prompt rules and
 context budgets can be read and changed without touching the model loop.
@@ -6,11 +6,10 @@ context budgets can be read and changed without touching the model loop.
 
 import hashlib
 import json
-from pathlib import Path
+from importlib.resources import files
 
 from nico_contracts.messages import AgentMessage
 
-SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 MAX_CONTEXT_CHARS = 32_000
 # 修改系统提示拼接规则时同步递增此版本。
 PROMPT_POLICY_VERSION = "5"
@@ -20,8 +19,8 @@ class ContextBudgetError(ValueError):
     """最新消息本身已超出本轮上下文预算。"""
 
 
-def skill_file(kind: str) -> Path:
-    return SKILL_ROOT / f"{kind}.md"
+def skill_file(kind: str):
+    return files("nico_application").joinpath("resources", "prompts", f"{kind}.md")
 
 
 def prompt_version(kind: str) -> str:

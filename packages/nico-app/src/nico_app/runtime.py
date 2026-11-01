@@ -27,16 +27,16 @@ from nico_application import (
 )
 from nico_domain import tool_is_read_only
 
-from .context import (
+from nico_application.context import (
     ContextBudgetError,
     assemble as assemble_context,
     build_context as context_messages,
     prompt_version as prompt_fingerprint,
 )
-from .mcp import MCPServers
-from .plugins import LocalPlugins, PluginTimeout
-from .store import Store
-from .tools import READ_ONLY_TOOLS, call as run_internal, record, schemas, tool_message
+from nico_adapters.mcp import MCPServers
+from nico_adapters.plugins import LocalPlugins, PluginTimeout
+from nico_application.tools import READ_ONLY_TOOLS, call as run_internal, record, schemas, tool_message
+from nico_storage import Store
 
 
 class AgentRuntime:

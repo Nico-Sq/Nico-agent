@@ -1,16 +1,10 @@
-import asyncio
-import logging
-import os
-from contextlib import asynccontextmanager, suppress
-from contextvars import ContextVar
-from pathlib import Path
+"""HTTP routes and request models for Nico-agent."""
+
 from typing import Literal
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
-from nico_adapters.registry import load_tool_adapters
 
 from nico_application import (
     ChatUseCases,
@@ -21,89 +15,39 @@ from nico_application import (
     ToolGrantUseCases,
     UseCaseError,
 )
+from nico_contracts.errors import ModelError
 
-from .auth import AuthStore, LoginRateLimited
-from .auto_backup import backup_all
-from .extract import MAX_FILE_BYTES, extract_text
-from .models import ModelCatalog
-from .provider import Provider
-from .providers import ModelError
-from .runtime import AgentRuntime
-from .store import Store
+from .backend import active_backend, active_runtime as _active_runtime, active_store as _active_store
 
 
-ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.getenv("DATA_DIR", ROOT / "data"))
-AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
-auth_store = AuthStore(DATA_DIR / "auth.sqlite3") if AUTH_REQUIRED else None
-store = Store(DATA_DIR / "career_agent.sqlite3")
-provider = Provider()
-model_catalog = ModelCatalog()
-_TOOL_ADAPTER_TYPES = load_tool_adapters(("stdio_mcp", "trusted_local_plugins"))
-MCPServers = _TOOL_ADAPTER_TYPES["stdio_mcp"]
-LocalPlugins = _TOOL_ADAPTER_TYPES["trusted_local_plugins"]
-mcp_servers = MCPServers()
-local_plugins = LocalPlugins()
-runtime = AgentRuntime(store, provider, mcp_servers, local_plugins)
+router = APIRouter()
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    local_plugins.activate()
-    async def backup_once():
-        try:
-            await asyncio.to_thread(backup_all, DATA_DIR)
-        except Exception:
-            logging.exception("本地业务数据自动备份失败")
-
-    async def backup_loop():
-        while True:
-            await asyncio.sleep(3600)
-            await backup_once()
-
-    await backup_once()
-    task = asyncio.create_task(backup_loop())
-    try:
-        yield
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        with suppress(Exception):
-            await mcp_servers.close()
-        with suppress(Exception):
-            await local_plugins.close()
-        await backup_once()
+def active_store():
+    return _active_store()
 
 
-app = FastAPI(title="双线求职 Agent", lifespan=lifespan)
-request_store: ContextVar[Store | None] = ContextVar("request_store", default=None)
-request_runtime: ContextVar[AgentRuntime | None] = ContextVar("request_runtime", default=None)
+def active_runtime():
+    return _active_runtime()
 
 
-def active_store() -> Store:
-    return request_store.get() or store
+def active_chat_use_cases():
+    backend = active_backend()
+    return ChatUseCases(active_store(), backend.model_catalog(), run_chat_session,
+                        backend.cancel_session_runs)
 
 
-def active_runtime() -> AgentRuntime:
-    return request_runtime.get() or runtime
+def active_interview_use_cases():
+    backend = active_backend()
+    return InterviewUseCases(active_store(), backend.model_catalog(), run_interview_session,
+                             backend.cancel_session_runs)
 
 
-def active_chat_use_cases() -> ChatUseCases:
-    return ChatUseCases(active_store(), model_catalog, run_chat_session,
-                        AgentRuntime.cancel_session_runs)
-
-
-def active_interview_use_cases() -> InterviewUseCases:
-    return InterviewUseCases(active_store(), model_catalog, run_interview_session,
-                             AgentRuntime.cancel_session_runs)
-
-
-def active_material_use_cases() -> MaterialUseCases:
+def active_material_use_cases():
     return MaterialUseCases(active_store())
 
 
-def active_memory_use_cases() -> MemoryUseCases:
+def active_memory_use_cases():
     return MemoryUseCases(active_store())
 
 
@@ -120,35 +64,42 @@ def http_interview_use_case_error(exc: UseCaseError) -> HTTPException:
     return http_use_case_error(exc)
 
 
-@app.middleware("http")
-async def bind_account(request: Request, call_next):
-    if not AUTH_REQUIRED or request.url.path in (
-        "/", "/api/config", "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-    ) or request.url.path.startswith("/static/"):
-        return await call_next(request)
-    user_id = auth_store.resolve_token(request.cookies.get("nico_session"))
-    if user_id is None:
-        return JSONResponse({"detail": "请先登录"}, status_code=401)
-    scoped_store = Store(DATA_DIR / "users" / user_id / "career_agent.sqlite3")
-    store_token = request_store.set(scoped_store)
-    runtime_token = request_runtime.set(AgentRuntime(scoped_store, provider, mcp_servers, local_plugins))
+async def run_chat_session(session: dict) -> dict:
+    backend = active_backend()
+    selected = session.get("model_id", "default")
+    run = active_runtime() if selected == "default" else backend.make_runtime(
+        active_store(), backend.model_catalog().get(selected),
+    )
+    return await run.run(session)
+
+
+async def run_interview_session(session: dict, result_handler) -> dict:
+    backend = active_backend()
+    selected = session.get("model_id", "default")
+    run = active_runtime() if selected == "default" else backend.make_runtime(
+        active_store(), backend.model_catalog().get(selected),
+    )
+    return await run.run(session, result_handler=result_handler)
+
+
+async def complete_chat_request(result) -> dict | JSONResponse:
     try:
-        return await call_next(request)
-    finally:
-        request_store.reset(store_token)
-        request_runtime.reset(runtime_token)
+        return await result
+    except UseCaseError:
+        raise
+    except ModelError as exc:
+        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
+    except ValueError:
+        return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
+    except Exception:
+        return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
 
 
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    """Keep private API payloads out of shared caches and block content sniffing."""
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    if request.url.path.startswith("/api/"):
-        response.headers.setdefault("Cache-Control", "no-store")
-    return response
-
+async def complete_interview_request(result) -> dict | JSONResponse:
+    try:
+        return await complete_chat_request(result)
+    except UseCaseError as exc:
+        raise http_interview_use_case_error(exc) from exc
 
 class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=12000)
@@ -234,57 +185,23 @@ def require_session(session_id: str, kind: str) -> dict:
     return session
 
 
-async def run_chat_session(session: dict) -> dict:
-    selected = session.get("model_id", "default")
-    run = active_runtime() if selected == "default" else AgentRuntime(
-        active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
-    return await run.run(session)
-
-
-async def run_interview_session(session: dict, result_handler) -> dict:
-    selected = session.get("model_id", "default")
-    run = active_runtime() if selected == "default" else AgentRuntime(
-        active_store(), model_catalog.get(selected), mcp_servers, local_plugins)
-    return await run.run(session, result_handler=result_handler)
-
-
-async def complete_chat_request(result) -> dict | JSONResponse:
-    try:
-        return await result
-    except UseCaseError:
-        raise
-    except ModelError as exc:
-        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
-    except ValueError:
-        return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
-    except Exception:
-        return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
-
-
-async def complete_interview_request(result) -> dict | JSONResponse:
-    try:
-        return await complete_chat_request(result)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-
-@app.get("/api/config")
+@router.get("/api/config")
 def config():
-    return {"provider": provider.mode, "model": provider.model, "auth_required": AUTH_REQUIRED,
-            "config_error": provider.configuration_error()}
+    return {"provider": active_backend().provider().mode, "model": active_backend().provider().model, "auth_required": active_backend().auth_required(),
+            "config_error": active_backend().provider().configuration_error()}
 
 
-@app.get("/api/models")
+@router.get("/api/models")
 def list_models():
-    return model_catalog.list()
+    return active_backend().model_catalog().list()
 
 
-@app.get("/api/memories")
+@router.get("/api/memories")
 def list_memories(q: str = Query(default="", max_length=100)):
     return active_memory_use_cases().search(q)
 
 
-@app.post("/api/memories")
+@router.post("/api/memories")
 def add_memory(body: LongMemoryInput):
     try:
         return active_memory_use_cases().add(body.content)
@@ -292,7 +209,7 @@ def add_memory(body: LongMemoryInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.delete("/api/memories/{memory_id}")
+@router.delete("/api/memories/{memory_id}")
 def delete_memory(memory_id: str):
     try:
         active_memory_use_cases().delete(memory_id)
@@ -301,7 +218,7 @@ def delete_memory(memory_id: str):
     return {"deleted": True}
 
 
-@app.get("/api/memory-candidates")
+@router.get("/api/memory-candidates")
 def list_memory_candidates(
     session_id: str | None = Query(default=None),
     status: Literal["pending", "confirmed"] | None = Query(default=None),
@@ -314,7 +231,7 @@ def list_memory_candidates(
         raise http_use_case_error(exc) from exc
 
 
-@app.get("/api/memory-candidates/{candidate_id}")
+@router.get("/api/memory-candidates/{candidate_id}")
 def get_memory_candidate(candidate_id: str):
     try:
         return active_memory_use_cases().get_candidate(candidate_id)
@@ -322,7 +239,7 @@ def get_memory_candidate(candidate_id: str):
         raise http_use_case_error(exc) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/memory-candidates")
+@router.post("/api/chat/sessions/{session_id}/memory-candidates")
 def create_memory_candidate(session_id: str, body: MemoryCandidateInput):
     require_session(session_id, "chat")
     try:
@@ -335,7 +252,7 @@ def create_memory_candidate(session_id: str, body: MemoryCandidateInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.put("/api/memory-candidates/{candidate_id}")
+@router.put("/api/memory-candidates/{candidate_id}")
 def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
     try:
         return active_memory_use_cases().edit_candidate(candidate_id, body.content)
@@ -345,7 +262,7 @@ def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/memory-candidates/{candidate_id}/confirm")
+@router.post("/api/memory-candidates/{candidate_id}/confirm")
 def confirm_memory_candidate(candidate_id: str):
     try:
         return active_memory_use_cases().confirm_candidate(candidate_id)
@@ -355,7 +272,7 @@ def confirm_memory_candidate(candidate_id: str):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.delete("/api/memory-candidates/{candidate_id}")
+@router.delete("/api/memory-candidates/{candidate_id}")
 def delete_memory_candidate(candidate_id: str):
     try:
         active_memory_use_cases().delete_candidate(candidate_id)
@@ -364,29 +281,29 @@ def delete_memory_candidate(candidate_id: str):
     return {"deleted": True}
 
 
-@app.get("/api/mcp/tools")
+@router.get("/api/mcp/tools")
 async def list_mcp_tools():
     try:
-        return await mcp_servers.discover()
+        return await active_backend().mcp_servers().discover()
     except Exception as exc:
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
 
 
-@app.get("/api/mcp/servers")
+@router.get("/api/mcp/servers")
 async def list_mcp_servers():
     """Report each configured server so operators can see why a tool is missing."""
-    return {"servers": await mcp_servers.report()}
+    return {"servers": await active_backend().mcp_servers().report()}
 
 
-@app.get("/api/tools")
+@router.get("/api/tools")
 async def list_tools():
     try:
-        return local_plugins.discover() + await mcp_servers.discover()
+        return active_backend().local_plugins().discover() + await active_backend().mcp_servers().discover()
     except Exception as exc:
         raise HTTPException(502, "工具发现失败，请检查本地插件或 MCP 配置") from exc
 
 
-@app.get("/api/{kind}/sessions/{session_id}/tools")
+@router.get("/api/{kind}/sessions/{session_id}/tools")
 def get_session_tools(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
@@ -394,7 +311,7 @@ def get_session_tools(kind: str, session_id: str):
     return {"names": ToolGrantUseCases(active_store()).list(session_id)}
 
 
-@app.put("/api/{kind}/sessions/{session_id}/tools")
+@router.put("/api/{kind}/sessions/{session_id}/tools")
 async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
@@ -403,7 +320,7 @@ async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
         raise HTTPException(409, "运行中不能修改工具授权")
     try:
         available = {item["name"]: item
-                     for item in local_plugins.discover() + await mcp_servers.discover()}
+                     for item in active_backend().local_plugins().discover() + await active_backend().mcp_servers().discover()}
     except Exception as exc:
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
     try:
@@ -416,35 +333,35 @@ async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
     return {"names": names}
 
 
-@app.get("/api/data/backup")
+@router.get("/api/data/backup")
 def backup_data():
     return Response(active_store().backup(), media_type="application/vnd.sqlite3",
                     headers={"Content-Disposition": 'attachment; filename="nico-agent-backup.sqlite3"'})
 
 
 def set_login_cookie(response: Response, request: Request, user_id: str):
-    response.set_cookie("nico_session", auth_store.issue_token(user_id), max_age=7 * 24 * 3600,
+    response.set_cookie("nico_session", active_backend().auth_store().issue_token(user_id), max_age=7 * 24 * 3600,
                         httponly=True, secure=request.url.scheme == "https", samesite="strict", path="/")
 
 
-@app.post("/api/auth/register")
+@router.post("/api/auth/register")
 def register(body: Credentials, request: Request, response: Response):
-    if not AUTH_REQUIRED:
+    if not active_backend().auth_required():
         raise HTTPException(404)
-    user_id = auth_store.register(body.username, body.password)
+    user_id = active_backend().auth_store().register(body.username, body.password)
     if user_id is None:
         raise HTTPException(409, "用户名已存在")
     set_login_cookie(response, request, user_id)
     return {"username": body.username.lower()}
 
 
-@app.post("/api/auth/login")
+@router.post("/api/auth/login")
 def login(body: Credentials, request: Request, response: Response):
-    if not AUTH_REQUIRED:
+    if not active_backend().auth_required():
         raise HTTPException(404)
     try:
-        user_id = auth_store.login(body.username, body.password)
-    except LoginRateLimited as exc:
+        user_id = active_backend().auth_store().login(body.username, body.password)
+    except active_backend().login_rate_limited_error as exc:
         raise HTTPException(429, "登录尝试过多，请 15 分钟后重试") from exc
     if user_id is None:
         raise HTTPException(401, "用户名或密码错误")
@@ -452,31 +369,31 @@ def login(body: Credentials, request: Request, response: Response):
     return {"username": body.username.lower()}
 
 
-@app.get("/api/auth/me")
+@router.get("/api/auth/me")
 def current_user(request: Request):
-    if not AUTH_REQUIRED:
+    if not active_backend().auth_required():
         raise HTTPException(404)
-    user_id = auth_store.resolve_token(request.cookies.get("nico_session"))
+    user_id = active_backend().auth_store().resolve_token(request.cookies.get("nico_session"))
     if user_id is None:
         raise HTTPException(401, "请先登录")
-    return {"username": auth_store.username(user_id)}
+    return {"username": active_backend().auth_store().username(user_id)}
 
 
-@app.post("/api/auth/logout")
+@router.post("/api/auth/logout")
 def logout(request: Request, response: Response):
-    if not AUTH_REQUIRED:
+    if not active_backend().auth_required():
         raise HTTPException(404)
-    auth_store.revoke_token(request.cookies.get("nico_session"))
+    active_backend().auth_store().revoke_token(request.cookies.get("nico_session"))
     response.delete_cookie("nico_session", path="/")
     return {"logged_out": True}
 
 
-@app.get("/api/materials")
+@router.get("/api/materials")
 def list_materials():
     return active_material_use_cases().list_materials()
 
 
-@app.post("/api/materials")
+@router.post("/api/materials")
 def create_material(body: MaterialInput):
     try:
         return active_material_use_cases().create_material(body.kind, body.title, body.content)
@@ -484,16 +401,16 @@ def create_material(body: MaterialInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/materials/extract")
+@router.post("/api/materials/extract")
 async def extract_material(file: UploadFile = File(...)):
-    data = await file.read(MAX_FILE_BYTES + 1)
+    data = await file.read(active_backend().max_file_bytes + 1)
     try:
-        return {"filename": file.filename, "content": extract_text(file.filename or "", data)}
+        return {"filename": file.filename, "content": active_backend().extract_text(file.filename or "", data)}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.put("/api/materials/{material_id}")
+@router.put("/api/materials/{material_id}")
 def edit_material(material_id: str, body: MaterialEdit):
     try:
         material = active_material_use_cases().edit_material(
@@ -506,19 +423,19 @@ def edit_material(material_id: str, body: MaterialEdit):
     return material
 
 
-@app.delete("/api/materials/{material_id}")
+@router.delete("/api/materials/{material_id}")
 def delete_material(material_id: str):
     if not active_material_use_cases().delete_material(material_id):
         raise HTTPException(404, "材料不存在或已撤回")
     return {"revoked": True}
 
 
-@app.get("/api/claims")
+@router.get("/api/claims")
 def list_claims():
     return active_material_use_cases().list_claims()
 
 
-@app.post("/api/claims")
+@router.post("/api/claims")
 def create_claim(body: ClaimInput):
     try:
         return active_material_use_cases().create_claim(body.text, body.material_id)
@@ -526,7 +443,7 @@ def create_claim(body: ClaimInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.put("/api/claims/{claim_id}")
+@router.put("/api/claims/{claim_id}")
 def edit_claim(claim_id: str, body: ClaimEdit):
     try:
         claim = active_material_use_cases().edit_claim(claim_id, body.text)
@@ -537,14 +454,14 @@ def edit_claim(claim_id: str, body: ClaimEdit):
     return claim
 
 
-@app.delete("/api/claims/{claim_id}")
+@router.delete("/api/claims/{claim_id}")
 def delete_claim(claim_id: str):
     if not active_material_use_cases().delete_claim(claim_id):
         raise HTTPException(404, "经历不存在或已撤回")
     return {"revoked": True}
 
 
-@app.post("/api/claims/{claim_id}/confirm")
+@router.post("/api/claims/{claim_id}/confirm")
 def confirm_claim(claim_id: str):
     claim = active_material_use_cases().confirm_claim(claim_id)
     if claim is None:
@@ -552,14 +469,14 @@ def confirm_claim(claim_id: str):
     return claim
 
 
-@app.get("/api/{kind}/sessions")
+@router.get("/api/{kind}/sessions")
 def list_sessions(kind: str, q: str = Query(default="", max_length=100)):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     return active_store().list_sessions(kind, q)
 
 
-@app.get("/api/{kind}/sessions/{session_id}")
+@router.get("/api/{kind}/sessions/{session_id}")
 def get_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
@@ -571,17 +488,17 @@ def get_session(kind: str, session_id: str):
     return result
 
 
-@app.delete("/api/{kind}/sessions/{session_id}")
+@router.delete("/api/{kind}/sessions/{session_id}")
 def delete_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     if not active_store().delete_session(session_id, kind):
         raise HTTPException(404, "会话不存在")
-    AgentRuntime.cancel_session_runs(session_id)
+    active_backend().cancel_session_runs(session_id)
     return {"deleted": True}
 
 
-@app.put("/api/{kind}/sessions/{session_id}/title")
+@router.put("/api/{kind}/sessions/{session_id}/title")
 def update_session_title(kind: str, session_id: str, body: SessionTitleInput):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
@@ -591,7 +508,7 @@ def update_session_title(kind: str, session_id: str, body: SessionTitleInput):
     return session
 
 
-@app.get("/api/{kind}/sessions/{session_id}/export.md")
+@router.get("/api/{kind}/sessions/{session_id}/export.md")
 def export_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
@@ -629,7 +546,7 @@ def export_session(kind: str, session_id: str):
                     headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
 
-@app.post("/api/chat/sessions")
+@router.post("/api/chat/sessions")
 def create_chat(body: ChatCreateInput | None = None):
     model_id = body.model_id if body else "default"
     try:
@@ -638,7 +555,7 @@ def create_chat(body: ChatCreateInput | None = None):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.put("/api/chat/sessions/{session_id}/memory")
+@router.put("/api/chat/sessions/{session_id}/memory")
 def update_chat_memory(session_id: str, body: ChatMemoryInput):
     try:
         return {"text": active_chat_use_cases().set_memory(session_id, body.text)}
@@ -646,7 +563,7 @@ def update_chat_memory(session_id: str, body: ChatMemoryInput):
         raise http_use_case_error(exc) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/messages")
+@router.post("/api/chat/sessions/{session_id}/messages")
 async def chat_message(session_id: str, body: TextInput):
     try:
         return await complete_chat_request(
@@ -658,7 +575,7 @@ async def chat_message(session_id: str, body: TextInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/messages/claim")
+@router.post("/api/chat/sessions/{session_id}/messages/claim")
 def claim_chat_message(session_id: str, body: TextInput):
     try:
         return active_chat_use_cases().claim_message(session_id, body.text)
@@ -668,7 +585,7 @@ def claim_chat_message(session_id: str, body: TextInput):
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/messages/run")
+@router.post("/api/chat/sessions/{session_id}/messages/run")
 async def run_chat_message(session_id: str, body: ChatRunInput):
     try:
         return await complete_chat_request(
@@ -678,7 +595,7 @@ async def run_chat_message(session_id: str, body: ChatRunInput):
         raise http_use_case_error(exc) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/retry")
+@router.post("/api/chat/sessions/{session_id}/retry")
 async def retry_chat_message(session_id: str):
     try:
         return await complete_chat_request(
@@ -688,7 +605,7 @@ async def retry_chat_message(session_id: str):
         raise http_use_case_error(exc) from exc
 
 
-@app.post("/api/chat/sessions/{session_id}/interrupt")
+@router.post("/api/chat/sessions/{session_id}/interrupt")
 def interrupt_chat(session_id: str):
     try:
         return active_chat_use_cases().interrupt(session_id)
@@ -696,7 +613,7 @@ def interrupt_chat(session_id: str):
         raise http_use_case_error(exc) from exc
 
 
-@app.post("/api/interview/sessions")
+@router.post("/api/interview/sessions")
 def create_interview(body: InterviewInput):
     try:
         return active_interview_use_cases().create(
@@ -708,7 +625,7 @@ def create_interview(body: InterviewInput):
         raise HTTPException(422, message) from exc
 
 
-@app.get("/api/interview/sessions/{session_id}/report")
+@router.get("/api/interview/sessions/{session_id}/report")
 def interview_report(session_id: str):
     try:
         return active_interview_use_cases().report(session_id)
@@ -716,7 +633,7 @@ def interview_report(session_id: str):
         raise http_interview_use_case_error(exc) from exc
 
 
-@app.post("/api/interview/sessions/{session_id}/practice")
+@router.post("/api/interview/sessions/{session_id}/practice")
 def create_practice(session_id: str, body: PracticeInput):
     try:
         return active_interview_use_cases().create_practice(session_id, body.question_number)
@@ -726,17 +643,17 @@ def create_practice(session_id: str, body: PracticeInput):
         raise HTTPException(409, str(exc)) from exc
 
 
-@app.post("/api/interview/sessions/{session_id}/start")
+@router.post("/api/interview/sessions/{session_id}/start")
 async def start_interview(session_id: str):
     return await complete_interview_request(active_interview_use_cases().start(session_id))
 
 
-@app.post("/api/interview/sessions/{session_id}/answers")
+@router.post("/api/interview/sessions/{session_id}/answers")
 async def answer_interview(session_id: str, body: TextInput):
     return await complete_interview_request(active_interview_use_cases().answer(session_id, body.text))
 
 
-@app.post("/api/interview/sessions/{session_id}/answers/claim")
+@router.post("/api/interview/sessions/{session_id}/answers/claim")
 def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
     try:
         return active_interview_use_cases().claim_answer(
@@ -746,21 +663,21 @@ def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
         raise http_interview_use_case_error(exc) from exc
 
 
-@app.post("/api/interview/sessions/{session_id}/answers/run")
+@router.post("/api/interview/sessions/{session_id}/answers/run")
 async def run_interview_answer(session_id: str, body: ChatRunInput):
     return await complete_interview_request(
         active_interview_use_cases().run_claimed_answer(session_id, body.version)
     )
 
 
-@app.post("/api/interview/sessions/{session_id}/skip")
+@router.post("/api/interview/sessions/{session_id}/skip")
 async def skip_interview_question(session_id: str, body: PracticeInput):
     return await complete_interview_request(
         active_interview_use_cases().skip(session_id, body.question_number)
     )
 
 
-@app.post("/api/interview/sessions/{session_id}/pause")
+@router.post("/api/interview/sessions/{session_id}/pause")
 def pause_interview(session_id: str):
     try:
         return active_interview_use_cases().pause(session_id)
@@ -768,7 +685,7 @@ def pause_interview(session_id: str):
         raise http_interview_use_case_error(exc) from exc
 
 
-@app.post("/api/interview/sessions/{session_id}/cancel")
+@router.post("/api/interview/sessions/{session_id}/cancel")
 def cancel_interview(session_id: str):
     try:
         return active_interview_use_cases().cancel(session_id)
@@ -776,15 +693,6 @@ def cancel_interview(session_id: str):
         raise http_interview_use_case_error(exc) from exc
 
 
-@app.post("/api/interview/sessions/{session_id}/resume")
+@router.post("/api/interview/sessions/{session_id}/resume")
 async def resume_interview(session_id: str):
     return await complete_interview_request(active_interview_use_cases().resume(session_id))
-
-
-STATIC = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
-
-
-@app.get("/")
-def index():
-    return FileResponse(STATIC / "index.html")

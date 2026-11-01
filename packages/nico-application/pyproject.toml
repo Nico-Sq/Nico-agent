@@ -13,4 +13,4 @@ dependencies = ["nico-contracts==0.1.0", "nico-domain==0.1.0", "jsonschema>=4.21
 where = ["src"]
 
 [tool.setuptools.package-data]
-nico_application = ["py.typed"]
+nico_application = ["py.typed", "resources/prompts/*.md"]

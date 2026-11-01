@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nico-agent"
+version = "0.1.0"
+description = "Local-first Nico-agent application and compatibility package"
+requires-python = ">=3.11"
+dependencies = [
+    "nico-contracts==0.1.0",
+    "nico-domain==0.1.0",
+    "nico-agent-core==0.1.0",
+    "nico-application==0.1.0",
+    "nico-adapters==0.1.0",
+    "nico-storage==0.1.0",
+    "nico-cli==0.1.0",
+    "nico-web==0.1.0",
+    "uvicorn>=0.30",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nico_app*", "career_agent*"]
+
+[tool.setuptools.package-data]
+nico_app = ["py.typed"]

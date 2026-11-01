@@ -1,17 +1,17 @@
 """Compatibility CLI for restoring a Nico-agent business database snapshot."""
 
 import argparse
-import os
 import sqlite3
 from pathlib import Path
 
 from nico_storage.restore import OPTIONAL_TABLES, TABLES, restore, validate_backup
+from .config import data_dir
 
 
 def main():
     parser = argparse.ArgumentParser(description="恢复 Nico-agent 业务数据；运行前请停止应用。")
     parser.add_argument("backup", type=Path, help="页面下载的 SQLite 业务数据快照")
-    default_target = Path(os.getenv("DATA_DIR", Path(__file__).resolve().parent.parent / "data")) / "career_agent.sqlite3"
+    default_target = data_dir() / "career_agent.sqlite3"
     parser.add_argument("--target", type=Path, default=default_target, help="目标业务数据库路径")
     args = parser.parse_args()
     try:

@@ -717,7 +717,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [x] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
 - [x] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
 - [x] 阶段 8：性能/可靠性基线与超预算优化。
-- [ ] 阶段 9：唯一组合根、兼容层、WebUI 收口和全 wheel 安装验收。
+- [x] 阶段 9：唯一组合根、兼容层、WebUI 收口和全 wheel 安装验收。
 
 ### 13.2 条件任务
 
@@ -843,6 +843,22 @@ API/CLI/数据兼容：
 - 本机假 HTTP 的 `post_json` P95 为 1,882.4954 ms（P99 2,300.1177 ms）。独立诊断中，复用异步 HTTPX 客户端的三次 loopback 请求为 2.1–4.4 ms，而生产 `post_json` 每次新建客户端仍明显更慢；这不是实际模型服务测量，也没有为该项设定预算。真实模型端点验收仍是条件任务，因此不据此改传输层，待选定端点后再测连接复用收益。基准未请求外部模型端点、未下载模型，也未触碰真实库或凭据。
 - 验收：基准 smoke 测试通过；根目录全套测试 143 项通过（含 API、CLI、账户和备份/恢复）；7 个包独立测试共 59 项通过；`python -m compileall -q career_agent packages tests scripts benchmarks`、`python scripts/check_dependency_graph.py`（依赖图无环，领域/application 禁止依赖检查通过）和 `git diff --check` 通过。所有基准数据库在临时目录，退出后自动清理。
 - 阶段实现与数据结果分别提交；不 push。写入此记录时阶段 9 尚未开始。
+
+阶段 9 调研与实施前决策（2026-11-01）：
+
+- Akashic：检查 `E:\Akashic-agent\akashic-agent\bootstrap\app.py`、`bootstrap\wiring.py` 与 `bootstrap\app_server.py`。源码由 `AppRuntime` 显式装配服务，并在 `finally` 中按顺序关闭资源；Web server 从 runtime services 建立。采用单一组合根与有序关闭自有资源；不照搬其较大的生命周期运行时。
+- nanobot：检查 `E:\nanobot\nanobot\api\server.py`、`cli\commands.py`、`webui\src\App.tsx` 与 `main.tsx`。API 使用接收运行时的 app factory，CLI 负责运行时装配和启动/清理；WebUI 按组件拆分但依赖 React/Vite。采用 app factory 和清晰入口组合；保持 Nico 的原生 HTML/CSS/JS，不增加前端依赖。
+- Pi：检查 `E:\Agent\Pi-agent\pi\packages\coding-agent\src\cli.ts`、`src\main.ts`、`src\cli\setup.ts` 与 `src\core\session-manager.ts`。CLI 入口委托 setup/main，职责模块和会话持久化管理器分离；coding-agent 包未发现浏览器 WebUI（仅终端 UI 和 HTML 导出模板）。采用明确入口职责；没有可直接借鉴的浏览器 UI 实现，不复制其终端界面。
+- 实施决定：`nico-web` 只保留 FastAPI app factory、HTTP 请求/响应契约、路由、中间件和包内静态资源读取；具体 Store、认证、Provider、MCP/插件、运行时、生命周期及 CLI 服务由 `nico-app` 单一组合根装配并注入。把提示词、静态文件和兼容入口随发行包打包，以 `importlib.resources` 读取；现有 `career_agent` 模块仅转发至新包。原生 WebUI 按共享 API/state、聊天、面试、设置/记忆拆分，保持既有 URL、行为和灰阶设计。
+- 验收继续覆盖 API、CLI、DATA_DIR/账户隔离、数据库与备份恢复兼容；不改 schema、不加渠道、不实现流式、不开放写工具。本阶段不需要模型端点或下载模型。
+
+阶段 9 实施与验收记录（2026-11-01）：
+
+- 将 Web 路由与静态资源迁入 `nico-web`，应用装配、CLI、恢复入口和 `DATA_DIR` 选择迁入 `nico-app`；应用通过注入的 backend 连接 Web 层。其余旧 `career_agent` 导入路径保留兼容转发，提示词和静态文件随各自 wheel 打包。将原生 WebUI 脚本拆为共享状态/API、聊天、面试、设置与启动文件，未增加前端运行时依赖。
+- 根目录改为 uv workspace 元数据，新增 `scripts/install_workspace.py` 以依赖顺序安装九个 editable 包；README 更新安装和数据目录说明。未迁移 Store、未改数据库 schema、未新增渠道或流式、写工具仍默认拒绝。
+- 验收通过：根目录回归测试 143 项；独立包测试 60 项；`python scripts/check_dependency_graph.py --require-all` 检查无环且分层限制通过；九个 wheel 全部构建，并在仓库外临时 venv 安装验证 API、静态/提示词资源、兼容导入、CLI/恢复入口和 wheel 默认数据目录；全 workspace editable 安装后仓库外 smoke 通过。`compileall`、各静态 JS 的 `node --check` 和 `git diff --check` 通过。
+- 浏览器 smoke 覆盖桌面、375 px 移动视口、面试与设置界面、键盘焦点环及键盘发送；移动视口无横向溢出，演示聊天正常往返。API、CLI、DATA_DIR、账户隔离、数据库和备份恢复既有兼容快照/回归均通过。
+- 未下载或运行本地模型，未请求商业模型端点；阶段 9 不以模型服务为前置条件。阶段 9 完成后提交，不 push。
 
 ## 16. 给后续执行 AI 的直接指令
 
