@@ -1,0 +1,48 @@
+{
+  "test_date": "2026-11-02",
+  "code_commit": "df14087",
+  "provider": "openai_compatible",
+  "model": "openai/gpt-oss-20b",
+  "interview_prompt_version": "6b1a7486e6d5",
+  "cases": {
+    "json_api": [
+      {"id": "IF-03", "start_status": 200, "session_status": "awaiting_answer", "cleanup": true},
+      {"id": "IF-04", "start_status": 200, "answer_status": 502, "answer_code": "model_invalid_output", "cleanup": true},
+      {"id": "IF-06", "start_status": 200, "session_status": "awaiting_answer", "cleanup": true},
+      {"id": "IF-08", "start_status": 200, "answer_status": 502, "answer_code": "model_invalid_output", "cleanup": true},
+      {"id": "IF-09", "start_status": 200, "session_status": "awaiting_answer", "cleanup": true},
+      {"id": "IF-10", "start_status": 200, "answer_status": 502, "answer_code": "model_invalid_output", "cleanup": true}
+    ],
+    "frontend_sse": [
+      {
+        "id": "IF-04",
+        "start_ok": true,
+        "answer_ok": true,
+        "feedback": "您提到负责接口实现，但未配置事务或参与架构设计，这表明您在保证数据一致性方面可能缺乏主动性。建议说明您在接口层面采取了哪些措施来保证一致性，例如使用幂等性、锁机制或回滚策略。",
+        "evidence": ["我负责接口实现，但没有配置事务，也没有参与系统架构设计。"],
+        "cleanup": true
+      },
+      {
+        "id": "IF-08",
+        "start_ok": true,
+        "answer_ok": true,
+        "feedback": "您提到负责订单查询接口和部分单元测试，但未说明与团队成员的协作方式。请补充具体的行动、结果和证据。",
+        "evidence": ["团队一共 4 人，我负责订单查询接口和部分单元测试。"],
+        "cleanup": true
+      },
+      {
+        "id": "IF-10",
+        "start_ok": true,
+        "answer_ok": true,
+        "feedback": "您坦诚地承认目前无法回忆起 Redis 在项目中的具体用途，并表示需要查看代码确认，这表明您对信息的真实性保持谨慎。建议在面试中说明您会主动查阅项目文档或代码，并在确认后给出具体示例，以展示您对技术细节的负责态度。",
+        "evidence": ["我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。"],
+        "cleanup": true
+      }
+    ]
+  },
+  "findings": [
+    "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
+    "IF-04 与 IF-10 的流式反馈出现了没有具体行为或结果支撑的态度推断。",
+    "面试提示词已收紧此类判断规则；新提示词需要在重启服务后用这些案例复测。"
+  ]
+}
