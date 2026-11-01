@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager, suppress
+from functools import lru_cache
+from pathlib import Path
 
 from nico_adapters.models.catalog import ModelCatalog
 from nico_adapters.models.provider import Provider
@@ -38,6 +40,11 @@ def make_runtime(target_store, selected_provider):
     return AgentRuntime(target_store, selected_provider, mcp_servers, local_plugins)
 
 
+@lru_cache(maxsize=128)
+def make_account_store(path: Path) -> Store:
+    return Store(path)
+
+
 backend = WebBackend(
     data_dir=lambda: DATA_DIR,
     auth_required=lambda: AUTH_REQUIRED,
@@ -48,7 +55,7 @@ backend = WebBackend(
     model_catalog=lambda: model_catalog,
     mcp_servers=lambda: mcp_servers,
     local_plugins=lambda: local_plugins,
-    make_store=Store,
+    make_store=make_account_store,
     make_runtime=make_runtime,
     cancel_session_runs=AgentRuntime.cancel_session_runs,
     max_file_bytes=MAX_FILE_BYTES,

@@ -19,43 +19,29 @@ python -m career_agent
 
 仓库按依赖方向拆为九个独立发行包：`nico-contracts` 和 `nico-domain` 是底层；`nico-agent-core` 依赖 contracts；`nico-application` 依赖 contracts/domain；`nico-adapters`、`nico-storage`、`nico-cli`、`nico-web` 分别实现模型/工具、存储、命令行和 HTTP 界面；`packages/nico-app` 构建 `nico-agent` wheel，并作为唯一组合根装配其余包。`career_agent.*` 保留旧导入和 `python -m` 入口。
 
-接 OpenAI 兼容的聊天补全接口时，在启动前设置环境变量。请求使用 `max_tokens=2048`；所选端点需要支持该参数和工具调用协议：
+## 真实模型配置
 
-真实模型模式会将本次聊天消息、面试回答及获授权读取的材料发送到配置的模型服务。请先确认该服务符合你的数据使用要求。
-
-用户选定的 OpenAI 配置：
-
-官方状态核对：OpenAI 将 gpt-4o-mini 标记为 deprecated；DeepSeek 的更新记录列出 deepseek-flash 并说明旧 deepseek-chat 已停服。参见 [OpenAI 模型页](https://developers.openai.com/api/docs/models/gpt-4o-mini) 和 [DeepSeek 更新记录](https://api-docs.deepseek.com/updates/)。
-
-```powershell
-$env:MODEL_PROVIDER = "openai"
-$env:MODEL_API_BASE_URL = "https://api.openai.com"
-$env:OPENAI_API_KEY = "你的密钥"
-$env:MODEL_NAME = "gpt-4o-mini"
-$env:MODEL_TEMPERATURE = "0.7"
-```
-
-DeepSeek 可将 Provider 配为 `deepseek`、模型配为 `deepseek-flash`、Base URL 配为 `https://api.deepseek.com`，密钥放在 `DEEPSEEK_API_KEY`。上面的 Provider 与模型都可通过 `MODEL_CATALOG_PATH` 配置为新会话可选项。
+真实模型模式会将本次聊天消息、面试回答及获授权读取的材料发送到配置的模型服务。请先确认该服务符合你的数据使用要求。用户报告当前默认模型 `openai/gpt-oss-20b` 已能正常对话；模型服务地址和密钥不保存在仓库中。这是连接可用的用户报告，不代表工具调用、面试反馈质量或求职效果已通过评估。
 
 ```powershell
 $env:MODEL_PROVIDER = "openai_compatible"
-$env:MODEL_API_BASE_URL = "https://api.openai.com/v1"
+$env:MODEL_API_BASE_URL = "https://your-provider.example/v1"
 $env:MODEL_API_KEY = "你的密钥"
-$env:MODEL_NAME = "提供方的模型名"
+$env:MODEL_NAME = "your-supported-model-id"
 python -m career_agent
 ```
 
 真实模型模式至少要设置 `MODEL_NAME`，`MODEL_API_BASE_URL` 要是有效的 HTTP(S) 地址；本机兼容服务若不要求认证，`MODEL_API_KEY` 可以不设置。配置不完整时页面会显示原因，并暂时禁用聊天发送和开始面试；修改环境变量后重启应用。兼容接口若报告输出截断或其他非正常结束，本轮不会采纳回复或执行其中的工具调用；已提交的聊天消息或面试回答会保留，调整请求后可重试。
 
-`MODEL_PROVIDER` 可选 `demo`、`openai`、`deepseek`、`openai_compatible` 和 `anthropic`。`openai`、`deepseek` 和 `openai_compatible` 使用 OpenAI Chat Completions；`anthropic` 使用 Anthropic Messages。OpenAI 默认读取 `OPENAI_API_KEY`（兼容旧配置 `MODEL_API_KEY`），DeepSeek 读取 `DEEPSEEK_API_KEY`，Anthropic 仍读取 `MODEL_API_KEY`；无需认证的本地兼容接口可不设密钥。OpenAI 根地址 `https://api.openai.com` 自动补为 `/v1`；DeepSeek 根地址为 `https://api.deepseek.com`。用户选定的 OpenAI 模型为 `gpt-4o-mini`、温度为 `0.7`；该模型当前已标记为 deprecated，后续实际可用性取决于服务端。DeepSeek 模型配置为 `deepseek-flash`。兼容协议支持工具调用和 SSE；Web 聊天与面试通过 `Accept: text/event-stream` 协商 SSE，其他请求保持 JSON。温度可由 `MODEL_TEMPERATURE` 或模型目录中的 `temperature` 设置，范围 0–2。各模式要求模型支持工具调用。单次输出上限默认 2048，可用 `MODEL_MAX_OUTPUT_TOKENS` 或模型目录中的 `max_output_tokens` 调整，范围 256–8192。运行时通过可选的 Provider `stream` 能力接收增量，Agent 循环保留统一工具流程。
+`MODEL_PROVIDER` 可选 `demo`、`openai`、`deepseek`、`openai_compatible` 和 `anthropic`。`openai`、`deepseek` 和 `openai_compatible` 使用 OpenAI Chat Completions；`anthropic` 使用 Anthropic Messages。OpenAI 默认读取 `OPENAI_API_KEY`（兼容旧配置 `MODEL_API_KEY`），DeepSeek 读取 `DEEPSEEK_API_KEY`，Anthropic 读取 `MODEL_API_KEY`；无需认证的本地兼容接口可不设密钥。OpenAI 根地址会自动补为 `/v1`。各模式要求所选模型支持工具调用。Web 聊天与面试在请求 SSE 时接收增量，其他 API 请求保持 JSON。温度可由 `MODEL_TEMPERATURE` 或模型目录中的 `temperature` 设置，范围 0–2。单次输出上限默认 2048，可用 `MODEL_MAX_OUTPUT_TOKENS` 或模型目录中的 `max_output_tokens` 调整，范围 256–8192。
 
 需要在新会话中选择不同模型时，设置 `MODEL_CATALOG_PATH` 指向本地 JSON 文件，例如：
 
 ```json
 [
   {"id":"local","provider":"openai_compatible","model":"your-local-model","base_url":"http://127.0.0.1:1234/v1","supports_tools":true},
-  {"id":"openai","provider":"openai","model":"gpt-4o-mini","base_url":"https://api.openai.com","api_key_env":"OPENAI_API_KEY","temperature":0.7,"supports_tools":true},
-  {"id":"deepseek","provider":"deepseek","model":"deepseek-flash","base_url":"https://api.deepseek.com","api_key_env":"DEEPSEEK_API_KEY","supports_tools":true},
+  {"id":"openai","provider":"openai","model":"your-supported-model-id","base_url":"https://api.openai.com","api_key_env":"OPENAI_API_KEY","temperature":0.7,"supports_tools":true},
+  {"id":"deepseek","provider":"deepseek","model":"your-deepseek-model-id","base_url":"https://api.deepseek.com","api_key_env":"DEEPSEEK_API_KEY","supports_tools":true},
   {"id":"claude","provider":"anthropic","model":"your-claude-model","api_key_env":"MODEL_CLAUDE_KEY","supports_tools":true,"max_output_tokens":4096}
 ]
 ```
@@ -148,6 +134,6 @@ GitHub Actions 会在 Python 3.11 和 3.13 上运行同一套测试；真实模�
 
 ## 当前边界
 
-账户模式提供基本的数据隔离和按账户登录失败限流，尚无密码重置流程，不应直接作为公网生产服务。扫描版 PDF 没有文本层时需先进行 OCR；目前不解析音频。聊天固定备注需由用户维护；长期记忆候选可由 Agent 提议，但不会自动确认或自动注入模型，仍需用户逐条确认。渠道回复的 SQLite 账本可跨进程重启恢复；消息处理状态不确定时不会自动重跑模型，跨平台传输不承诺 exactly-once 投递。用户确认经历不等于独立事实核验，回答证据的原文匹配也不等于反馈事实正确。真实模型效果尚未验证。兼容端点不返回 token 用量时无法强制执行累计 token 阈值；真实货币费用上限需要模型价格和计费数据。语音、实时转写、第二聊天渠道、日程、外部搜索和更多 Provider 属于后续阶段。
+账户模式提供基本的数据隔离和按账户登录失败限流，尚无密码重置流程，不应直接作为公网生产服务。账户运行的取消登记仍是进程内状态；当前仅按单进程本地服务支持，跨进程取消和部署行为尚未验证。扫描版 PDF 没有文本层时需先进行 OCR；目前不解析音频。聊天固定备注需由用户维护；长期记忆候选可由 Agent 提议，但不会自动确认或自动注入模型，仍需用户逐条确认。渠道回复的 SQLite 账本可跨进程重启恢复；消息处理状态不确定时不会自动重跑模型，跨平台传输不承诺 exactly-once 投递。用户确认经历不等于独立事实核验，回答证据的原文匹配也不等于反馈事实正确。用户报告默认模型连接和普通聊天可用；工具调用、面试反馈质量和求职效果仍待评估。兼容端点不返回 token 用量时无法强制执行累计 token 阈值；真实货币费用上限需要模型价格和计费数据。语音、实时转写、第二聊天渠道、日程、外部搜索和更多 Provider 属于后续阶段。
 
-完整产品定义见 [项目定义.md](docs/项目定义.md)。
+完整产品定义见 [项目定义.md](docs/项目定义.md)；模型与核心流程的验证步骤见 [产品验证方案](docs/产品验证方案.md)。

@@ -85,22 +85,22 @@ flowchart LR
 
 | 能力 | 状态 | 可核对证据 | 尚缺部分 |
 |---|---|---|---|
-| 聊天与面试双线、材料/经历确认、逐题反馈、报告与复练 | 已完成本机基础闭环 | `career_agent/main.py`、`career_agent/store.py`、`career_agent/runtime.py`、`tests/test_api.py`、`tests/test_core.py` | 真实模型效果未验收；业务规则仍分散在入口、Store 和 Runtime |
-| Agent 工具循环、取消、会话版本防迟到提交、上下文与调用限额 | 已完成基础能力，通用边界未建立 | `career_agent/runtime.py`、`career_agent/events.py`、`career_agent/context.py`、`tests/test_core.py`、`tests/test_provider.py` | Runtime 耦合面试协议；`_ACTIVE_RUNS` 仅进程内；同步插件线程不可可靠取消 |
-| OpenAI Chat Completions、OpenAI 兼容端点、Anthropic、demo 与会话模型选择 | 已完成本地协议适配；本地真实端点验收路径已定，商业服务待选 | `career_agent/provider.py`、`career_agent/models.py`、`career_agent/providers/`、`tests/test_provider.py`、`tests/test_model_contracts.py` | 先用本地 OpenAI 兼容端点验证工具调用；商业端点尚未验收；非流式；HTTP 客户端尚未在长生命周期内复用 |
-| 内置只读工具、会话授权与只读并行 | 已完成当前只读安全闭环 | `career_agent/tools.py`、`career_agent/runtime.py`、`career_agent/store.py`、`tests/test_core.py` | 没有通用工具目录快照和独立权限策略包；写工具未开放 |
-| 本地 stdio MCP、白名单、连接复用、失败隔离 | 已完成只读基础能力 | `career_agent/mcp.py`、`career_agent/runtime.py`、`tests/test_mcp.py` | 仅 stdio；无远端 MCP；不确定副作用调用不重试的规则需继续由契约测试守住 |
-| 短期上下文、固定备注、可回源候选和确认后长期记忆 | 已完成基础能力 | `career_agent/context.py`、`career_agent/store.py`、`career_agent/tools.py`、`career_agent/skills/chat.md`、`tests/test_core.py`、`tests/test_api.py` | 固定 16 条消息窗口；长期记忆为 SQLite 字面检索；无自动注入或自动确认 |
-| 可信本地 Python 插件发现、授权、参数校验和调用 | 已完成当前只读基础能力 | `career_agent/plugins.py`、`examples/echo_plugin.py`、`tests/test_extensions.py` | 无显式生命周期/关闭接口；超时线程可能继续；无可信来源隔离 |
-| CLI 聊天、面试、候选记忆、模型和工具命令 | 已完成本机基础能力 | `career_agent/cli.py`、`career_agent/channels.py`、`tests/test_extensions.py` | 账户模式拒绝 CLI；命令层直接装配具体实现；未拆发行包 |
-| WebUI、登录、工具权限、候选记忆、导出与备份 | 已完成本机基础能力 | `career_agent/static/`、`career_agent/main.py`、`career_agent/auth.py`、`tests/test_api.py`、`tests/test_auth.py`、`tests/test_auto_backup.py` | `static/app.js` 集中大量页面状态；静态资源仍依赖包内文件系统路径 |
-| SQLite 业务数据、账户隔离、备份恢复 | 已完成基础能力 | `career_agent/store.py`、`career_agent/auth.py`、`career_agent/auto_backup.py`、`career_agent/restore.py`、`tests/test_restore.py` | 无显式 schema 版本；建表/ALTER 位于 `Store` 初始化；恢复表清单需随迁移演进 |
-| 文字渠道身份、去重和投递重试契约 | 部分完成 | `career_agent/channels.py`、`tests/test_extensions.py` | 只有 ConsoleChannel；绑定和幂等账本仅内存；无第二平台 |
-| 运行事件与用量记录 | 部分完成 | `career_agent/events.py`、`career_agent/runtime.py`、`tests/test_core.py` | 没有稳定事件端口；Web 无流式事件；无性能指标输出 |
-| 单仓库多发行包、独立 wheel、包依赖检查 | 尚未实现 | 当前仅有根 `pyproject.toml`；`[tool.setuptools] packages` 明确列出 `career_agent` 和 `career_agent.providers` | 所有目标包、发布依赖和独立安装验证均未建立 |
-| 性能基准与容量证据 | 尚未实现 | 仅有运行/上下文/事件上限：`career_agent/runtime.py`、`career_agent/context.py`、`career_agent/events.py` | 无查询延迟、并发、锁等待、内存、HTTP 连接复用或备份基准 |
+| 聊天与面试双线、材料/经历确认、逐题反馈、报告与复练 | 已完成本机基础闭环 | `packages/nico-web/src/nico_web/routes.py`、`packages/nico-application/src/nico_application/use_cases.py`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_api.py`、`tests/test_core.py` | 真实模型的面试反馈质量与求职效果尚未评估 |
+| Agent 工具循环、取消、会话版本防迟到提交、上下文与调用限额 | 已完成基础能力，通用边界未建立 | `packages/nico-agent-core/src/nico_agent_core/core.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-application/src/nico_application/context.py`、`tests/test_core.py`、`tests/test_provider.py` | `_ACTIVE_RUNS` 仅进程内；同步插件线程不可可靠取消；当前按单进程本地运行 |
+| OpenAI Chat Completions、OpenAI 兼容端点、Anthropic、demo、SSE 与会话模型选择 | 协议适配和 SSE 已实现；用户报告默认模型普通聊天可用 | `packages/nico-adapters/src/nico_adapters/models/`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_provider.py`、`tests/test_model_contracts.py` | 用户尚未提供可复现的端点配置；工具调用、面试反馈质量和求职效果仍待评估 |
+| 内置只读工具、会话授权与只读并行 | 已完成当前只读安全闭环 | `packages/nico-application/src/nico_application/tools.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-storage/src/nico_storage/store/`、`tests/test_core.py` | 当前不开放有副作用的写工具 |
+| 本地 stdio MCP、白名单、连接复用、失败隔离 | 已完成只读基础能力 | `packages/nico-adapters/src/nico_adapters/mcp.py`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_mcp.py` | 仅 stdio；无远端 MCP；不确定副作用调用不重试的规则需继续由契约测试守住 |
+| 短期上下文、固定备注、可回源候选和确认后长期记忆 | 已完成基础能力 | `packages/nico-application/src/nico_application/context.py`、`packages/nico-application/src/nico_application/tools.py`、`packages/nico-application/src/nico_application/resources/prompts/chat.md`、`packages/nico-storage/src/nico_storage/store/memory.py`、`tests/test_api.py` | 固定 16 条消息窗口；长期记忆为 SQLite 字面检索；无自动注入或自动确认 |
+| 可信本地 Python 插件发现、授权、参数校验和调用 | 已完成当前只读基础能力 | `packages/nico-adapters/src/nico_adapters/plugins.py`、`packages/nico-app/src/nico_app/main.py`、`examples/echo_plugin.py`、`tests/test_extensions.py` | 插件在应用进程内运行；超时线程可能继续；不可信插件没有进程隔离 |
+| CLI 聊天、面试、候选记忆、模型和工具命令 | 已完成本机基础能力 | `packages/nico-cli/src/nico_cli/cli.py`、`packages/nico-app/src/nico_app/cli.py`、`tests/test_extensions.py` | CLI 不提供账户登录；命令入口仍组合本地服务 |
+| WebUI、登录、工具权限、候选记忆、导出与备份 | 已完成本机基础能力 | `packages/nico-web/src/nico_web/`、`packages/nico-web/src/nico_web/resources/static/`、`packages/nico-app/src/nico_app/main.py`、`tests/test_api.py`、`tests/test_auth.py` | 尚无目标用户可用性试跑和模型结果评估 |
+| SQLite 业务数据、账户隔离、备份恢复 | 已完成基础能力 | `packages/nico-storage/src/nico_storage/schema_migrations.py`、`schema.py`、`restore.py`、`backup.py`、`packages/nico-app/src/nico_app/main.py`、`tests/test_storage.py`、`tests/test_restore.py` | 账户 Store 首次打开仍需迁移/完整性校验；多进程部署和跨进程取消未验证 |
+| 文字渠道身份、去重和投递重试契约 | 部分完成 | `packages/nico-application/src/nico_application/channels.py`、`packages/nico-storage/src/nico_storage/store/channels.py`、`packages/nico-adapters/src/nico_adapters/console.py`、`tests/test_channels.py` | 没有第二个外部消息平台；跨平台投递不保证 exactly-once |
+| 运行事件与用量记录 | 已完成当前基础能力 | `packages/nico-contracts/src/nico_contracts/events.py`、`packages/nico-agent-core/src/nico_agent_core/core.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-storage/src/nico_storage/store/runs.py` | 费用上限取决于端点返回的 token 用量；缺少真实模型质量数据 |
+| 单仓库多发行包、独立 wheel、包依赖检查 | 已完成 | 根 `pyproject.toml`、`packages/*/pyproject.toml`、`scripts/check_dependency_graph.py`、`scripts/build_wheels.py`、`scripts/verify_wheel_install.py` | 九个独立发行包对单一产品是否过细尚无使用证据；后续只在维护或发布成本实际出现时再合并 |
+| 性能基准与容量证据 | 已完成单机 SQLite 基线 | `benchmarks/run_baseline.py`、`benchmarks/results/stage8-baseline.json`、`EXECUTION_PLAN.md` 第 12 节 | 不覆盖真实模型服务、多进程取消或生产容量；基线不构成公网部署承诺 |
 
-仓库旧文档记录了截至 2026-10-31 的 133 个测试通过及若干本机页面检查，但本次文档合并没有重新运行业务测试，因此这些结果只作为历史记录，不宣称为当前提交的新验证。
+历史阶段记录保留当时的测试结果。2026-11-01 本次复审以 `--import-mode=importlib` 运行全套测试，214 项通过；另检查依赖图、适配器 wheel 元数据、CSS 灰度和语法。以上验证不覆盖真实模型工具调用、面试质量或目标用户体验。
 
 ### 2.3 必须保持的兼容基线
 
@@ -735,9 +735,9 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 
 ## 14. 已锁定的产品与运行决策
 
-以下决策用于解除阶段 1 和后续依赖中的歧义。它们不表示条件任务已经实现。
+以下记录当前生效的产品与运行决策；历史任务记录和当时的条件仍保留在第 15 节。
 
-1. **首个商业真实模型端点**：用户指定 OpenAI Chat Completions、`gpt-4o-mini`、`https://api.openai.com`、温度 `0.7`；密钥只从 `OPENAI_API_KEY` 读取，根 URL 归一化为 `/v1/chat/completions`。官方模型页将 `gpt-4o-mini` 标为 deprecated，仍尊重用户指定，不静默换模型。此前阶段 4 的本机 Ollama 工具调用验收保留为历史记录；商业端点须在凭据可用时另行验收普通回复和工具调用。用户另选 DeepSeek 作为第二个**模型 Provider**（不是消息渠道）：Chat Completions 根 URL `https://api.deepseek.com`、模型 `deepseek-flash`、密钥只从 `DEEPSEEK_API_KEY` 读取。OpenAI 与 DeepSeek 共用 OpenAI Chat Completions wire adapter；GPT-6 系列若需 Responses API，应新增独立 `openai_responses` 适配器，不把差异写入 Agent 循环或业务用例。
+1. **模型配置与已知状态**：模型由 `MODEL_PROVIDER`、`MODEL_NAME`、服务地址和本地密钥配置，模型目录可提供新会话选项。用户报告当前默认模型界面显示 `openai/gpt-oss-20b`，普通对话可正常使用；截图没有提供可复现的服务地址或密钥，仓库不保存凭证。该报告仅说明连接和普通聊天可用，不能代替工具调用、面试反馈质量或求职效果评估；评估步骤见 `docs/产品验证方案.md`。
 2. **流式输出**：初期不作为阶段 1 门槛；用户现在明确选择开启 SSE。Chat Completions 请求使用 `stream=true`，Web 聊天和面试仅在 `Accept: text/event-stream` 时返回 SSE，现有 JSON API 与 CLI 保持兼容。只发送可公开文本增量、工具名称进度、完成或错误状态，不发送工具参数、隐藏推理或敏感上下文；仅完整成功的最终结果进入现有持久化路径。浏览器断开时取消当前运行，不自动重试。
 3. **第二文字渠道**：当前暂缓具体消息平台，Console 与 WebUI 继续作为渠道基线。DeepSeek 是模型 Provider，不构成第二消息渠道。若之后必须接入首个外部文字平台，默认选择 Telegram Bot long polling，因为它不要求公网 webhook 且具备稳定消息 ID；若主要场景明确迁移到飞书或企业工作流，再单独改变该决策。任何平台都不得复制聊天业务用例。
 4. **写工具**：用户列出了写文件、删文件、改数据库、发邮件/发消息、执行 shell、提交代码和创建工单类别，并要求路径、表、命令、分支、渠道及速率限制；但数据库表、shell 命令、具体仓库/分支、收件对象/限频、工单系统等范围仍未给出，且 `/tmp/workspace` 与 `./output` 的运行路径语义尚需明确。因此执行器继续默认拒绝。首次开放时每次逐一确认；记录最终参数和结果，为有副作用的调用提供幂等键，远端结果不确定时不得自动重试。会话级宽泛写入授权不作为默认能力。
@@ -872,6 +872,15 @@ API/CLI/数据兼容：
 - 当前实施顺序：先为 `openai` / `deepseek` 增加 Chat Completions 温度、密钥环境变量和 SSE 解析；再让 AgentCore、Web API 与 WebUI 透传可取消的 text/tool/done/error 事件。工具参数、推理内容和敏感上下文不得通过 SSE 输出；持久化只发生在完整运行成功后。标准 API 与 CLI 非流式路径保持兼容。
 - 用户授权了受限写工具类别，但精确数据库/表、shell 命令、仓库与分支、消息接收者/限频、工单系统范围尚待补充；这些执行器继续默认拒绝，直到范围明确并实现逐次确认、幂等和不确定结果不重试。
 - 当前进程没有 `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY`；不在代码、配置文件、命令输出或聊天消息中保存/显示密钥。未请求真实端点，先以假 HTTP 测协议与流式边界。
+
+本机复审与优化记录（2026-11-01）：
+
+- PDF 文本提取在解码前设置 pypdf 输出上限，并增加单页与整份文件的解压预算；适配器最低依赖提高到支持该上下文级配置 API 的 pypdf 版本。
+- 账户模式按数据库路径复用最多 128 个 `Store` 对象，避免每个请求重复触发迁移和完整性检查。
+- WebUI 浅色与深色主题统一为灰阶，设计规范、产品定义和模型配置示例已与当前实现同步。模型状态仅记录为用户报告；真实模型质量仍待评估。
+- 新增 `docs/产品验证方案.md`，定义虚构资料试跑、固定模型案例、评分规则和首轮门槛；试跑尚未执行。
+- 验证：`pytest --import-mode=importlib -q` 215 项通过；适配器测试 11 项通过；依赖图检查通过；适配器 wheel 构建且元数据包含 pypdf 最低版本；CSS 41 个颜色值全为灰阶、173 条规则无语法错误。
+- 保留九包结构和单进程运行约束。九包合并与跨进程取消属于高影响架构变更，当前没有发布维护成本或多进程部署目标证据；出现实际需求后再立项。
 
 ## 16. 给后续执行 AI 的直接指令
 

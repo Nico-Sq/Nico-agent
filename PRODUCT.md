@@ -38,11 +38,11 @@ The application runs locally by default, with optional account isolation. Chat s
 - The user explicitly prefers the quiet, restrained visual discipline and usable Agent components of `nanobot`.
 - Match that level of craft without copying `nanobot` branding, generic capabilities, or page composition wholesale.
 - Preserve a recognizable Nico identity centered on role evidence, interview practice, and review.
-- The user requested a restrained accent color in place of the earlier strictly grayscale UI. Accent use must remain limited to primary action, focus, and meaningful state.
+- The project requires black, white, grays, and their transparencies only. Use contrast, shape, and text to distinguish actions and states.
 
 ## Evidence on Hand
 
-The repository contains the implemented chat and interview flows, product definition, demo mode, and three local reference projects. There are no approved customer testimonials, outcome metrics, benchmark claims, or production user research. The interface must not invent them.
+The user reports that the configured default model (`openai/gpt-oss-20b`) now responds normally. This confirms reported connectivity only; reply quality and task outcomes have not been assessed. There are no approved customer testimonials, outcome metrics, benchmark claims, or production user research. The interface must not invent them.
 
 ## Product Principles
 

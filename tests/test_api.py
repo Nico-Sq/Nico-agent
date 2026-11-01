@@ -41,6 +41,18 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
         self.assertNotIn("api_key", config)
 
+    def test_account_store_factory_reuses_store_for_same_path(self):
+        path = Path(self.temp.name) / "account.sqlite3"
+        main.make_account_store.cache_clear()
+        try:
+            with patch.object(main, "Store") as store_factory:
+                first = main.make_account_store(path)
+                second = main.make_account_store(path)
+            self.assertIs(first, second)
+            store_factory.assert_called_once_with(path)
+        finally:
+            main.make_account_store.cache_clear()
+
     def test_api_responses_are_not_cached_or_sniffed(self):
         response = self.client.get("/api/config")
         self.assertEqual(response.headers["cache-control"], "no-store")

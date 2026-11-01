@@ -1,18 +1,18 @@
 :root {
-  --canvas: #eef0ec;
-  --surface: #fbfcf9;
-  --sidebar: #f5f6f2;
-  --surface-soft: #f1f3ee;
-  --surface-hover: #e8ece6;
-  --ink: #171a17;
-  --ink-soft: #363c36;
-  --muted: #687168;
-  --line: #e4e8e1;
-  --line-strong: #d1d7cf;
-  --accent: #2c67d5;
-  --accent-strong: #1f50a8;
-  --accent-soft: #e9f0fc;
-  --shadow: 0 20px 54px #1c251b12;
+  --canvas: #efefef;
+  --surface: #fcfcfc;
+  --sidebar: #f5f5f5;
+  --surface-soft: #f2f2f2;
+  --surface-hover: #ebebeb;
+  --ink: #191919;
+  --ink-soft: #3a3a3a;
+  --muted: #6e6e6e;
+  --line: #e7e7e7;
+  --line-strong: #d5d5d5;
+  --accent: #555555;
+  --accent-strong: #333333;
+  --accent-soft: #e9e9e9;
+  --shadow: 0 20px 54px #22222212;
   font-family: "Noto Sans SC", "PingFang SC", "Segoe UI Variable", "Microsoft YaHei", sans-serif;
   color: var(--ink);
   background: var(--canvas);
@@ -22,19 +22,19 @@
 }
 
 :root[data-theme="dark"] {
-  --canvas: #0a0c0b;
-  --surface: #121512;
-  --sidebar: #0e110f;
-  --surface-soft: #1a1e1a;
-  --surface-hover: #232822;
-  --ink: #f1f3ee;
-  --ink-soft: #d0d5ce;
-  --muted: #929b93;
-  --line: #252a25;
-  --line-strong: #353c35;
-  --accent: #8ab4ff;
-  --accent-strong: #a9c7ff;
-  --accent-soft: #19243a;
+  --canvas: #0c0c0c;
+  --surface: #141414;
+  --sidebar: #101010;
+  --surface-soft: #1d1d1d;
+  --surface-hover: #272727;
+  --ink: #f2f2f2;
+  --ink-soft: #d3d3d3;
+  --muted: #999999;
+  --line: #292929;
+  --line-strong: #3a3a3a;
+  --accent: #d0d0d0;
+  --accent-strong: #eeeeee;
+  --accent-soft: #252525;
   --shadow: 0 26px 70px #00000067;
   color-scheme: dark;
 }
@@ -45,10 +45,10 @@ body {
   margin: 0;
   padding: 12px;
   overflow-x: hidden;
-  background: linear-gradient(145deg, #e7eae5 0%, #f0f2ed 54%, #e7ebe4 100%);
+  background: linear-gradient(145deg, #e9e9e9 0%, #f1f1f1 54%, #eaeaea 100%);
 }
 :root[data-theme="dark"] body {
-  background: linear-gradient(145deg, #090b0a 0%, #111411 56%, #0a0d0b 100%);
+  background: linear-gradient(145deg, #0b0b0b 0%, #131313 56%, #0c0c0c 100%);
 }
 ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--ink); }
 button, textarea, input, select { font: inherit; }
@@ -372,10 +372,10 @@ select:focus {
   border: 1px solid color-mix(in srgb, var(--line-strong) 78%, transparent);
   border-radius: 24px;
   background: var(--surface);
-  box-shadow: 0 18px 52px #1b211b10, 0 2px 8px #1b211b08;
+  box-shadow: 0 18px 52px #1f1f1f10, 0 2px 8px #1f1f1f08;
 }
 :root[data-theme="dark"] #chat-panel > .composer { box-shadow: 0 20px 56px #0000005c, 0 2px 8px #00000032; }
-#chat-panel > .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 56%, var(--line)); box-shadow: 0 18px 52px #1b211b10, 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+#chat-panel > .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 56%, var(--line)); box-shadow: 0 18px 52px #1f1f1f10, 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 #chat-panel > .composer textarea { min-height: 72px; max-height: 240px; padding: 5px 3px 13px; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: 0; font-size: 15px; line-height: 1.7; }
 #chat-panel > .composer textarea:focus { border: 0; box-shadow: none; outline: 0; }
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 0; }
@@ -470,7 +470,7 @@ dialog input {
 #session-title,
 .candidate-card textarea { background: var(--surface); color: var(--ink); }
 dialog { border-color: var(--line); border-radius: 18px; color: var(--ink); background: var(--surface); box-shadow: 0 28px 80px #00000042; }
-dialog::backdrop { background: #0c0f0ca6; }
+dialog::backdrop { background: #0e0e0ea6; }
 .settings-section { border-color: var(--line); }
 .settings-row, .candidate-card, .candidate-source { background: var(--surface-soft); }
 .candidate-card { border-color: var(--line); }
