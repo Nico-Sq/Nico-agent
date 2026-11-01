@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nico-storage"
+version = "0.1.0"
+description = "SQLite repositories, authentication, backup and schema migrations for Nico-agent"
+requires-python = ">=3.11"
+dependencies = ["nico-application==0.1.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nico_storage = ["py.typed", "migrations/*.sql"]

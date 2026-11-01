@@ -71,7 +71,7 @@ python -m career_agent.cli interview practice <SESSION_ID> <题号>
 
 本地插件示例位于 `examples/echo_plugin.py` 和 `examples/plugins.json`。设置 `LOCAL_PLUGINS_PATH=./examples/plugins.json` 后启动服务，`GET /api/tools` 可发现 `plugin_echo_plugin_echo`；按上文的会话工具接口授权，再在聊天中请模型调用该工具。插件需要提供 `TOOLS` 列表，每项包括 `name`、`description`、`parameters`（JSON Schema 对象）、可选的 `read_only` 和同步 `run(arguments)` 函数；插件代码在启动时执行且只在当前进程生命周期内有效，只配置自己信任的文件。插件与 MCP 使用相同的会话授权、非只读拒绝和参数校验入口。只有 `read_only` 为 true 的工具（MCP 工具由服务端的 `readOnlyHint` 标注）会提供给模型；连续只读调用可并行，其他调用按出现顺序单独串行执行。插件异常返回 `plugin_tool_failed`；超过 10 秒返回 `plugin_timeout` 并标记后台线程可能仍在运行，不能视为副作用已取消。内置读取工具均为只读。测试命令：`python -m unittest discover -s tests -q`。
 
-本地数据库默认位于 `data/career_agent.sqlite3`，可用 `DATA_DIR` 指定其他目录。启动时会为已有数据库自动增加运行认领字段，保留原会话；升级前可先下载业务数据快照。不要将密钥写入项目文件。
+本地数据库默认位于 `data/career_agent.sqlite3`，可用 `DATA_DIR` 指定其他目录。业务库与 `auth.sqlite3` 各自用 SQLite `user_version` 管理 schema。启动时会先在同目录临时副本验证已知旧库迁移；验证通过后，在数据库旁的 `migration-backups/` 保存迁移前快照，再原子替换数据库。未知结构或高于当前支持版本的数据库会停止启动，不会自动重建。不要将密钥写入项目文件。
 
 恢复页面下载的业务数据时，先停止应用，再运行：
 
@@ -79,7 +79,7 @@ python -m career_agent.cli interview practice <SESSION_ID> <题号>
 python -m career_agent.restore .\nico-agent-backup.sqlite3
 ```
 
-命令会校验备份、在目标目录生成临时数据库并校验，再把现有业务库另存为 `career_agent.before-restore-<ID>.sqlite3`，最后替换目标文件。使用了 `DATA_DIR` 时，恢复命令也要设置相同变量；账户模式需用 `--target` 指向对应账户的 `data/users/<用户ID>/career_agent.sqlite3`。下载的业务快照不含 `auth.sqlite3` 中的账户凭据。
+命令会按 schema manifest 校验备份，在目标目录生成临时数据库并校验；已知历史版本会先在临时库升级。然后把现有业务库另存为 `career_agent.before-restore-<ID>.sqlite3`，最后替换目标文件。使用了 `DATA_DIR` 时，恢复命令也要设置相同变量；账户模式需用 `--target` 指向对应账户的 `data/users/<用户ID>/career_agent.sqlite3`。下载的业务快照不含 `auth.sqlite3` 中的账户凭据。
 
 应用启动时、运行期间每小时及正常退出时检查本地业务库。在各数据库旁的 `backups/` 目录保留最近 7 份按 UTC 日期命名的每日 SQLite 快照，并在每次检查时原子更新 `career_agent-latest.sqlite3`。每日快照保存当天首次检查时的数据；`latest` 保存最近一次检查时的数据。账户模式按账户分别备份业务数据；自动快照同样不含账户凭据。恢复自动快照时也使用上面的命令，并将快照路径作为第一个参数。异常断电时仍可能丢失最近一次检查之后的改动。
 

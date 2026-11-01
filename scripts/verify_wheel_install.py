@@ -63,11 +63,19 @@ def main() -> int:
         modules = [name for name, _ in wheels]
         verification = (
             "import importlib, importlib.metadata, json\n"
+            "import tempfile\n"
+            "from pathlib import Path\n"
             f"modules={modules!r}\n"
             "loaded=[]\n"
             "for module in modules:\n"
             "    importlib.import_module(module)\n"
             "    loaded.append(module)\n"
+            "if 'nico_storage' in modules:\n"
+            "    from nico_storage import Store\n"
+            "    with tempfile.TemporaryDirectory() as directory:\n"
+            "        store=Store(Path(directory) / 'career_agent.sqlite3')\n"
+            "        with store.connect() as db:\n"
+            "            assert db.execute('PRAGMA user_version').fetchone()[0] == 1\n"
             "print(json.dumps({'loaded': loaded, 'cwd': __import__('os').getcwd()}))\n"
         )
         environment = os.environ.copy()

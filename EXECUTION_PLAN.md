@@ -704,8 +704,8 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 - [x] 阶段 1：workspace、契约、依赖图和兼容护栏。
 - [x] 阶段 2：聊天、材料、记忆 application 用例。
 - [x] 阶段 3：面试 application 用例和结果校验。
-- [ ] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
-- [ ] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
+- [x] 阶段 4：通用 Agent core、多模型端口/现有适配器，以及本地 OpenAI 兼容端点的非流式普通回复和工具循环验收。
+- [x] 阶段 5：SQLite 包、schema 版本、旧库迁移、备份恢复。
 - [ ] 阶段 6：工具、MCP、可信插件端口和只读安全闭环。
 - [ ] 阶段 7：CLI、ConsoleChannel 和持久渠道账本。
 - [ ] 阶段 8：性能/可靠性基线与超预算优化。
@@ -748,7 +748,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
 | 4 Agent core/多模型 | 已完成（2026-11-01） | `d4e766c` | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
-| 5 storage/schema/迁移 | 待做 | — | — | — |
+| 5 storage/schema/迁移 | 已完成（2026-11-01） | 本阶段提交记录见下文 | 根测试 137 项、storage 测试 12 项；依赖图无环；6 个 wheel 构建并在仓库外安装；API/CLI/账户/备份恢复与旧导入快照通过；`git diff --check` | ChannelLedger 数据表与跨重启账本留到阶段 7；未迁移真实 `data/`。 |
 | 6 tools/MCP/plugins | 待做 | — | — | — |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
 | 8 性能基线 | 待做 | — | — | — |
@@ -778,7 +778,17 @@ API/CLI/数据兼容：
 - Akashic：检查 `E:\Akashic-agent\akashic-agent\bootstrap\app.py`、`bootstrap\tools.py`、`agent\context.py` 和 `prompts\agent.py`。源码由组合根装配 Provider、工具和上下文；当前让 `career_agent.runtime` 暂任迁移期组合边界，保留 Store、上下文、授权和持久化归属，不提前抽 Store 或增加空包。
 - 当前代码将模型协议适配器移入 `nico-adapters`，保留 `career_agent` 兼容导入；OpenAI Chat Completions 与 Anthropic 分别适配。非流式运行通过本地假 HTTP 服务契约测试。用户授权临时下载后，使用 Ollama 官方标注支持 tools 的最小 `qwen3:0.6b`（523 MB）验收本机 `http://127.0.0.1:11434/v1`：普通回复返回 `READY`；AgentCore 完成工具调用并返回工具结果 `NICO_STAGE4_TOOL_OK`。该 0.6B 模型在提示“只调用一次”时实际调用只读测试工具两次；最终回复仍基于工具结果，记录为小模型行为限制。验收后执行 `ollama rm qwen3:0.6b`；`ollama list` 只剩原有 `all-minilm:latest`，模型 blob `sha256-7f4030143c1c*` 已不存在，`ollama ps` 为空。模型清单标注该版本 523 MB，且属于 tools 家族；Ollama 文档记录其 Chat Completions 接口支持工具调用（[模型条目](https://ollama.com/library/qwen3:0.6b)、[工具调用文档](https://docs.ollama.com/capabilities/tool-calling)、[OpenAI 兼容文档](https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx)）。按已锁定决策，阶段 4 不实现流式。
 - 自动验证命令与结果：根测试运行前在 PowerShell 设置 `PYTHONPATH=packages/nico-contracts/src;packages/nico-agent-core/src;packages/nico-adapters/src;packages/nico-application/src;packages/nico-domain/src`；`D:\anaconda3\python.exe -m unittest discover -s tests -v`（136 项通过）、`D:\anaconda3\python.exe -m unittest discover -s packages/nico-agent-core/tests -v`（5 项通过）、`D:\anaconda3\python.exe -m unittest discover -s packages/nico-adapters/tests -v`（2 项通过）；`D:\anaconda3\python.exe scripts/check_dependency_graph.py`（无环）；`E:\Agent\Nico-agent\.venv\Scripts\python.exe scripts/build_wheels.py --all --out dist`（5 个已物化包构建成功）；`D:\anaconda3\python.exe scripts/verify_wheel_install.py --all`（5 个 wheel 在仓库外临时 venv 导入成功）；`git diff --check` 通过。首次在仓库 `.venv` 跑全套测试时，Python 3.13 加载了仅适用于 CPython 3.12 的 `pydantic-core`、`rpds-py`、`lxml` 扩展；改用可用的基础解释器后全套通过。
-- 自动验证和真实端点验收均已通过；阶段 4 变更待提交，提交后再开始阶段 5。
+- 自动验证和真实端点验收均已通过；实现提交 `d4e766c` 与记录提交 `2753793` 均已创建，未 push。阶段 5 从此状态继续。
+
+
+阶段 5 参考项目与实施记录（2026-11-01）：
+
+- Akashic：检查 `E:\Akashic-agent\akashic-agent\agent\migrations\runner.py`、`tests\test_migration_runner.py` 与 `tests\test_yoyo_migration_append_only.py`。源码在启动前用 workspace 锁串行迁移、失败时中止，并测试失败重试和迁移目录追加约束。采用“启动时迁移失败即拒绝启动”和有序迁移历史；SQLite 只管理本项目每个数据库自己的 schema，因此使用 `PRAGMA user_version`，不引入额外 Yoyo 账本。
+- Pi：检查 `E:\Agent\Pi-agent\pi\packages\durable\src\storage\sqlite\migrations.ts`、`schema.ts` 与 `test\sqlite-migrations.test.ts`。源码保留不可变、有序的迁移列表，应用迁移时原子提交并测试重复运行、未来版本拒绝和失败回滚。采用同类顺序与回滚保证；按 Nico 的计划改为包内 SQL 资源与 SQLite `user_version`，并给 schema manifest 保存版本快照。
+- nanobot：检查 `E:\nanobot\nanobot\session\manager.py`、`agent\memory.py` 与 `pairing\store.py`。相关实现以 JSONL、Markdown 和原子文件写入持久化，没有 SQLite schema 迁移；因 Nico 已有 SQLite 关系与事务，未照搬文件存储。存储边界没有直接相关的 Agent 提示词或工具描述。
+- 本阶段建立 `nico-storage`，把 Store 的事务基类、会话/事件/授权、材料/经历、记忆候选、运行状态、Auth、自动备份和恢复拆成模块；`career_agent.*` 保留兼容转发。新空库和已识别 `user_version=0` 历史库共用 v1 基线；迁移先在同目录副本验证，通过后备份原库并原子替换；未知 schema 与未来版本拒绝处理。业务表定义未重建或改动。
+- 根测试在临时 `DATA_DIR` 与假模型下运行（137 项通过）；`packages/nico-storage/tests`（12 项通过）覆盖历史库安全备份、未知库原样保留、失败回滚、未来版本、连续版本、认证/账户独立版本和旧备份恢复。`scripts/check_dependency_graph.py` 通过；`scripts/build_wheels.py --all --out dist` 构建 6 个包；`scripts/verify_wheel_install.py --all` 在仓库外临时 venv 安装 6 个 wheel，并从 wheel SQL 资源创建 v1 数据库；`git diff --check` 通过。没有读取或迁移真实 `data/`。
+- 阶段 7 再实现 ChannelLedger 的数据库表和跨重启幂等；本阶段只定义 application 端口。没有改变第二渠道、流式输出、记忆检索或工具授权策略。
 
 ## 16. 给后续执行 AI 的直接指令
 

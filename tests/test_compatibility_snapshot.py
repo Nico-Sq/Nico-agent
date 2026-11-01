@@ -22,6 +22,13 @@ from career_agent.provider import ModelError as LegacyProviderModelError
 from career_agent.providers import ModelError as LegacyProvidersModelError
 from career_agent.providers.base import Adapter as LegacyAdapter
 from career_agent.providers.errors import ModelError as LegacyErrorsModelError
+from career_agent.auth import AuthStore as LegacyAuthStore
+from career_agent.auto_backup import backup_all as legacy_backup_all
+from career_agent.restore import restore as legacy_restore
+from career_agent.store import Store as LegacyStore
+from nico_storage import AuthStore, Store
+from nico_storage.backup import backup_all
+from nico_storage.restore import restore as storage_restore
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +93,12 @@ EXPECTED_API_ROUTES = {
 
 
 class CompatibilitySnapshotTests(unittest.TestCase):
+    def test_legacy_storage_imports_forward_to_the_storage_package(self):
+        self.assertIs(LegacyStore, Store)
+        self.assertIs(LegacyAuthStore, AuthStore)
+        self.assertIs(legacy_backup_all, backup_all)
+        self.assertIs(legacy_restore, storage_restore)
+
     def test_legacy_imports_are_the_contract_objects(self):
         self.assertIs(LegacyUsage, Usage)
         self.assertIs(LegacyProviderModelError, ModelError)

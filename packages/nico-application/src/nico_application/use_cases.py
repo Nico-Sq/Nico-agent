@@ -1,6 +1,7 @@
 """Chat, material and memory workflows shared by API and CLI."""
 
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
 from nico_domain import (
@@ -21,8 +22,31 @@ from nico_domain import (
 )
 
 
-class ChatSessionReader(Protocol):
+class RepositoryPort(Protocol):
     def get(self, session_id: str, kind: str) -> dict | None: ...
+
+
+class UnitOfWorkPort(Protocol):
+    def transaction(self) -> AbstractContextManager[object]: ...
+
+
+class AuthPort(Protocol):
+    def register(self, username: str, password: str) -> str | None: ...
+    def login(self, username: str, password: str) -> str | None: ...
+    def issue_token(self, user_id: str) -> str: ...
+    def resolve_token(self, token: str | None) -> str | None: ...
+    def revoke_token(self, token: str | None) -> None: ...
+    def username(self, user_id: str) -> str | None: ...
+
+
+class ChannelLedgerPort(Protocol):
+    def claim_inbound(self, sender_id: str, conversation_id: str, message_id: str) -> bool: ...
+    def store_reply(self, message_id: str, response: str, delivery_id: str) -> None: ...
+    def mark_delivered(self, delivery_id: str) -> None: ...
+
+
+class ChatSessionReader(RepositoryPort, Protocol):
+    pass
 
 
 class ChatStorePort(ChatSessionReader, Protocol):
