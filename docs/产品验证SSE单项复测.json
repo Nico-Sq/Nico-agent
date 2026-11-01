@@ -58,17 +58,18 @@
         "answer_error": "model_invalid_output",
         "model_finished": true,
         "model_returned_extra_question": true,
-        "evidence_matches_answer": true,
+        "evidence_empty": true,
+        "evidence_matches_answer": false,
         "summary_present": true,
         "cleanup": true
       }
     ],
-    "finding": "IF-10 的失败是模型在题数已达上限时仍返回下一题；该题的反馈遵守了新的事实边界。解析器现会丢弃终止轮次的多余问题。"
+    "finding": "IF-10 的输出同时带有多余下一题和空 evidence。解析器现会丢弃终止轮次的多余问题；提示词进一步说明，即使没有项目事实也必须引用用户对不确定性的原话，引用不等于事实核验。"
   },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "IF-04 的开始请求走 JSON API，回答请求走 SSE；IF-08 与 IF-10 的开始和回答均走 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器与网页流式显示已修正，需在再次重启服务后复测。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏 JSON；证据规则提示词已加强，需重启后再次复测。"
   ]
 }
