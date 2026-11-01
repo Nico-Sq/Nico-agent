@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
@@ -25,6 +26,7 @@ from .backend import active_backend, active_runtime as _active_runtime, active_s
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def active_store():
@@ -105,14 +107,17 @@ def stream_response(operation: Callable[[RunEventSink], Awaitable[dict]]) -> Str
                 queue.put_nowait({"type": "error", "detail": str(exc), "code": "request_rejected",
                                   "status": status})
             except ModelError as exc:
+                logger.warning("Model run failed: code=%s", exc.code)
                 queue.put_nowait({"type": "error", "detail": str(exc), "code": exc.code,
                                   "status": exc.status_code})
             except ValueError:
+                logger.warning("Model run failed: code=model_invalid_output")
                 queue.put_nowait({"type": "error", "detail": "模型输出或上下文不符合要求",
                                   "code": "model_invalid_output", "status": 502})
             except asyncio.CancelledError:
                 raise
             except Exception:
+                logger.error("Model run failed: code=model_run_failed")
                 queue.put_nowait({"type": "error", "detail": "模型运行失败，请稍后重试",
                                   "code": "model_run_failed", "status": 502})
             finally:
@@ -146,10 +151,13 @@ async def complete_chat_request(result) -> dict | JSONResponse:
     except UseCaseError:
         raise
     except ModelError as exc:
+        logger.warning("Model run failed: code=%s", exc.code)
         return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
     except ValueError:
+        logger.warning("Model run failed: code=model_invalid_output")
         return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
     except Exception:
+        logger.error("Model run failed: code=model_run_failed")
         return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
 
 

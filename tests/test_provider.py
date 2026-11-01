@@ -25,8 +25,11 @@ class FakeClient:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        status, body = outcome
-        return httpx.Response(status, json=body, request=httpx.Request("POST", url))
+        status, body, *response_headers = outcome
+        return httpx.Response(
+            status, json=body, headers=response_headers[0] if response_headers else None,
+            request=httpx.Request("POST", url),
+        )
 
     async def __aenter__(self):
         return self
@@ -138,6 +141,37 @@ class ProviderAdapterTests(unittest.TestCase):
             reply = self.complete(provider, client)
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(reply["content"], "retried")
+
+    def test_retry_after_is_respected(self):
+        client = FakeClient((429, {"error": "private response"}, {
+            "Retry-After": "2.5", "x-request-id": "req-123",
+        }),
+                            (200, openai_body("retried")))
+        provider = Provider(mode="openai", model="m", base_url="https://example.test/v1", api_key="k")
+        delays = []
+
+        async def record_delay(seconds):
+            delays.append(seconds)
+
+        with self.assertLogs("nico_adapters.models.transport", level="WARNING") as captured:
+            with patch("career_agent.providers.transport.asyncio.sleep", side_effect=record_delay):
+                reply = self.complete(provider, client)
+        self.assertEqual(delays, [2.5])
+        self.assertEqual(reply["content"], "retried")
+        log = "\n".join(captured.output)
+        self.assertIn("HTTP 429", log)
+        self.assertIn("req-123", log)
+        self.assertNotIn("private response", log)
+
+    def test_long_retry_after_returns_busy_without_waiting(self):
+        client = FakeClient((429, {"error": "busy"}, {"Retry-After": "45"}))
+        provider = Provider(mode="openai", model="m", base_url="https://example.test/v1", api_key="k")
+        with patch("career_agent.providers.transport.asyncio.sleep") as sleep:
+            with self.assertRaises(ModelError) as caught:
+                self.complete(provider, client)
+        self.assertEqual(caught.exception.code, "model_busy")
+        self.assertEqual(len(client.requests), 1)
+        sleep.assert_not_awaited()
 
     def test_connect_error_is_retried_once(self):
         client = FakeClient(
