@@ -1,13 +1,5 @@
-﻿"""Model adapters: one module per wire protocol, selected by `MODEL_PROVIDER`."""
+"""Compatibility imports for model adapters moved to ``nico_adapters``."""
 
-from . import anthropic, demo, openai_chat
-from .base import Adapter
-from .errors import ModelError
+from nico_adapters.models import ADAPTERS, Adapter, ModelError, anthropic, demo, openai_chat, transport
 
-ADAPTERS: dict[str, Adapter] = {
-    "openai": openai_chat,
-    "openai_compatible": openai_chat,
-    "anthropic": anthropic,
-}
-
-__all__ = ["ADAPTERS", "Adapter", "ModelError", "anthropic", "demo", "openai_chat"]
+__all__ = ["ADAPTERS", "Adapter", "ModelError", "anthropic", "demo", "openai_chat", "transport"]

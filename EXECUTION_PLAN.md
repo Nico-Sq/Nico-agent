@@ -747,7 +747,7 @@ python -m build --wheel packages/nico-agent-core --outdir dist
 | 1 workspace/契约/护栏 | 已完成（2026-10-31） | `39f6732` | 136 项现有测试、4 项契约测试；依赖图无环；`python -m build --wheel packages/nico-contracts --outdir dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | 本地/商业真实模型调用按阶段 4 决策执行；未改变 Store 或数据库 schema |
 | 2 聊天/材料/记忆用例 | 已完成（2026-11-01） | `a7be2cb` | 136 项现有测试、4 项领域测试、5 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 保持原样 |
 | 3 面试用例/校验 | 已完成（2026-11-01） | `00d811a` | 136 项现有测试、9 项领域测试、10 项 application 测试；依赖图无环；`python scripts/build_wheels.py --all --out dist`；`python scripts/verify_wheel_install.py --all`；`git diff --check` | Store 与数据库 schema 未改变；真实模型端点留待阶段 4 |
-| 4 Agent core/多模型 | 待做 | — | — | — |
+| 4 Agent core/多模型 | 实现、自动验证和真实端点验收通过（2026-11-01） | 待记录 | 136 项现有测试、5 项 agent-core 测试、2 项 adapter 测试；依赖图无环；5 个包 wheel 构建并在仓库外安装；真实 Ollama OpenAI 兼容端点普通回复和工具调用通过；`git diff --check` | 临时 `qwen3:0.6b` 已删除，Ollama 只保留原有 `all-minilm:latest`；小模型在验收提示中调用测试工具两次，测试工具只读 |
 | 5 storage/schema/迁移 | 待做 | — | — | — |
 | 6 tools/MCP/plugins | 待做 | — | — | — |
 | 7 CLI/channels/幂等 | 待做 | — | — | — |
@@ -770,6 +770,15 @@ API/CLI/数据兼容：
 性能结果或未测原因：
 剩余风险：
 ```
+
+阶段 4 参考项目与实施记录（2026-11-01）：
+
+- Pi：检查 `E:\Agent\Pi-agent\pi\packages\agent\src\types.ts` 与 `agent-loop.ts`。源码将归一化消息/事件类型与 Agent 循环分开；当前采用这种边界，把模型端口、工具循环、预算、取消和运行跟踪移入 `nico-agent-core`。
+- nanobot：检查 `E:\nanobot\nanobot\providers\base.py`、`agent\loop.py` 和 `templates\agent\tool_contract.md`。源码以统一响应形状连接 provider 与循环；当前采用归一化 `ModelPort`，保留 Nico 既有错误码、工具权限和结果校验。
+- Akashic：检查 `E:\Akashic-agent\akashic-agent\bootstrap\app.py`、`bootstrap\tools.py`、`agent\context.py` 和 `prompts\agent.py`。源码由组合根装配 Provider、工具和上下文；当前让 `career_agent.runtime` 暂任迁移期组合边界，保留 Store、上下文、授权和持久化归属，不提前抽 Store 或增加空包。
+- 当前代码将模型协议适配器移入 `nico-adapters`，保留 `career_agent` 兼容导入；OpenAI Chat Completions 与 Anthropic 分别适配。非流式运行通过本地假 HTTP 服务契约测试。用户授权临时下载后，使用 Ollama 官方标注支持 tools 的最小 `qwen3:0.6b`（523 MB）验收本机 `http://127.0.0.1:11434/v1`：普通回复返回 `READY`；AgentCore 完成工具调用并返回工具结果 `NICO_STAGE4_TOOL_OK`。该 0.6B 模型在提示“只调用一次”时实际调用只读测试工具两次；最终回复仍基于工具结果，记录为小模型行为限制。验收后执行 `ollama rm qwen3:0.6b`；`ollama list` 只剩原有 `all-minilm:latest`，模型 blob `sha256-7f4030143c1c*` 已不存在，`ollama ps` 为空。模型清单标注该版本 523 MB，且属于 tools 家族；Ollama 文档记录其 Chat Completions 接口支持工具调用（[模型条目](https://ollama.com/library/qwen3:0.6b)、[工具调用文档](https://docs.ollama.com/capabilities/tool-calling)、[OpenAI 兼容文档](https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx)）。按已锁定决策，阶段 4 不实现流式。
+- 自动验证命令与结果：根测试运行前在 PowerShell 设置 `PYTHONPATH=packages/nico-contracts/src;packages/nico-agent-core/src;packages/nico-adapters/src;packages/nico-application/src;packages/nico-domain/src`；`D:\anaconda3\python.exe -m unittest discover -s tests -v`（136 项通过）、`D:\anaconda3\python.exe -m unittest discover -s packages/nico-agent-core/tests -v`（5 项通过）、`D:\anaconda3\python.exe -m unittest discover -s packages/nico-adapters/tests -v`（2 项通过）；`D:\anaconda3\python.exe scripts/check_dependency_graph.py`（无环）；`E:\Agent\Nico-agent\.venv\Scripts\python.exe scripts/build_wheels.py --all --out dist`（5 个已物化包构建成功）；`D:\anaconda3\python.exe scripts/verify_wheel_install.py --all`（5 个 wheel 在仓库外临时 venv 导入成功）；`git diff --check` 通过。首次在仓库 `.venv` 跑全套测试时，Python 3.13 加载了仅适用于 CPython 3.12 的 `pydantic-core`、`rpds-py`、`lxml` 扩展；改用可用的基础解释器后全套通过。
+- 自动验证和真实端点验收均已通过；阶段 4 变更待提交，提交后再开始阶段 5。
 
 ## 16. 给后续执行 AI 的直接指令
 
