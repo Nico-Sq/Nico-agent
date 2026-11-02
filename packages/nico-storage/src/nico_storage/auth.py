@@ -7,7 +7,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from nico_application.use_cases import AuthPort
+from nico_application.contracts import AuthPort
 
 from .schema_migrations import migrate_database
 

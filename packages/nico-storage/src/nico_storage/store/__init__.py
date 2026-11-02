@@ -11,7 +11,7 @@ from .materials import MaterialRepositoryMixin
 from .memory import MemoryRepositoryMixin
 from .runs import RunRepositoryMixin
 from .sessions import SessionRepositoryMixin
-from nico_application.use_cases import RepositoryPort, UnitOfWorkPort
+from nico_application.contracts import RepositoryPort, UnitOfWorkPort
 
 
 class Store(

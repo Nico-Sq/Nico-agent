@@ -104,6 +104,23 @@ EXPECTED_API_ROUTES = {
 
 
 class CompatibilitySnapshotTests(unittest.TestCase):
+    def test_application_contracts_keep_legacy_use_case_exports(self):
+        from nico_application import InterviewUseCases, commit_interview_result
+        from nico_application.contracts import AuthPort, RepositoryPort, UnitOfWorkPort
+        from nico_application.use_cases import (
+            AuthPort as LegacyAuthPort,
+            InterviewUseCases as LegacyInterviewUseCases,
+            RepositoryPort as LegacyRepositoryPort,
+            UnitOfWorkPort as LegacyUnitOfWorkPort,
+            commit_interview_result as legacy_commit_interview_result,
+        )
+
+        self.assertIs(LegacyAuthPort, AuthPort)
+        self.assertIs(LegacyRepositoryPort, RepositoryPort)
+        self.assertIs(LegacyUnitOfWorkPort, UnitOfWorkPort)
+        self.assertIs(LegacyInterviewUseCases, InterviewUseCases)
+        self.assertIs(legacy_commit_interview_result, commit_interview_result)
+
     def test_legacy_main_keeps_route_exports_without_framework_imports(self):
         from career_agent import main
 

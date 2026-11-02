@@ -55,9 +55,14 @@ Nico-agent 是仅在本机运行、可长期扩展的求职 Agent。当前产品
 flowchart LR
   WebUI[nico-web/resources/static] --> Web[nico-web/routes.py]
   CLI[nico-cli/cli.py] --> Cases[nico-application/use_cases.py]
+  CLI --> InterviewCases[nico-application/interview_use_cases.py]
   Web --> Cases
+  Web --> InterviewCases
+  Cases --> Ports[nico-application/contracts.py]
+  InterviewCases --> Ports
   Cases --> Domain[nico-domain]
-  Cases --> Store[nico-storage/store]
+  InterviewCases --> Domain
+  Store[nico-storage/store] --> Ports
   Web --> Runtime[nico-app/runtime.py]
   CLI --> Runtime
   Runtime --> Core[nico-agent-core]
@@ -75,7 +80,7 @@ flowchart LR
 当前主要事实：
 
 - `nico-app/main.py` 与 `nico-app/cli.py` 装配存储、模型、工具适配器和运行时；`career_agent.*` 是保留的旧导入及入口。
-- `nico-web/routes.py` 处理 HTTP/SSE，`nico-cli/cli.py` 处理终端命令；聊天、面试、材料和记忆流程由 `nico-application/use_cases.py` 协调，状态和输出校验依赖 `nico-domain`。
+- `nico-web/routes.py` 处理 HTTP/SSE，`nico-cli/cli.py` 处理终端命令；聊天、材料和记忆用例由 `nico-application/use_cases.py` 协调，面试状态与结果提交由 `interview_use_cases.py` 协调。两者使用 `contracts.py` 的端口和错误类型，并依赖 `nico-domain` 的规则；`nico-storage` 实现存储端口。
 - `nico-app/runtime.py` 将 `nico-agent-core` 的模型/工具循环连接到上下文、内置工具、外部适配器和存储；提示词位于 `nico-application/resources/prompts/`。
 - `nico-storage` 负责 SQLite schema、业务记录、账户、备份和恢复；根 `pyproject.toml` 列出九个独立发行包。
 
@@ -83,7 +88,7 @@ flowchart LR
 
 | 能力 | 状态 | 可核对证据 | 尚缺部分 |
 |---|---|---|---|
-| 聊天与面试双线、材料/经历确认、逐题反馈、报告与复练 | 已完成本机基础闭环 | `packages/nico-web/src/nico_web/routes.py`、`packages/nico-application/src/nico_application/use_cases.py`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_api.py`、`tests/test_core.py` | 真实模型的面试反馈质量与求职效果尚未评估 |
+| 聊天与面试双线、材料/经历确认、逐题反馈、报告与复练 | 已完成本机基础闭环 | `packages/nico-web/src/nico_web/routes.py`、`packages/nico-application/src/nico_application/use_cases.py`、`packages/nico-application/src/nico_application/interview_use_cases.py`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_api.py`、`tests/test_core.py` | 真实模型的面试反馈质量与求职效果尚未评估 |
 | Agent 工具循环、取消、会话版本防迟到提交、上下文与调用限额 | 已完成基础能力，通用边界未建立 | `packages/nico-agent-core/src/nico_agent_core/core.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-application/src/nico_application/context.py`、`tests/test_core.py`、`tests/test_provider.py` | `_ACTIVE_RUNS` 仅进程内；同步插件线程不可可靠取消；当前按单进程本地运行 |
 | OpenAI Chat Completions、OpenAI 兼容端点、Anthropic、demo、SSE 与会话模型选择 | 协议适配和 SSE 已实现；用户报告默认模型普通聊天可用 | `packages/nico-adapters/src/nico_adapters/models/`、`packages/nico-app/src/nico_app/runtime.py`、`tests/test_provider.py`、`tests/test_model_contracts.py` | 用户尚未提供可复现的端点配置；工具调用、面试反馈质量和求职效果仍待评估 |
 | 内置只读工具、会话授权与只读并行 | 已完成当前只读安全闭环 | `packages/nico-application/src/nico_application/tools.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-storage/src/nico_storage/store/`、`tests/test_core.py` | 当前不开放有副作用的写工具 |
