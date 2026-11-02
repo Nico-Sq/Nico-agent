@@ -2,7 +2,9 @@ import asyncio
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
@@ -787,6 +789,54 @@ class InterviewApiTests(unittest.TestCase):
         for session_id in (source_id, practice_id, nested_id):
             self.assertEqual(self.client.get(f"/api/interview/sessions/{session_id}").status_code, 404)
         self.assertEqual(self.client.get("/api/interview/sessions").json(), [])
+
+    def test_deleting_source_cancels_active_practice_model_run(self):
+        class WaitingProvider:
+            def __init__(self):
+                self.started = threading.Event()
+                self.cancelled = threading.Event()
+                self.release = threading.Event()
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                try:
+                    await asyncio.to_thread(self.release.wait)
+                except asyncio.CancelledError:
+                    self.cancelled.set()
+                    raise
+                return {"content": "不应提交的迟到结果"}
+
+        source_id = self.client.post("/api/interview/sessions", json={
+            "goal": "开发岗位", "max_questions": 1,
+        }).json()["id"]
+        self.client.post(f"/api/interview/sessions/{source_id}/start")
+        self.client.post(f"/api/interview/sessions/{source_id}/answers", json={"text": "原回答"})
+        practice_id = self.client.post(f"/api/interview/sessions/{source_id}/practice", json={
+            "question_number": 1,
+        }).json()["id"]
+        provider = WaitingProvider()
+        main.runtime.provider = provider
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                running = executor.submit(
+                    self.client.post,
+                    f"/api/interview/sessions/{practice_id}/start",
+                    headers={"Accept": "text/event-stream"},
+                )
+                self.assertTrue(provider.started.wait(10))
+                deleted = self.client.delete(f"/api/interview/sessions/{source_id}")
+                self.assertEqual(deleted.status_code, 200)
+                self.assertTrue(provider.cancelled.wait(10))
+                provider.release.set()
+                response = running.result(timeout=10)
+        finally:
+            provider.release.set()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get(f"/api/interview/sessions/{source_id}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/interview/sessions/{practice_id}").status_code, 404)
+        self.assertEqual(AgentRuntime.cancel_session_runs(practice_id), 0)
 
     def test_deleting_chat_leaves_interview_untouched(self):
         chat_id = self.client.post("/api/chat/sessions").json()["id"]
