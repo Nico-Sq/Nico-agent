@@ -7,6 +7,7 @@ from .base import (
     now,
 )
 from .channels import ChannelRepositoryMixin
+from .interviews import InterviewRepositoryMixin
 from .materials import MaterialRepositoryMixin
 from .memory import MemoryRepositoryMixin
 from .runs import RunRepositoryMixin
@@ -17,6 +18,7 @@ from nico_application.contracts import RepositoryPort, UnitOfWorkPort
 class Store(
     SessionRepositoryMixin,
     ChannelRepositoryMixin,
+    InterviewRepositoryMixin,
     MaterialRepositoryMixin,
     MemoryRepositoryMixin,
     RunRepositoryMixin,
