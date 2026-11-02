@@ -109,7 +109,12 @@ class CompatibilitySnapshotTests(unittest.TestCase):
 
         self.assertTrue(callable(main.claim_chat_message))
         self.assertTrue(callable(main.interrupt_chat))
+        self.assertTrue(callable(main.register))
+        self.assertTrue(callable(main.login))
+        self.assertTrue(callable(main.current_user))
+        self.assertTrue(callable(main.logout))
         self.assertIsNotNone(main.TextInput)
+        self.assertIsNotNone(main.Credentials)
         self.assertFalse(hasattr(main, "HTTPException"))
         self.assertFalse(hasattr(main, "BaseModel"))
 
