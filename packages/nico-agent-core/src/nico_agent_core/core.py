@@ -112,6 +112,8 @@ class AgentCore:
         try:
             try:
                 async with asyncio.timeout(MAX_RUN_SECONDS):
+                    if not request.is_current():
+                        raise RunSuperseded()
                     await request.prepare_tools()
                     content = await self._model_loop(request)
             except TimeoutError as exc:

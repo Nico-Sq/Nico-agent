@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from nico_agent_core import AgentCore, AgentRunRequest, classify_run_error
+from nico_agent_core import AgentCore, AgentRunRequest, RunSuperseded, classify_run_error
 from nico_contracts.errors import ModelError
 
 
@@ -33,6 +33,21 @@ class AgentCoreTests(unittest.TestCase):
         result = asyncio.run(AgentCore().run(self.request(reply)))
         self.assertEqual(result, "answer")
         self.assertEqual(reply.calls, 1)
+
+    def test_superseded_run_skips_tool_preparation(self):
+        request = self.request(FakeModel())
+        prepared = []
+
+        async def prepare_tools():
+            prepared.append(True)
+
+        request.is_current = lambda: False
+        request.prepare_tools = prepare_tools
+
+        with self.assertRaises(RunSuperseded):
+            asyncio.run(AgentCore().run(request))
+
+        self.assertEqual(prepared, [])
 
     def test_tool_cycle_uses_generic_executor_and_usage(self):
         tool_call = {"id": "call-1", "function": {"name": "lookup", "arguments": "{}"}}

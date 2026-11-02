@@ -931,6 +931,14 @@ API/CLI/数据兼容：
 - 实施：在 `nico-web/app.py` 增加仅匹配材料提取 POST 路由的 ASGI 限制；用 `Content-Length` 快速拒绝，并逐块累计请求体以覆盖缺少长度头的请求。上限为现有文件字节上限加 64 KiB multipart 开销，超限返回 413；现有提取器仍按单文件上限验证。未改提取格式、路由契约或文件大小策略。
 - 验证：新增 Web 测试覆盖带长度头的大请求在提取器运行前返回 413、无长度头时逐块计数并返回 413；Web 定向测试 2 项、API 材料提取测试 2 项、适配器 PDF 解压限制测试 2 项通过。根目录全套测试 248 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-web` wheel，并在仓库外临时 venv 安装验证 web 及 contracts/domain/application 依赖通过。
 
+AgentCore 过期运行的工具准备边界复审与修复（2026-11-02）：
+
+- 聊天工具授权链复查：内置材料/报告读取通过 `chat_authorizes(session_id, version, target)` 检查当前消息与运行版本；`AgentRuntime` 在进入模型循环及每轮前都通过 `run_current()` 验证版本。该路径没有发现可借用后续消息授权的问题，没有改动授权规则。
+- 证据：`AgentCore.run()` 原先先 `await request.prepare_tools()`，只有进入 `_model_loop()` 后才检查 `is_current()`。因此运行在上下文装配期间被 supersede 时，仍会开始 MCP/插件发现。新增测试在 `is_current() == False` 时观察到 `prepare_tools()` 仍被调用，稳定复现该多余工作。
+- 参考核对：Akashic `agent/core/passive_turn.py` 在 turn 流程中管理工具发现状态，但没有 Nico 的 SQLite session-version 接口，未照搬其状态结构；nanobot `agent/loop.py::_cancel_active_tasks()` 体现按 session 取消并等待任务；Pi `packages/agent/src/agent-loop.ts` 将 `AbortSignal` 传到流与工具准备/执行，并在工具执行前检查取消。调整后只在 Nico 现有 `AgentCore` 准备边界提前调用已有版本端口，不新增取消抽象。
+- 实施：`AgentCore.run()` 在 `prepare_tools()` 前检查 `is_current()`，失效时直接抛出既有 `RunSuperseded`；保留 `_model_loop()` 内的检查，以覆盖准备工具期间版本变化。模型协议与工具接口不变。
+- 验证：agent-core 定向测试 8 项通过；根目录全套测试 249 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-agent-core` wheel，并在仓库外临时 venv 安装验证 agent-core 及 contracts 依赖通过。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text
