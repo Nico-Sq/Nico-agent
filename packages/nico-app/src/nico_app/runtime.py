@@ -236,6 +236,14 @@ class AgentRuntime:
         except Exception as exc:
             trace.outcome = "failed"
             trace.error_code = classify_run_error(exc)
+            if kind == "interview" and isinstance(exc, ValueError):
+                if isinstance(exc, json.JSONDecodeError):
+                    reason = "invalid_json"
+                elif "证据" in str(exc) or "引用" in str(exc):
+                    reason = "evidence_validation"
+                else:
+                    reason = "output_validation"
+                logger.warning("Interview response rejected: reason=%s", reason)
             self.store.fail_run(session["id"], session["version"], kind, trace.error_code)
             raise
         finally:

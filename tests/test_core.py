@@ -465,7 +465,7 @@ class CoreTests(unittest.TestCase):
     def test_failed_interview_retry_records_failed_run_status(self):
         answer_text = "我负责接口实现，但没有配置事务。"
         invalid = json.dumps({
-            "feedback": "当前无法判断具体做法。",
+            "feedback": "SECRET_MODEL_OUTPUT",
             "question": "", "finished": True, "evidence": [],
             "summary": "本轮已完成。",
         }, ensure_ascii=False)
@@ -480,8 +480,11 @@ class CoreTests(unittest.TestCase):
         answer = self.store.claim_run(
             interview["id"], "interview", "awaiting_answer", answer_text,
         )
-        with self.assertRaises(ValueError):
-            run_demo(AgentRuntime(self.store, InvalidProvider()).run(answer))
+        with self.assertLogs("nico_app.runtime", level="WARNING") as captured:
+            with self.assertRaises(ValueError):
+                run_demo(AgentRuntime(self.store, InvalidProvider()).run(answer))
+        self.assertIn("reason=evidence_validation", "\n".join(captured.output))
+        self.assertNotIn("SECRET_MODEL_OUTPUT", "\n".join(captured.output))
 
         detail = json.loads(next(
             event["detail"] for event in reversed(self.store.events(interview["id"], "interview"))
