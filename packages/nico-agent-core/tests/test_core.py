@@ -1,8 +1,10 @@
 import asyncio
 import unittest
+from threading import Event, Thread
 from unittest.mock import patch
 
 from nico_agent_core import AgentCore, AgentRunRequest, RunSuperseded, classify_run_error
+import nico_agent_core.core as agent_core_module
 from nico_contracts.errors import ModelError
 
 
@@ -48,6 +50,75 @@ class AgentCoreTests(unittest.TestCase):
             asyncio.run(AgentCore().run(request))
 
         self.assertEqual(prepared, [])
+
+    def test_session_run_registry_allows_cross_thread_finish_during_cancel(self):
+        values_started = Event()
+        continue_values = Event()
+        finish_started = Event()
+        finish_completed = Event()
+        errors = []
+
+        class GatedRuns(dict):
+            def values(self):
+                iterator = iter(super().values())
+                first = next(iterator)
+                values_started.set()
+                if not continue_values.wait(1):
+                    raise TimeoutError("cancel snapshot was not released")
+                yield first
+                yield from iterator
+
+        class ClosedLoop:
+            @staticmethod
+            def is_closed():
+                return True
+
+        class FinishedTask:
+            @staticmethod
+            def done():
+                return False
+
+            @staticmethod
+            def get_loop():
+                return ClosedLoop()
+
+        first_task, second_task = FinishedTask(), FinishedTask()
+        active_runs = GatedRuns({1: first_task, 2: second_task})
+
+        def capture_error(action):
+            try:
+                action()
+            except Exception as exc:
+                errors.append(exc)
+
+        def finish():
+            finish_started.set()
+            AgentCore.finish_session_run("session", 2, second_task)
+            finish_completed.set()
+
+        cancel_thread = Thread(target=lambda: capture_error(
+            lambda: AgentCore.cancel_session_runs("session"),
+        ))
+        finish_thread = Thread(target=finish)
+        finish_thread_started = False
+        with patch.object(agent_core_module, "_ACTIVE_RUNS", {"session": active_runs}):
+            cancel_thread.start()
+            try:
+                self.assertTrue(values_started.wait(1), repr(errors))
+                finish_thread.start()
+                finish_thread_started = True
+                self.assertTrue(finish_started.wait(1))
+                self.assertFalse(finish_completed.wait(0.05))
+            finally:
+                continue_values.set()
+                cancel_thread.join(1)
+                if finish_thread_started:
+                    finish_thread.join(1)
+
+        self.assertFalse(cancel_thread.is_alive())
+        self.assertFalse(finish_thread.is_alive())
+        self.assertTrue(finish_completed.is_set())
+        self.assertEqual(errors, [])
 
     def test_tool_cycle_uses_generic_executor_and_usage(self):
         tool_call = {"id": "call-1", "function": {"name": "lookup", "arguments": "{}"}}

@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from threading import Lock
 
 from nico_contracts.errors import ModelError
 from nico_contracts.events import RunEventSink, Usage, run_event
@@ -20,6 +21,8 @@ MAX_MODEL_OUTPUT_CHARS = 12_000
 MAX_MODEL_TURNS = 4
 
 _ACTIVE_RUNS: dict[str, dict[int, asyncio.Task]] = {}
+# Sync HTTP handlers cancel runs from worker threads while the loop updates this registry.
+_ACTIVE_RUNS_LOCK = Lock()
 
 
 class RunSuperseded(Exception):
@@ -75,23 +78,26 @@ class AgentCore:
     @classmethod
     def track_session_run(cls, session_id: str, version: int, task: asyncio.Task | None) -> None:
         if task is not None:
-            _ACTIVE_RUNS.setdefault(session_id, {})[version] = task
+            with _ACTIVE_RUNS_LOCK:
+                _ACTIVE_RUNS.setdefault(session_id, {})[version] = task
 
     @classmethod
     def finish_session_run(cls, session_id: str, version: int, task: asyncio.Task | None) -> None:
-        runs = _ACTIVE_RUNS.get(session_id)
-        if runs and runs.get(version) is task:
-            runs.pop(version, None)
-            if not runs:
-                _ACTIVE_RUNS.pop(session_id, None)
+        with _ACTIVE_RUNS_LOCK:
+            runs = _ACTIVE_RUNS.get(session_id)
+            if runs and runs.get(version) is task:
+                runs.pop(version, None)
+                if not runs:
+                    _ACTIVE_RUNS.pop(session_id, None)
 
     @classmethod
     def cancel_session_runs(cls, session_id: str) -> int:
         """Cancel tasks still working on a session after its version changed."""
-        runs = _ACTIVE_RUNS.get(session_id, {})
-        tasks = [task for task in runs.values() if not task.done()]
-        if runs and not tasks:
-            _ACTIVE_RUNS.pop(session_id, None)
+        with _ACTIVE_RUNS_LOCK:
+            runs = _ACTIVE_RUNS.get(session_id, {})
+            tasks = [task for task in runs.values() if not task.done()]
+            if runs and not tasks:
+                _ACTIVE_RUNS.pop(session_id, None)
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:

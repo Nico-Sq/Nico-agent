@@ -939,6 +939,13 @@ AgentCore 过期运行的工具准备边界复审与修复（2026-11-02）：
 - 实施：`AgentCore.run()` 在 `prepare_tools()` 前检查 `is_current()`，失效时直接抛出既有 `RunSuperseded`；保留 `_model_loop()` 内的检查，以覆盖准备工具期间版本变化。模型协议与工具接口不变。
 - 验证：agent-core 定向测试 8 项通过；根目录全套测试 249 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-agent-core` wheel，并在仓库外临时 venv 安装验证 agent-core 及 contracts 依赖通过。
 
+AgentCore 运行登记跨线程竞态复审与修复（2026-11-02）：
+
+- 证据：`nico-web/chat_routes.py` 的中断路由和 `nico-web/routes.py` 的删除路由均为同步 handler，FastAPI 会在 worker thread 执行；它们通过 application 调用 `AgentRuntime.cancel_session_runs()`。运行任务则在 asyncio loop 中登记/移除；`cancel_session_runs()` 已用 `loop.call_soon_threadsafe()` 支持跨线程取消，但此前直接遍历同一共享嵌套字典。受控测试让取消线程暂停在 `values()` 迭代中，同时另一线程移除版本条目，复现并发改字典导致快照失败。
+- 参考核对：Akashic `agent/looping/core.py` 按 session 保存 `_active_tasks` 并由 `request_interrupt()` 直接取任务，整体以同一 loop 生命周期为边界；nanobot `agent/loop.py::_cancel_active_tasks()` 是 async 取消并等待任务；Pi `packages/agent/src/agent-loop.ts` 通过 `AbortSignal` 传递取消状态，没有 Nico 这种跨线程共享 Python 任务映射。它们不提供可直接复制的 cross-thread registry 实现；本项目需保护的是自身同步 HTTP handler 与 asyncio loop 共享的状态。
+- 实施：对 `_ACTIVE_RUNS` 的登记、移除和取消任务快照使用一个 `threading.Lock`；调度 `task.cancel()` 保持在锁外，避免在临界区调用事件循环。
+- 验证：agent-core 定向测试 9 项通过，新增测试以事件门控确定性覆盖“取消快照与另一线程完成任务”的交错；根目录全回归 250 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-agent-core` wheel，并在仓库外临时 venv 安装验证其及 contracts 依赖通过。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text
