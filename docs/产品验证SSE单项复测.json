@@ -159,10 +159,53 @@
     },
     "finding": "重启后 IF-04 与 IF-10 的网页 SSE 完整流程均结束为 finished，回答原文和 evidence 完全一致。IF-10 反馈明确保留不确定边界，并给出查看 Redis 调用点和配置的步骤。此次仅覆盖两个固定案例；首轮 30 案例和第二位独立评审仍未通过或完成。"
   },
+  "after_stack_followup_retest": {
+    "date": "2026-11-02",
+    "based_on_code_commit": "a29b61a",
+    "prompt_policy_version": "9",
+    "interview_prompt_version": "5ca5b19335cc",
+    "flow": "网页 SSE：start -> answers/claim -> answers/run",
+    "cases": [
+      {
+        "id": "IF-04",
+        "start_http": 200,
+        "start_status": "awaiting_answer",
+        "answer_http": 200,
+        "answer_sse_error": "model_invalid_output",
+        "report_http": 200,
+        "report_status": "paused",
+        "answer_exactly_preserved": true,
+        "evidence": [],
+        "cleanup": true,
+        "model_run_event": {
+          "provider": "openai_compatible",
+          "model": "openai/gpt-oss-20b",
+          "status": "running",
+          "error_code": "model_invalid_output"
+        }
+      },
+      {
+        "id": "IF-10",
+        "start_http": 200,
+        "start_status": "awaiting_answer",
+        "answer_http": 200,
+        "answer_sse_errors": [],
+        "report_http": 200,
+        "report_status": "finished",
+        "question": "请问在项目复测-IF-10中，Redis 的具体使用场景是什么？请说明你是如何确认这些场景的。",
+        "feedback": "您的回答表明您曾使用 Redis，但目前无法确认其在项目中的具体用途。建议查看项目代码中 Redis 的调用位置和配置，以确定其用途。",
+        "evidence": ["我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。"],
+        "answer_exactly_preserved": true,
+        "evidence_exactly_matches_answer": true,
+        "cleanup": true
+      }
+    ],
+    "finding": "在 Java/Spring Boot 材料下，IF-10 本次给出与语言无关的 Redis 调用与配置检查建议。IF-04 的一次后续运行在回答阶段再次出现 model_invalid_output；同一案例此前完成过，因此重试后输出稳定性仍未证明。失败事件的 model_run 状态仍记录为 running，是后续可修复的观测问题。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "历史复测中的传输方式不完全一致；本次按当前网页请求流程，IF-04 和 IF-10 的开始及回答均使用 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；IF-04/IF-10 的本次 SSE 复测已完成。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；IF-10 通过后续栈一致性复测，但 IF-04 的 model_invalid_output 仍间歇出现。"
   ]
 }
