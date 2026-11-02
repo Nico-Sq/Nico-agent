@@ -104,6 +104,15 @@ EXPECTED_API_ROUTES = {
 
 
 class CompatibilitySnapshotTests(unittest.TestCase):
+    def test_legacy_main_keeps_route_exports_without_framework_imports(self):
+        from career_agent import main
+
+        self.assertTrue(callable(main.claim_chat_message))
+        self.assertTrue(callable(main.interrupt_chat))
+        self.assertIsNotNone(main.TextInput)
+        self.assertFalse(hasattr(main, "HTTPException"))
+        self.assertFalse(hasattr(main, "BaseModel"))
+
     def test_legacy_storage_imports_forward_to_the_storage_package(self):
         self.assertIs(LegacyStore, Store)
         self.assertIs(LegacyAuthStore, AuthStore)
