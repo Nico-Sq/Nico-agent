@@ -234,6 +234,7 @@ class AgentRuntime:
             self.store.fail_run(session["id"], session["version"], kind, trace.error_code)
             raise
         except Exception as exc:
+            trace.outcome = "failed"
             trace.error_code = classify_run_error(exc)
             self.store.fail_run(session["id"], session["version"], kind, trace.error_code)
             raise

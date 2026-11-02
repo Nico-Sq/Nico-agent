@@ -462,6 +462,34 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result["session"]["status"], "finished")
         self.assertEqual(report["items"][0]["evidence"], [answer_text])
 
+    def test_failed_interview_retry_records_failed_run_status(self):
+        answer_text = "我负责接口实现，但没有配置事务。"
+        invalid = json.dumps({
+            "feedback": "当前无法判断具体做法。",
+            "question": "", "finished": True, "evidence": [],
+            "summary": "本轮已完成。",
+        }, ensure_ascii=False)
+
+        class InvalidProvider:
+            async def complete(self, messages, tools):
+                return {"content": invalid}
+
+        interview = self.store.create("interview", "后端工程师", max_questions=1)
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answer = self.store.claim_run(
+            interview["id"], "interview", "awaiting_answer", answer_text,
+        )
+        with self.assertRaises(ValueError):
+            run_demo(AgentRuntime(self.store, InvalidProvider()).run(answer))
+
+        detail = json.loads(next(
+            event["detail"] for event in reversed(self.store.events(interview["id"], "interview"))
+            if event["kind"] == "model_run"
+        ))
+        self.assertEqual(detail["status"], "failed")
+        self.assertEqual(detail["error_code"], "model_invalid_output")
+
     def test_chat_memory_survives_context_window(self):
         chat = self.store.create("chat")
         self.store.set_chat_memory(chat["id"], "重点准备后端岗位")
