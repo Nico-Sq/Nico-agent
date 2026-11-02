@@ -114,10 +114,12 @@ class CompatibilitySnapshotTests(unittest.TestCase):
         self.assertTrue(callable(main.current_user))
         self.assertTrue(callable(main.logout))
         self.assertTrue(callable(main.active_material_use_cases))
+        self.assertTrue(callable(main.active_memory_use_cases))
         self.assertIsNotNone(main.TextInput)
         self.assertIsNotNone(main.Credentials)
         self.assertIsNotNone(main.MaterialInput)
         self.assertIsNotNone(main.ClaimInput)
+        self.assertIsNotNone(main.MemoryCandidateInput)
         self.assertFalse(hasattr(main, "HTTPException"))
         self.assertFalse(hasattr(main, "BaseModel"))
 

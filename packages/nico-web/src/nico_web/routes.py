@@ -4,8 +4,6 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Literal
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -13,7 +11,6 @@ from pydantic import BaseModel, Field
 from nico_application import (
     ChatUseCases,
     InterviewUseCases,
-    MemoryUseCases,
     ToolGrantError,
     ToolGrantUseCases,
     UseCaseError,
@@ -50,6 +47,23 @@ from .material_routes import (
     list_materials,
     router as material_router,
 )
+from .memory_routes import (
+    LongMemoryInput,
+    MemoryCandidateEdit,
+    MemoryCandidateInput,
+    active_memory_use_cases,
+    add_memory,
+    confirm_memory_candidate,
+    create_memory_candidate,
+    delete_memory,
+    delete_memory_candidate,
+    get_memory_candidate,
+    list_memories,
+    list_memory_candidates,
+    router as memory_router,
+    update_memory_candidate,
+)
+from .route_support import http_interview_use_case_error, http_use_case_error, require_session
 from .backend import active_backend, active_runtime as _active_runtime, active_store as _active_store
 
 
@@ -168,23 +182,6 @@ def active_interview_use_cases():
     backend = active_backend()
     return InterviewUseCases(active_store(), backend.model_catalog(), run_interview_session,
                              backend.cancel_session_runs)
-
-
-def active_memory_use_cases():
-    return MemoryUseCases(active_store())
-
-
-def http_use_case_error(exc: UseCaseError) -> HTTPException:
-    status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
-    return HTTPException(status, str(exc))
-
-
-def http_interview_use_case_error(exc: UseCaseError) -> HTTPException:
-    if exc.kind == "not_found" and str(exc) == "面试会话不存在":
-        return HTTPException(404, "会话不存在")
-    if exc.kind == "invalid" and str(exc) == "回答不能为空":
-        return HTTPException(422, "内容不能为空")
-    return http_use_case_error(exc)
 
 
 async def run_chat_session(session: dict, on_event: RunEventSink | None = None) -> dict:
@@ -312,18 +309,6 @@ class ChatMemoryInput(BaseModel):
     text: str = Field(max_length=2000)
 
 
-class LongMemoryInput(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
-
-
-class MemoryCandidateInput(LongMemoryInput):
-    source_message_ids: list[int] = Field(min_length=1, max_length=16)
-
-
-class MemoryCandidateEdit(LongMemoryInput):
-    pass
-
-
 class SessionTitleInput(BaseModel):
     title: str = Field(max_length=80)
 
@@ -334,13 +319,6 @@ class InterviewAnswerInput(TextInput):
 
 class PracticeInput(BaseModel):
     question_number: int = Field(ge=1)
-
-
-def require_session(session_id: str, kind: str) -> dict:
-    session = active_store().get(session_id, kind)
-    if session is None:
-        raise HTTPException(404, "会话不存在")
-    return session
 
 
 @router.get("/api/config")
@@ -354,89 +332,7 @@ def list_models():
     return active_backend().model_catalog().list()
 
 
-@router.get("/api/memories")
-def list_memories(q: str = Query(default="", max_length=100)):
-    return active_memory_use_cases().search(q)
-
-
-@router.post("/api/memories")
-def add_memory(body: LongMemoryInput):
-    try:
-        return active_memory_use_cases().add(body.content)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.delete("/api/memories/{memory_id}")
-def delete_memory(memory_id: str):
-    try:
-        active_memory_use_cases().delete(memory_id)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    return {"deleted": True}
-
-
-@router.get("/api/memory-candidates")
-def list_memory_candidates(
-    session_id: str | None = Query(default=None),
-    status: Literal["pending", "confirmed"] | None = Query(default=None),
-):
-    if session_id is not None:
-        require_session(session_id, "chat")
-    try:
-        return active_memory_use_cases().list_candidates(session_id, status)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.get("/api/memory-candidates/{candidate_id}")
-def get_memory_candidate(candidate_id: str):
-    try:
-        return active_memory_use_cases().get_candidate(candidate_id)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/memory-candidates")
-def create_memory_candidate(session_id: str, body: MemoryCandidateInput):
-    require_session(session_id, "chat")
-    try:
-        return active_memory_use_cases().create_candidate(
-            session_id, body.content, body.source_message_ids
-        )
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.put("/api/memory-candidates/{candidate_id}")
-def update_memory_candidate(candidate_id: str, body: MemoryCandidateEdit):
-    try:
-        return active_memory_use_cases().edit_candidate(candidate_id, body.content)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.post("/api/memory-candidates/{candidate_id}/confirm")
-def confirm_memory_candidate(candidate_id: str):
-    try:
-        return active_memory_use_cases().confirm_candidate(candidate_id)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.delete("/api/memory-candidates/{candidate_id}")
-def delete_memory_candidate(candidate_id: str):
-    try:
-        active_memory_use_cases().delete_candidate(candidate_id)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    return {"deleted": True}
+router.include_router(memory_router)
 
 
 @router.get("/api/mcp/tools")
