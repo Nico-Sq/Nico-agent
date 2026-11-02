@@ -1,10 +1,11 @@
 """Generic non-streaming model and tool loop."""
 
 import asyncio
+import copy
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Lock
 
 from nico_contracts.errors import ModelError
@@ -13,12 +14,17 @@ from nico_contracts.messages import AgentMessage
 from nico_contracts.tools import ToolDefinition
 
 from .ports import ModelPort
-
-MAX_MODEL_INPUT_CHARS = 64_000
-MAX_TOOL_CALLS = 8
-MAX_RUN_SECONDS = 120
-MAX_MODEL_OUTPUT_CHARS = 12_000
-MAX_MODEL_TURNS = 4
+from .run import (
+    MAX_MODEL_INPUT_CHARS,
+    MAX_MODEL_OUTPUT_CHARS,
+    MAX_MODEL_TURNS,
+    MAX_RUN_SECONDS,
+    MAX_TOOL_CALLS,
+    PreparedRun,
+    RunKey,
+    RunOutcome,
+    RunPolicy,
+)
 
 _ACTIVE_RUNS: dict[str, dict[int, asyncio.Task]] = {}
 # Sync HTTP handlers cancel runs from worker threads while the loop updates this registry.
@@ -40,11 +46,13 @@ class AgentRunRequest:
     prepare_tools: Callable[[], Awaitable[None]]
     trace: "AgentRunTrace" = field(default_factory=lambda: AgentRunTrace())
     on_event: RunEventSink | None = None
+    policy: RunPolicy = field(default_factory=RunPolicy)
 
 
 @dataclass
 class AgentRunTrace:
     version: int = 0
+    key: RunKey | None = None
     provider: str = "custom"
     model: str = ""
     prompt_version: str = ""
@@ -74,7 +82,39 @@ def classify_run_error(error: Exception) -> str:
     return "model_run_failed"
 
 
+def _message_chars(messages: list[AgentMessage]) -> int:
+    return sum(len(message.get("content") or "")
+               + len(json.dumps(message.get("tool_calls", []), ensure_ascii=False))
+               for message in messages)
+
+
 class AgentCore:
+    async def execute(self, prepared: PreparedRun) -> RunOutcome:
+        async def execute_tool(call: dict) -> dict:
+            name = call["function"]["name"]
+            args = json.loads(call["function"].get("arguments") or "{}")
+            result = await prepared.tools.execute(name, args)
+            return {"role": "tool", "tool_call_id": call["id"],
+                    "content": json.dumps(result, ensure_ascii=False)}
+
+        async def prepare_tools() -> None:
+            return None
+
+        request = AgentRunRequest(
+            model=prepared.model,
+            messages=list(prepared.messages),
+            tools=list(prepared.tools.definitions),
+            is_current=prepared.is_current,
+            execute_tool=execute_tool,
+            can_execute_in_parallel=lambda call: prepared.tools.can_execute_in_parallel(
+                call["function"]["name"]),
+            prepare_tools=prepare_tools,
+            trace=AgentRunTrace(version=prepared.key.version, key=prepared.key),
+            on_event=prepared.on_event,
+            policy=prepared.policy,
+        )
+        return RunOutcome(await self.run(request), request.trace)
+
     @classmethod
     def track_session_run(cls, session_id: str, version: int, task: asyncio.Task | None) -> None:
         if task is not None:
@@ -119,18 +159,28 @@ class AgentCore:
 
     async def run(self, request: AgentRunRequest) -> str:
         try:
+            if any(not isinstance(message, dict)
+                   or message.get("role") not in ("system", "user", "assistant", "tool")
+                   or not isinstance(message.get("content"), (str, type(None)))
+                   or (message.get("role") != "assistant"
+                       and not isinstance(message.get("content"), str))
+                   for message in request.messages):
+                raise ModelError("model_invalid_input", "模型输入消息格式错误")
+            if _message_chars(request.messages) > request.policy.max_input_chars:
+                raise ModelError("context_budget_exceeded", "模型输入超过上下文预算", 413)
+            working_request = replace(request, messages=copy.deepcopy(request.messages))
             try:
-                async with asyncio.timeout(MAX_RUN_SECONDS):
+                async with asyncio.timeout(request.policy.timeout_seconds):
                     if not request.is_current():
                         raise RunSuperseded()
                     await request.prepare_tools()
-                    content = await self._model_loop(request)
+                    content = await self._model_loop(working_request)
             except TimeoutError as exc:
                 error = ModelError("run_timeout", "本次模型运行超时", 504)
                 request.trace.outcome = "failed"
                 request.trace.error_code = error.code
                 raise error from exc
-            if len(content) > MAX_MODEL_OUTPUT_CHARS:
+            if len(content) > request.policy.max_output_chars:
                 raise ValueError("模型输出超过长度上限")
             return content
         except RunSuperseded:
@@ -146,7 +196,7 @@ class AgentCore:
             raise
 
     async def _model_loop(self, request: AgentRunRequest) -> str:
-        for _ in range(MAX_MODEL_TURNS):
+        for _ in range(request.policy.max_turns):
             if not request.is_current():
                 raise RunSuperseded()
             request.trace.usage.request_count += 1
@@ -184,9 +234,9 @@ class AgentCore:
                 if request.on_event is not None and not streaming:
                     request.on_event({"type": "text_delta", "text": content})
                 return content.strip()
-            if request.trace.usage.exceeded:
+            if request.trace.usage.total_tokens >= request.policy.max_reported_tokens:
                 raise ModelError("run_token_limit", "本次模型运行已达到用量上限")
-            if len(request.trace.tool_names) + len(calls) > MAX_TOOL_CALLS:
+            if len(request.trace.tool_names) + len(calls) > request.policy.max_tool_calls:
                 raise ValueError("本次运行的工具调用超过上限")
             request.trace.tool_names.extend(call["function"]["name"] for call in calls)
             if request.on_event is not None:
@@ -197,9 +247,7 @@ class AgentCore:
             request.messages.extend(await self.execute_tools(
                 calls, request.execute_tool, request.can_execute_in_parallel,
             ))
-            if sum(len(message.get("content") or "")
-                   + len(json.dumps(message.get("tool_calls", []), ensure_ascii=False))
-                   for message in request.messages) > MAX_MODEL_INPUT_CHARS:
+            if _message_chars(request.messages) > request.policy.max_input_chars:
                 raise ModelError(
                     "context_budget_exceeded",
                     "工具结果超过模型上下文预算，请减少本次读取的材料或经历", 413,

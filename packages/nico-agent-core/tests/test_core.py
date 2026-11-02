@@ -1,8 +1,10 @@
 import asyncio
+import copy
 import unittest
 from threading import Event, Thread
 from unittest.mock import patch
 
+import nico_agent_core
 from nico_agent_core import AgentCore, AgentRunRequest, RunSuperseded, classify_run_error
 import nico_agent_core.core as agent_core_module
 from nico_contracts.errors import ModelError
@@ -253,12 +255,164 @@ class AgentCoreTests(unittest.TestCase):
                 await asyncio.sleep(1)
 
         request = self.request(SlowModel())
-        with patch("nico_agent_core.core.MAX_RUN_SECONDS", 0.01):
-            with self.assertRaises(ModelError) as caught:
-                asyncio.run(AgentCore().run(request))
+        request.policy = nico_agent_core.RunPolicy(timeout_seconds=0.01)
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().run(request))
         self.assertEqual(caught.exception.code, "run_timeout")
         self.assertEqual(request.trace.outcome, "failed")
         self.assertEqual(request.trace.error_code, "run_timeout")
+
+
+class PreparedRunContractTests(unittest.TestCase):
+    def test_policy_rejects_invalid_limits_at_construction(self):
+        for changes in ({"max_turns": 0}, {"max_tool_calls": True},
+                        {"timeout_seconds": float("nan")}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                nico_agent_core.RunPolicy(**changes)
+
+    def test_namespaces_and_attempts_keep_distinct_run_identity(self):
+        class EmptyTools:
+            definitions = ()
+
+            async def execute(self, name, args):
+                raise AssertionError("no tool was offered")
+
+            def can_execute_in_parallel(self, name):
+                return True
+
+        keys = (
+            nico_agent_core.RunKey("chat", "same", 1, 0),
+            nico_agent_core.RunKey("interview", "same", 1, 0),
+            nico_agent_core.RunKey("chat", "same", 1, 1),
+        )
+
+        async def scenario():
+            return await asyncio.gather(*(AgentCore().execute(
+                nico_agent_core.PreparedRun(
+                    key=key, model=FakeModel({"content": str(index), "finish_reason": "stop"}),
+                    messages=({"role": "user", "content": "start"},),
+                    tools=EmptyTools(), is_current=lambda: True,
+                )
+            ) for index, key in enumerate(keys)))
+
+        outcomes = asyncio.run(scenario())
+        self.assertEqual([outcome.content for outcome in outcomes], ["0", "1", "2"])
+        self.assertEqual([getattr(outcome.trace, "key", None) for outcome in outcomes], list(keys))
+
+    def test_independent_host_can_run_with_neutral_contract(self):
+        self.assertTrue(all(hasattr(nico_agent_core, name) for name in (
+            "RunKey", "RunPolicy", "PreparedRun", "RunOutcome", "ToolSnapshot",
+        )))
+
+        class EmptyTools:
+            definitions = ()
+
+            async def execute(self, name, args):
+                raise AssertionError("no tool was offered")
+
+            def can_execute_in_parallel(self, name):
+                return True
+
+        prepared = nico_agent_core.PreparedRun(
+            key=nico_agent_core.RunKey("example", "session", 1),
+            model=FakeModel({"content": "ready", "finish_reason": "stop"}),
+            messages=({"role": "user", "content": "start"},),
+            tools=EmptyTools(),
+            policy=nico_agent_core.RunPolicy(),
+            is_current=lambda: True,
+        )
+        outcome = asyncio.run(AgentCore().execute(prepared))
+        self.assertEqual(outcome.content, "ready")
+        self.assertEqual(outcome.trace.usage.request_count, 1)
+
+    def test_legacy_run_does_not_change_host_messages(self):
+        call = {"id": "lookup-1", "function": {"name": "lookup", "arguments": "{}"}}
+        model = FakeModel(
+            {"content": None, "tool_calls": [call], "finish_reason": "tool_calls"},
+            {"content": "done", "finish_reason": "stop"},
+        )
+        request = AgentCoreTests().request(model)
+        original = copy.deepcopy(request.messages)
+        self.assertEqual(asyncio.run(AgentCore().run(request)), "done")
+        self.assertEqual(request.messages, original)
+
+    def test_invalid_initial_message_stops_before_model(self):
+        model = FakeModel({"content": "should not run"})
+        request = AgentCoreTests().request(model, messages=[
+            {"role": "admin", "content": "invalid role"},
+        ])
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().run(request))
+        self.assertEqual(caught.exception.code, "model_invalid_input")
+        self.assertEqual(model.calls, 0)
+
+    def test_missing_user_content_stops_before_model(self):
+        model = FakeModel({"content": "should not run"})
+        request = AgentCoreTests().request(model, messages=[{"role": "user"}])
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().run(request))
+        self.assertEqual(caught.exception.code, "model_invalid_input")
+        self.assertEqual(model.calls, 0)
+
+    def test_initial_input_budget_stops_before_model(self):
+        model = FakeModel({"content": "should not run"})
+        request = AgentCoreTests().request(model, messages=[
+            {"role": "user", "content": "too long"},
+        ])
+        request.policy = nico_agent_core.RunPolicy(max_input_chars=5)
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().run(request))
+        self.assertEqual(caught.exception.code, "context_budget_exceeded")
+        self.assertEqual(model.calls, 0)
+
+    def test_custom_token_policy_stops_tool_but_default_allows_it(self):
+        call = {"id": "lookup-1", "function": {"name": "lookup", "arguments": "{}"}}
+
+        class LookupTools:
+            definitions = ({"type": "function", "function": {
+                "name": "lookup", "description": "Read one value",
+                "parameters": {"type": "object", "properties": {}},
+            }},)
+
+            def __init__(self):
+                self.calls = 0
+
+            async def execute(self, name, args):
+                self.calls += 1
+                return {"value": "found"}
+
+            def can_execute_in_parallel(self, name):
+                return True
+
+        def prepared(limit, reported_tokens=3):
+            tools = LookupTools()
+            model = FakeModel(
+                {"content": None, "tool_calls": [call], "finish_reason": "tool_calls",
+                 "usage": {"total_tokens": reported_tokens}},
+                {"content": "done", "finish_reason": "stop"},
+            )
+            return nico_agent_core.PreparedRun(
+                key=nico_agent_core.RunKey("example", "session", 1),
+                model=model, messages=({"role": "user", "content": "start"},),
+                tools=tools, policy=nico_agent_core.RunPolicy(max_reported_tokens=limit),
+                is_current=lambda: True,
+            ), tools
+
+        limited, limited_tools = prepared(3)
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().execute(limited))
+        self.assertEqual(caught.exception.code, "run_token_limit")
+        self.assertEqual(limited_tools.calls, 0)
+
+        normal, normal_tools = prepared(16_000)
+        self.assertEqual(asyncio.run(AgentCore().execute(normal)).content, "done")
+        self.assertEqual(normal_tools.calls, 1)
+
+        default_limited, default_tools = prepared(16_000, 16_000)
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().execute(default_limited))
+        self.assertEqual(caught.exception.code, "run_token_limit")
+        self.assertEqual(default_tools.calls, 0)
 
 
 if __name__ == "__main__":

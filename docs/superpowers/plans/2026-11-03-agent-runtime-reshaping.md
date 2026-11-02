@@ -252,10 +252,10 @@ flowchart TB
 
 **文件：**`packages/nico-agent-core/src/nico_agent_core/` 内新增中性类型文件，更新 `ports.py`、`__init__.py`；需要跨包传递的数据形状放 `nico-contracts`；测试 `packages/nico-agent-core/tests/test_core.py`；必要时改 `scripts/check_dependency_graph.py`。**依赖：**T00。
 
-- [ ] 先写测试：两个不同 namespace 的同名 session/version 可同时运行；同一版本的 attempt 0/1 各有独立运行标识；相同 run 输入的消息在执行后保持原值；非法初始消息在引擎入口得到稳定错误且不调用模型；自定义 token 阈值与默认 16,000 阈值均按传入政策生效。
-- [ ] 引入第 7.2 节的 `RunKey`、`RunPolicy`、`PreparedRun`、`RunOutcome` 最小形式，默认预算保持现值；保留旧 `AgentRunRequest` 转发路径供当前宿主使用。
-- [ ] 在依赖图检查中确认 Core 不导入求职包；对 `RunPolicy` 的非法值只在外部构造边界验证一次。
-- [ ] 运行 Core 测试与依赖图检查，审查公开导出是否有一次性、无使用者的类型。
+- [x] 先写测试：两个不同 namespace 的同名 session/version 可同时运行；同一版本的 attempt 0/1 各有独立运行标识；相同 run 输入的消息在执行后保持原值；非法初始消息在引擎入口得到稳定错误且不调用模型；自定义 token 阈值与默认 16,000 阈值均按传入政策生效。
+- [x] 引入第 7.2 节的 `RunKey`、`RunPolicy`、`PreparedRun`、`RunOutcome` 最小形式，默认预算保持现值；保留旧 `AgentRunRequest` 转发路径供当前宿主使用。
+- [x] 在依赖图检查中确认 Core 不导入求职包；对 `RunPolicy` 的非法值只在外部构造边界验证一次。
+- [x] 运行 Core 测试与依赖图检查，审查公开导出是否有一次性、无使用者的类型。
 
 **验收：**中性接口可由假模型和假工具独立使用；Nico 业务包不成为 Core 的依赖，原入口行为通过。
 
@@ -467,3 +467,11 @@ git status --short --branch
 - **验证：**初次使用全局 Python 3.13.9 时，`pypdf==5.9.0` 不满足 `nico-adapters` 声明的 `pypdf>=6.21.4,<7`，导致 adapters 测试导入失败、根目录回归 7 个错误。仅在 `.superpowers/sdd/2026-11-03-agent-runtime-reshaping/venv` 隔离环境安装 `pypdf==6.21.4` 后，`python -m unittest discover -s tests -q` 运行 163 项通过；contracts 4、domain 11、agent-core 10、application 26、adapters 11、storage 24、CLI 5、Web 2 项分别通过。`python scripts/check_dependency_graph.py --require-all` 通过，九包依赖图无环。
 - **性能口径：**使用隔离环境运行 `python -m benchmarks.run_baseline --output .superpowers/sdd/2026-11-03-agent-runtime-reshaping/t00-baseline.json`。Windows 11、CPython 3.13.9、SQLite 3.51.0、16 逻辑处理器；固定种子 20261101，1,000 会话、11,100 消息、200 条记忆，常规重复 20 次、启动重复 3 次、每 worker 写入 40 次。`context.recent_16.10000` p95 为 4.5951 ms，`memory.search_200` p95 为 2.6587 ms；loopback 假 HTTP 模型 p95 为 1485.0019 ms，20 次成功、错误路径 1 次。原始 JSON 在本计划专属的忽略目录中；这些数值只代表本机及假端点，不代表真实模型延迟或重塑收益。
 - **未验证风险与回退：**未连接真实模型，也未在 CI 的 Python 3.11/3.13 环境执行。T00 未改产品代码；若后续回退，只需撤回本段记录，隔离测试环境可删除。
+
+### T01（2026-11-03）：中性运行契约
+
+- **做法与原因：**Core 新增 `RunKey`、`RunPolicy`、`PreparedRun`、`RunOutcome` 与 `ToolSnapshot` 端口，`AgentCore.execute` 将新契约桥接到原执行循环；旧 `AgentRunRequest.run` 入口继续可用。运行身份进入 trace，旧请求的消息先复制再执行；初始消息形状与输入预算在模型调用前检查。默认预算只由一组常量定义，token 默认值沿用 contracts 的 16,000。`RunPolicy` 在构造处检查正数、类型与有限超时。
+- **红绿证据：**新增独立宿主测试先因公共契约缺失失败；消息不变、非法消息、缺失正文、自定义 token 阈值、运行身份、初始输入预算及非法政策测试均先因预期缺口失败，再通过最小实现转绿。旧超时测试改为从新政策注入 0.01 秒，保留原来的用户可见错误断言。
+- **验证：**隔离 Python 环境中 `python -m unittest discover -s packages/nico-agent-core/tests -q` 18 项通过；`python -m unittest discover -s tests -q` 163 项通过；contracts 4、domain 11、application 26、adapters 11、storage 24、CLI 5、Web 2 项通过。`python scripts/check_dependency_graph.py --require-all` 和 `git diff --check` 通过；源码检索未发现 Core 导入求职、SQLite、Web/CLI 或具体适配器。
+- **参考取舍：**Pi `packages/agent/src/agent-loop.ts` 复制宿主消息后运行，予以采用；nanobot `agent/runner.py` 的运行规格与 `agent/tools/registry.py` 的统一工具入口只采用中性契约，不复制其宽泛配置；Akashic `agent/looping/session_lane.py` 的会话隔离留给 T02，`bootstrap/tools.py` 的组合根边界保持在 Nico app。三者提示调用链与本计划第 3 节一致，求职提示仍留在 application。
+- **规则与风险：**T01 的 `ToolSnapshot` 仅是端口，完整不可变授权快照与参数校验由 T04 验收；实例级取消由 T02、事件终态由 T05 验收。本项没有改变存储 schema。回退时可撤回本项代码和测试提交，保留 T00 基线记录。
