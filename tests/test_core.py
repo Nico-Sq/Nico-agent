@@ -66,6 +66,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reply["usage"]["total_tokens"], 6)
         self.assertEqual(reply["finish_reason"], "stop")
 
+    def test_model_run_event_failure_does_not_hide_committed_response(self):
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+        save_event = self.store.event
+
+        def fail_model_run_event(session_id, kind, detail):
+            if kind == "model_run":
+                raise OSError("event storage unavailable")
+            save_event(session_id, kind, detail)
+
+        with patch.object(self.store, "event", side_effect=fail_model_run_event):
+            result = run_demo(self.runtime.run(running))
+
+        self.assertIn("message", result)
+        self.assertEqual(self.store.messages(chat["id"], "chat")[-1]["role"], "assistant")
+
     def test_anthropic_provider_runs_tool_cycle_with_native_messages(self):
         class Client:
             def __init__(self):

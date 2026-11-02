@@ -250,7 +250,13 @@ class AgentRuntime:
             raise
         finally:
             AgentCore.finish_session_run(session["id"], session["version"], task)
-            self.store.event(session["id"], "model_run", trace.event())
+            try:
+                self.store.event(session["id"], "model_run", trace.event())
+            except Exception:
+                logger.exception(
+                    "Failed to persist model-run event: session_id=%s version=%s",
+                    session["id"], session["version"],
+                )
 
     async def _retry_interview_response(self, request: AgentRunRequest,
                                         trace: AgentRunTrace,

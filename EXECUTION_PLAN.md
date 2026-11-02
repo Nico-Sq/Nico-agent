@@ -960,6 +960,13 @@ AgentCore 运行登记跨线程竞态复审与修复（2026-11-02）：
 - 实施：`AgentCore.cancel_session_runs()` 增加可选 `before_version`，只取消版本小于边界的 task；聊天消息认领/重试/中断、固定备注更新，以及面试回答/跳题/暂停/结束都传入其状态变更版本。新版本及其后的任务不再被旧操作取消；保留无边界调用以覆盖会话删除。
 - 验证：agent-core 与 application 定向测试共 36 项、根目录全回归 255 项通过（FastAPI TestClient 有 1 条 Starlette 上游弃用警告）；依赖图无环、`compileall`、`git diff --check` 通过。重建受影响的 agent-core、application、web、app wheels，并在仓库外临时 venv 验证安装；依赖下载有一次 TLS EOF 重试，使用本机缓存继续并成功。
 
+模型运行结果与审计事件写入边界复审及修复（2026-11-03）：
+
+- 证据：`AgentRuntime.run()` 先由 application result handler 通过 `Store.finish_run()` 提交助手回复和会话状态，随后在 `finally` 中用另一连接写 `model_run` 事件。测试注入事件写入 `OSError` 后稳定复现：助手回复已在 SQLite 中，调用仍以 `OSError` 失败；同一写入错误也会覆盖更早的模型错误或取消异常。
+- 参考核对：Akashic `agent/looping/core.py` 将 turn 执行与 `session_manager.save_async()` 分开；nanobot `agent/loop.py` 在 turn/session 生命周期中保存会话；Pi `packages/agent/src/agent-loop.ts` 发出运行事件，但持久化由宿主 session 管理。三者没有 Nico 的 SQLite `model_run` trace 写入点；调整后保持现有 Store 和记录格式，只隔离非业务审计事件的失败。
+- 实施：`AgentRuntime.run()` 捕获 `Store.event(..., "model_run", ...)` 的异常并用 session/version 记录异常日志，使它不再覆盖已经提交的回复或原始运行异常。若 SQLite 拒绝审计事件，该条遥测仍可能缺失，但错误在日志中可见；没有改变业务回复提交和失败运行状态写入。
+- 验证：新增回归测试先复现“回复提交成功而事件写入失败导致调用报错”，修复后确认返回回复且 SQLite 中存在助手消息。根目录全回归 256 项通过（FastAPI TestClient 有 1 条 Starlette 上游弃用警告）；依赖图无环、`compileall`、`git diff --check` 通过。重建 `nico-app` wheel 并在仓库外临时 venv 完整依赖安装验证成功。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text
