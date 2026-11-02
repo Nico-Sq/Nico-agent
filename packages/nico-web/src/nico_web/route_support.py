@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException
 
-from nico_application import UseCaseError
+from nico_application import SessionUseCases, UseCaseError
 
 from .backend import active_store
 
@@ -20,8 +20,12 @@ def http_interview_use_case_error(exc: UseCaseError) -> HTTPException:
     return http_use_case_error(exc)
 
 
+def active_session_use_cases():
+    return SessionUseCases(active_store())
+
+
 def require_session(session_id: str, kind: str) -> dict:
-    session = active_store().get(session_id, kind)
-    if session is None:
-        raise HTTPException(404, "会话不存在")
-    return session
+    try:
+        return active_session_use_cases().require_session(session_id, kind)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc

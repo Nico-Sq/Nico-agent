@@ -62,8 +62,11 @@ flowchart LR
   CLI --> InterviewCases[nico-application/interview_use_cases.py]
   Web --> Cases
   Web --> InterviewCases
+  Web --> SessionCases[nico-application/session_use_cases.py]
   Cases --> Ports[nico-application/contracts.py]
   InterviewCases --> Ports
+  SessionCases --> Ports
+  SessionCases --> Export[nico-application/export.py]
   Cases --> Domain[nico-domain]
   InterviewCases --> Domain
   Store[nico-storage/store] --> Ports
@@ -84,7 +87,7 @@ flowchart LR
 当前主要事实：
 
 - `nico-app/main.py` 与 `nico-app/cli.py` 装配存储、模型、工具适配器和运行时；`career_agent.*` 是保留的旧导入及入口。
-- `nico-web/routes.py` 组合 HTTP 子路由；`chat_routes.py` 与 `interview_routes.py` 分别处理对应业务接口，共用 SSE 与运行响应转换位于 `workflow_support.py`。`nico-cli/cli.py` 保留命令入口和分发，面试与记忆命令分别位于 `interview_commands.py` 和 `memory_commands.py`；聊天、材料和记忆用例由 `nico-application/use_cases.py` 协调，面试状态与结果提交由 `interview_use_cases.py` 协调。两者使用 `contracts.py` 的端口和错误类型，并依赖 `nico-domain` 的规则；`nico-storage` 实现存储端口。
+- `nico-web/routes.py` 组合 HTTP 子路由；`chat_routes.py` 与 `interview_routes.py` 分别处理对应业务接口，共用 SSE 与运行响应转换位于 `workflow_support.py`。通用会话列表、详情、标题更新和 Markdown 导出由 `nico-application/session_use_cases.py` 编排，Web 层保留 HTTP 参数、状态码和下载响应映射。`nico-cli/cli.py` 保留命令入口和分发，面试与记忆命令分别位于 `interview_commands.py` 和 `memory_commands.py`；聊天、材料和记忆用例由 `nico-application/use_cases.py` 协调，面试状态与结果提交由 `interview_use_cases.py` 协调；前两者使用 `nico-domain` 规则。各用例使用 `contracts.py` 端口，`nico-storage` 实现存储端口。
 - `nico-app/runtime.py` 将 `nico-agent-core` 的模型/工具循环连接到上下文、内置工具、外部适配器和存储；提示词与面试重试提示位于 `nico-application/resources/prompts/`，`context.py` 为面试运行记录这两类提示资源的指纹。
 - `nico-storage` 负责 SQLite schema、业务记录、账户、备份和恢复；`store/materials.py` 管材料与经历，`store/interviews.py` 管面试资源、报告和复练；根 `pyproject.toml` 列出九个独立发行包。
 
@@ -101,6 +104,7 @@ flowchart LR
 | 可信本地 Python 插件发现、授权、参数校验和调用 | 已完成当前只读基础能力 | `packages/nico-adapters/src/nico_adapters/plugins.py`、`packages/nico-app/src/nico_app/main.py`、`examples/echo_plugin.py`、`tests/test_extensions.py` | 插件在应用进程内运行；超时线程可能继续；不可信插件没有进程隔离 |
 | CLI 聊天、面试、候选记忆、模型和工具命令 | 已完成本机基础能力 | `packages/nico-cli/src/nico_cli/cli.py`、`packages/nico-app/src/nico_app/cli.py`、`tests/test_extensions.py` | CLI 不提供账户登录；命令入口仍组合本地服务 |
 | WebUI、登录、工具权限、候选记忆、导出与备份 | 已完成本机基础能力 | `packages/nico-web/src/nico_web/`、`packages/nico-web/src/nico_web/resources/static/`、`packages/nico-app/src/nico_app/main.py`、`tests/test_api.py`、`tests/test_auth.py` | 尚无目标用户可用性试跑和模型结果评估 |
+| Web 会话查询与导出 | 由 application 用例统一编排 | `packages/nico-application/src/nico_application/session_use_cases.py`、`packages/nico-application/src/nico_application/contracts.py`、`packages/nico-web/src/nico_web/routes.py` | 仅复用现有仓储方法；未增加聚合查询或数据库事务 |
 | SQLite 业务数据、账户隔离、备份恢复 | 已完成基础能力 | `packages/nico-storage/src/nico_storage/schema_migrations.py`、`schema.py`、`restore.py`、`backup.py`、`packages/nico-app/src/nico_app/main.py`、`tests/test_storage.py`、`tests/test_restore.py` | 账户 Store 首次打开仍需迁移/完整性校验；多进程部署和跨进程取消未验证 |
 | 文字渠道身份、去重和投递重试契约 | 部分完成 | `packages/nico-application/src/nico_application/channels.py`、`packages/nico-storage/src/nico_storage/store/channels.py`、`packages/nico-adapters/src/nico_adapters/console.py`、`tests/test_channels.py` | 没有第二个外部消息平台；跨平台投递不保证 exactly-once |
 | 运行事件与用量记录 | 已完成当前基础能力 | `packages/nico-contracts/src/nico_contracts/events.py`、`packages/nico-agent-core/src/nico_agent_core/core.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-storage/src/nico_storage/store/runs.py` | 费用上限取决于端点返回的 token 用量；缺少真实模型质量数据 |
@@ -888,6 +892,13 @@ API/CLI/数据兼容：
 - 新增 `docs/产品验证方案.md`，定义虚构资料试跑、固定模型案例、评分规则和首轮门槛；试跑尚未执行。
 - 验证：`pytest --import-mode=importlib -q` 215 项通过；适配器测试 11 项通过；依赖图检查通过；适配器 wheel 构建且元数据包含 pypdf 最低版本；CSS 41 个颜色值全为灰阶、173 条规则无语法错误。
 - 保留九包结构和单进程运行约束。九包合并与跨进程取消属于高影响架构变更，当前没有发布维护成本或多进程部署目标证据；出现实际需求后再立项。
+
+本机复审与优化记录（2026-11-02）：
+
+- 证据：`nico-web/routes.py` 直接调用 Store 获取会话列表、消息、事件、面试资源/复练来源和报告，并在 Web 层拼详情、归一标题及调用 Markdown 渲染；`route_support.py` 的 `require_session` 也直接读 Store。这样通用会话查询与导出依赖 HTTP 路由，CLI 或其他接口若需要相同行为会重复编排。
+- 参考核对：nanobot 的 `session/manager.py` 集中会话读写和列表预览，API 处理请求流程；Pi 的 `SessionManager.list` 管持久会话发现，没有对应浏览器服务层；Akashic 的 `bootstrap/chat_api.py` 列表路由直接穿过 channel 上下文读取内部 Store。调整后采用 Nico 已有的 application/port 边界；不复制任一项目的存储格式、分页机制或内部 Store 访问方式。
+- 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。Web 路由保留 `kind` 校验、HTTP 错误映射和下载响应；`require_session` 共用 application 用例。未改存储 schema、HTTP 响应形状或数据查询策略。
+- 验证：application 测试 22 项、API 测试 33 项、认证测试 5 项、兼容快照 8 项和根目录全回归 160 项通过；依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-web` wheels，并在仓库外临时 venv 验证依赖安装和导入。
 
 ## 16. 给后续执行 AI 的直接指令
 

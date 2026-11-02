@@ -10,6 +10,7 @@ from .use_cases import (
     commit_interview_result,
     delete_session_and_cancel_runs,
 )
+from .session_use_cases import SessionUseCases
 from .tooling import (
     ToolAdapterPort,
     ToolCatalog,
@@ -24,6 +25,7 @@ from .channels import ChannelLedgerPort, ChannelRouter
 
 __all__ = [
     "ChatUseCases", "InterviewUseCases", "MaterialUseCases", "MemoryUseCases",
+    "SessionUseCases",
     "UseCaseError", "commit_chat_result", "commit_interview_result",
     "delete_session_and_cancel_runs",
     "ToolAdapterPort", "ToolCatalog", "ToolCatalogPort", "ToolCatalogSnapshot",

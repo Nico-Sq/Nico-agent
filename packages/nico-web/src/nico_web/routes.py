@@ -8,7 +8,6 @@ from nico_application import (
     UseCaseError,
     delete_session_and_cancel_runs,
 )
-from nico_application.export import render_session_markdown
 
 from .auth_routes import (
     Credentials,
@@ -82,7 +81,12 @@ from .interview_routes import (
     skip_interview_question,
     start_interview,
 )
-from .route_support import http_interview_use_case_error, http_use_case_error, require_session
+from .route_support import (
+    active_session_use_cases,
+    http_interview_use_case_error,
+    http_use_case_error,
+    require_session,
+)
 from .tool_routes import (
     ToolGrantsInput,
     get_session_tools,
@@ -238,19 +242,17 @@ router.include_router(material_router)
 def list_sessions(kind: str, q: str = Query(default="", max_length=100)):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    return active_store().list_sessions(kind, q)
+    return active_session_use_cases().list(kind, q)
 
 
 @router.get("/api/{kind}/sessions/{session_id}")
 def get_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    session = require_session(session_id, kind)
-    result = {"session": session, "messages": active_store().messages(session_id, kind), "events": active_store().events(session_id, kind)}
-    if kind == "interview":
-        result["resources"] = active_store().interview_resources(session_id)
-        result["practice_source"] = active_store().practice_source(session_id)
-    return result
+    try:
+        return active_session_use_cases().detail(session_id, kind)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @router.delete("/api/{kind}/sessions/{session_id}")
@@ -269,20 +271,20 @@ def delete_session(kind: str, session_id: str):
 def update_session_title(kind: str, session_id: str, body: SessionTitleInput):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    session = active_store().set_session_title(session_id, kind, " ".join(body.title.split()))
-    if session is None:
-        raise HTTPException(404, "会话不存在")
-    return session
+    try:
+        return active_session_use_cases().set_title(session_id, kind, body.title)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
 
 
 @router.get("/api/{kind}/sessions/{session_id}/export.md")
 def export_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    session = require_session(session_id, kind)
-    messages = active_store().messages(session_id, kind)
-    report = active_store().interview_report(session_id) if kind == "interview" else None
-    content = render_session_markdown(session, messages, report)
+    try:
+        content = active_session_use_cases().export_markdown(session_id, kind)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     return Response(content, media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
