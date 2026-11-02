@@ -52,12 +52,15 @@ class MaterialRepositoryMixin:
         return bool(changed)
 
     def create_claim(self, text: str, material_id: str | None = None) -> dict:
-        if material_id:
-            material = self.get_material(material_id)
-            if material is None or material["revoked_at"] or material["kind"] == "job_description":
-                raise ValueError("经历来源必须是简历或项目材料")
         claim_id = uuid.uuid4().hex
         with self.connect() as db:
+            if material_id:
+                db.execute("BEGIN IMMEDIATE")
+                material = db.execute(
+                    "SELECT kind FROM materials WHERE id = ? AND revoked_at IS NULL", (material_id,),
+                ).fetchone()
+                if material is None or material["kind"] == "job_description":
+                    raise ValueError("经历来源必须是简历或项目材料")
             db.execute(
                 "INSERT INTO claims(id, material_id, text, status, created_at) "
                 "VALUES (?, ?, ?, 'draft', ?)",

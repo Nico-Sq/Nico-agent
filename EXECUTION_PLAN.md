@@ -907,6 +907,14 @@ API/CLI/数据兼容：
 - 实施：application 改用带会话类型的 `set_tool_grants_if_idle` 端口；Storage 在 `BEGIN IMMEDIATE` 中核验会话存在、类型和非运行状态后再替换授权，与 `claim_run` 的写锁串行。Web 将运行中冲突映射为 HTTP 409、异步期间已删除/类型不符映射为 404；CLI 的 grant/revoke 也传入会话类型。保留原 `set_tool_grants` 兼容接口和 schema。
 - 验证：application 24 项、storage 21 项、Web 包 1 项、受控发现竞态 1 项通过；仓库 `.venv` 根目录全套 244 项通过（FastAPI TestClient 有 1 条上游弃用警告）。依赖图检查、`compileall`、`git diff --check` 通过；九个 wheel 构建成功，本次受影响包及依赖在仓库外临时 venv 安装验证通过。系统 Anaconda Python 的 `pypdf` 为 5.9.0，不满足源码要求；最终验证使用仓库 `.venv`，未修改依赖声明。
 
+经历来源校验竞态复审与修复（2026-11-02）：
+
+- 证据：`MaterialUseCases.create_claim()` 校验来源后，Storage 又在独立连接读取材料，再单独插入主张；两次数据库操作间材料可被撤回。受控复现得到“材料已撤回、关联主张仍有效”；`confirm_claim()` 会接受该主张，因而这条路径可能把失效来源写成已确认经历。
+- 上下文候选核对：`replace_material()` 与 `replace_claim()` 都创建新 ID 并逻辑撤回旧记录；已有面试仍关联旧 ID，符合“旧面试保留原版本”。运行版本检查与结果提交版本保护也会阻止过期会话推进，因此没有引入跨表上下文快照。
+- 参考核对：Akashic 的 `memory2/store.py` 使用显式 SQLite 写事务保护持久状态更新；nanobot 的 `session/manager.py` 把完整会话写入临时文件后原子替换；Pi 的 `packages/durable/src/storage/sqlite/storage.ts` 把一批表变更放在同一事务后再采纳提交。三者没有材料/经历主张业务，也没有对应提示词或工具定义；采用事务提交边界，不复制其存储结构。
+- 实施：`Store.create_claim()` 在同一个 `BEGIN IMMEDIATE` 事务中重新核验来源仍有效且不是岗位描述材料，再插入主张。application 仍负责输入规范化和领域校验；未改 API、schema 或旧版本保留规则。
+- 验证：storage 23 项、application 24 项、根目录全套 246 项通过；测试断言来源读取和主张插入处于同一写事务，并覆盖撤回来源与岗位描述材料均不能创建主张。依赖图、编译、`git diff --check` 通过；重建 `nico-storage` wheel，并在仓库外临时 venv 验证其及依赖安装。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

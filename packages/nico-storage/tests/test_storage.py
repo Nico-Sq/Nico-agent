@@ -92,6 +92,54 @@ class StorageTests(unittest.TestCase):
         self.assertIsNone(store.set_tool_grants_if_idle(session["id"], "interview", ["other"]))
         self.assertEqual(store.tool_grants(session["id"]), ["read"])
 
+    def test_claim_source_check_and_insert_share_one_write_transaction(self):
+        store = Store(self.root / "claim-source.sqlite3")
+        material = store.create_material("project", "项目", "经历来源")
+        statements = []
+        connection_id = 0
+        connect = store.connect
+
+        @contextmanager
+        def traced_connect():
+            nonlocal connection_id
+            current = connection_id
+            connection_id += 1
+            with connect() as db:
+                db.set_trace_callback(lambda statement: statements.append((current, statement.strip())))
+                yield db
+
+        with patch.object(store, "connect", side_effect=traced_connect):
+            claim = store.create_claim("项目经历", material["id"])
+
+        validation_index, validation_connection = next(
+            (index, owner) for index, (owner, statement) in enumerate(statements)
+            if "SELECT KIND FROM MATERIALS" in statement.upper()
+        )
+        insert_index, insert_connection = next(
+            (index, owner) for index, (owner, statement) in enumerate(statements)
+            if "INSERT INTO CLAIMS" in statement.upper()
+        )
+        transaction_index = next(
+            index for index, (owner, statement) in enumerate(statements)
+            if owner == validation_connection and statement.upper() == "BEGIN IMMEDIATE"
+        )
+
+        self.assertEqual(validation_connection, insert_connection)
+        self.assertLess(transaction_index, validation_index)
+        self.assertLess(validation_index, insert_index)
+        self.assertIsNone(claim["revoked_at"])
+
+    def test_claim_cannot_use_revoked_or_job_description_material(self):
+        store = Store(self.root / "invalid-claim-source.sqlite3")
+        project = store.create_material("project", "项目", "经历来源")
+        job_description = store.create_material("job_description", "岗位", "岗位要求")
+        store.revoke_material(project["id"])
+
+        for material_id in (project["id"], job_description["id"]):
+            with self.subTest(material_id=material_id):
+                with self.assertRaisesRegex(ValueError, "经历来源必须是简历或项目材料"):
+                    store.create_claim("项目经历", material_id)
+
     def test_interview_report_uses_one_read_view_during_concurrent_delete(self):
         path = self.root / "interview.sqlite3"
         with database(path) as db:
