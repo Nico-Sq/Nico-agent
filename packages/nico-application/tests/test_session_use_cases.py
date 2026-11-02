@@ -34,6 +34,16 @@ class FakeStore:
             result["practice_source"] = self.practice_source(session_id)
         return result
 
+    def session_export_snapshot(self, session_id, kind):
+        session = self.get(session_id, kind)
+        if session is None:
+            return None
+        return {
+            "session": session,
+            "messages": self.messages(session_id, kind),
+            "report": self.interview_report(session_id) if kind == "interview" else None,
+        }
+
     def messages(self, session_id, kind, limit=None):
         return [{"role": "user", "content": "你好"}]
 
@@ -85,6 +95,12 @@ class SessionUseCaseTests(unittest.TestCase):
         self.assertIn("# 聊天记录", markdown)
         self.assertIn("## 固定备注", markdown)
         self.assertIn("你好", markdown)
+
+    def test_interview_export_uses_report_from_export_snapshot(self):
+        markdown = self.use_cases.export_markdown("interview-1", "interview")
+        self.assertIn("# 模拟面试记录", markdown)
+        self.assertIn("岗位目标：后端", markdown)
+        self.assertIn("## 完整对话", markdown)
 
 
 if __name__ == "__main__":

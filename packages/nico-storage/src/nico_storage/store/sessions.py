@@ -60,6 +60,21 @@ class SessionRepositoryMixin:
                 result["practice_source"] = self._read_practice_source(db, session_id)
             return result
 
+    def session_export_snapshot(self, session_id: str, kind: str) -> dict | None:
+        with self.connect() as db:
+            db.execute("BEGIN")
+            session = self._read_session(db, session_id, kind)
+            if session is None:
+                return None
+            result = {
+                "session": session,
+                "messages": self._read_messages(db, session_id, kind),
+                "report": None,
+            }
+            if kind == "interview":
+                result["report"] = self._read_interview_report(db, session_id, session)
+            return result
+
     def _read_session(self, db, session_id: str, kind: str) -> dict | None:
         row = db.execute(
             "SELECT * FROM sessions WHERE id = ? AND kind = ?", (session_id, kind)

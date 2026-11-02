@@ -31,7 +31,9 @@ class SessionUseCases:
         return session
 
     def export_markdown(self, session_id: str, kind: str) -> str:
-        session = self.require_session(session_id, kind)
-        messages = self.store.messages(session_id, kind)
-        report = self.store.interview_report(session_id) if kind == "interview" else None
-        return render_session_markdown(session, messages, report)
+        snapshot = self.store.session_export_snapshot(session_id, kind)
+        if snapshot is None:
+            raise UseCaseError("not_found", "会话不存在")
+        return render_session_markdown(
+            snapshot["session"], snapshot["messages"], snapshot["report"],
+        )

@@ -104,7 +104,7 @@ flowchart LR
 | 可信本地 Python 插件发现、授权、参数校验和调用 | 已完成当前只读基础能力 | `packages/nico-adapters/src/nico_adapters/plugins.py`、`packages/nico-app/src/nico_app/main.py`、`examples/echo_plugin.py`、`tests/test_extensions.py` | 插件在应用进程内运行；超时线程可能继续；不可信插件没有进程隔离 |
 | CLI 聊天、面试、候选记忆、模型和工具命令 | 已完成本机基础能力 | `packages/nico-cli/src/nico_cli/cli.py`、`packages/nico-app/src/nico_app/cli.py`、`tests/test_extensions.py` | CLI 不提供账户登录；命令入口仍组合本地服务 |
 | WebUI、登录、工具权限、候选记忆、导出与备份 | 已完成本机基础能力 | `packages/nico-web/src/nico_web/`、`packages/nico-web/src/nico_web/resources/static/`、`packages/nico-app/src/nico_app/main.py`、`tests/test_api.py`、`tests/test_auth.py` | 尚无目标用户可用性试跑和模型结果评估 |
-| Web 会话查询与导出 | 由 application 用例统一编排，详情使用同一 SQLite 读取快照 | `packages/nico-application/src/nico_application/session_use_cases.py`、`packages/nico-storage/src/nico_storage/store/sessions.py`、`packages/nico-web/src/nico_web/routes.py` | Markdown 导出与独立面试报告仍按现有读取路径生成；本次未改变其事务语义 |
+| Web 会话查询与导出 | 由 application 用例统一编排，详情、报告和导出使用一致读取快照 | `packages/nico-application/src/nico_application/session_use_cases.py`、`packages/nico-storage/src/nico_storage/store/sessions.py`、`packages/nico-storage/src/nico_storage/store/interviews.py`、`packages/nico-web/src/nico_web/routes.py` | 当前读取路径已覆盖并发删除时的快照一致性；尚无多进程测试目标 |
 | SQLite 业务数据、账户隔离、备份恢复 | 已完成基础能力 | `packages/nico-storage/src/nico_storage/schema_migrations.py`、`schema.py`、`restore.py`、`backup.py`、`packages/nico-app/src/nico_app/main.py`、`tests/test_storage.py`、`tests/test_restore.py` | 账户 Store 首次打开仍需迁移/完整性校验；多进程部署和跨进程取消未验证 |
 | 文字渠道身份、去重和投递重试契约 | 部分完成 | `packages/nico-application/src/nico_application/channels.py`、`packages/nico-storage/src/nico_storage/store/channels.py`、`packages/nico-adapters/src/nico_adapters/console.py`、`tests/test_channels.py` | 没有第二个外部消息平台；跨平台投递不保证 exactly-once |
 | 运行事件与用量记录 | 已完成当前基础能力 | `packages/nico-contracts/src/nico_contracts/events.py`、`packages/nico-agent-core/src/nico_agent_core/core.py`、`packages/nico-app/src/nico_app/runtime.py`、`packages/nico-storage/src/nico_storage/store/runs.py` | 费用上限取决于端点返回的 token 用量；缺少真实模型质量数据 |
@@ -898,7 +898,8 @@ API/CLI/数据兼容：
 - 证据：`nico-web/routes.py` 直接调用 Store 获取会话列表、消息、事件、面试资源/复练来源和报告，并在 Web 层拼详情、归一标题及调用 Markdown 渲染；`route_support.py` 的 `require_session` 也直接读 Store。这样通用会话查询与导出依赖 HTTP 路由，CLI 或其他接口若需要相同行为会重复编排。
 - 参考核对：nanobot 的 `session/manager.py` 集中会话读写和列表预览，API 处理请求流程；Pi 的 `SessionManager.list` 管持久会话发现，没有对应浏览器服务层；Akashic 的 `bootstrap/chat_api.py` 列表路由直接穿过 channel 上下文读取内部 Store。调整后采用 Nico 已有的 application/port 边界；不复制任一项目的存储格式、分页机制或内部 Store 访问方式。
 - 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；使用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”的部分结果。现由 storage 在显式只读事务中一次读取详情数据，并让查询辅助方法共享该连接；application 继续负责缺失会话错误。Web 路由保留 `kind` 校验、HTTP 错误映射和下载响应。未改 schema 或 HTTP 响应形状。
-- 验证：application 测试 22 项、storage 测试 16 项、根目录全回归 160 项通过；API/认证/兼容子套件此前分别 33/5/8 项通过；新增独立连接删除交错测试确认详情保持一个读取视图。依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-storage` wheels，并在仓库外临时 venv 验证依赖安装和导入。
+- 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；使用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”的部分结果。随后同样确认独立面试报告会混合读取，导出可能因会话与报告读取间删除而触发 `TypeError`。现由 storage 在显式读取事务中读取详情、完整报告和导出快照，查询辅助方法共享连接；application 继续负责缺失会话错误与 Markdown 渲染。Web 路由保留 `kind` 校验、HTTP 错误映射和下载响应。未改 schema 或 HTTP 响应形状。
+- 验证：application 测试 23 项、storage 测试 18 项、根目录全回归 160 项通过；API/认证/兼容子套件此前分别 33/5/8 项通过；独立连接删除交错测试覆盖详情、面试报告和导出。依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-storage` wheels，并在仓库外临时 venv 验证依赖安装和导入。
 
 ## 16. 给后续执行 AI 的直接指令
 

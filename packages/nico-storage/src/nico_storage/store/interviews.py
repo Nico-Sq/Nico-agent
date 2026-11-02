@@ -28,24 +28,31 @@ class InterviewRepositoryMixin:
         return {"materials": selected_materials, "claims": [dict(row) for row in claims]}
 
     def interview_report(self, session_id: str) -> dict | None:
-        session = self.get(session_id, "interview")
+        with self.connect() as db:
+            db.execute("BEGIN")
+            return self._read_interview_report(db, session_id)
+
+    def _read_interview_report(self, db, session_id: str,
+                               session: dict | None = None) -> dict | None:
+        if session is None:
+            session = self._read_session(db, session_id, "interview")
         if session is None:
             return None
-        with self.connect() as db:
-            rows = db.execute(
-                "SELECT number, question, answer, feedback, skipped FROM interview_items "
-                "WHERE session_id = ? ORDER BY number", (session_id,)
-            ).fetchall()
-            evidence = db.execute(
-                "SELECT number, quote FROM interview_evidence WHERE session_id = ? ORDER BY number, quote",
-                (session_id,),
-            ).fetchall()
-        messages = self.messages(session_id, "interview")
+        rows = db.execute(
+            "SELECT number, question, answer, feedback, skipped FROM interview_items "
+            "WHERE session_id = ? ORDER BY number", (session_id,)
+        ).fetchall()
+        evidence = db.execute(
+            "SELECT number, quote FROM interview_evidence WHERE session_id = ? ORDER BY number, quote",
+            (session_id,),
+        ).fetchall()
+        messages = self._read_messages(db, session_id, "interview")
+        practice_source = self._read_practice_source(db, session_id)
         summary = messages[-1]["content"] if session["status"] == "finished" and messages else None
         items = [dict(row) | {"evidence": [item["quote"] for item in evidence if item["number"] == row["number"]]}
                  for row in rows]
         return {"session_id": session_id, "goal": session["goal"], "status": session["status"],
-                "items": items, "summary": summary, "practice_source": self.practice_source(session_id)}
+                "items": items, "summary": summary, "practice_source": practice_source}
 
     def practice_source(self, session_id: str) -> dict | None:
         with self.connect() as db:

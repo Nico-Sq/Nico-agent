@@ -64,6 +64,76 @@ class StorageTests(unittest.TestCase):
         self.assertEqual([event["kind"] for event in snapshot["events"]], ["chat"])
         self.assertIsNone(store.get(session["id"], "chat"))
 
+    def test_interview_report_uses_one_read_view_during_concurrent_delete(self):
+        path = self.root / "interview.sqlite3"
+        with database(path) as db:
+            db.execute("PRAGMA journal_mode = WAL")
+        store = Store(path)
+        session = store.create("interview", goal="后端岗位")
+        with database(path) as db:
+            db.execute("UPDATE sessions SET status = 'finished' WHERE id = ?", (session["id"],))
+            db.execute(
+                "INSERT INTO interview_items(session_id, number, question, answer, feedback, skipped) "
+                "VALUES (?, 1, '问题', '回答', '反馈', 0)", (session["id"],),
+            )
+            db.execute(
+                "INSERT INTO interview_evidence(session_id, number, quote) VALUES (?, 1, '依据')",
+                (session["id"],),
+            )
+            db.execute(
+                "INSERT INTO messages(session_id, role, content, created_at) "
+                "VALUES (?, 'assistant', '总结', '2026-01-01')", (session["id"],),
+            )
+            db.commit()
+        read_session = store._read_session
+
+        def delete_after_session_read(db, session_id, kind):
+            result = read_session(db, session_id, kind)
+            store.delete_session_tree(session_id, kind)
+            return result
+
+        with patch.object(store, "_read_session", side_effect=delete_after_session_read):
+            report = store.interview_report(session["id"])
+
+        self.assertEqual(report["status"], "finished")
+        self.assertEqual(report["items"][0]["question"], "问题")
+        self.assertEqual(report["items"][0]["evidence"], ["依据"])
+        self.assertEqual(report["summary"], "总结")
+        self.assertIsNone(store.get(session["id"], "interview"))
+
+    def test_interview_export_snapshot_keeps_report_during_concurrent_delete(self):
+        path = self.root / "interview-export.sqlite3"
+        with database(path) as db:
+            db.execute("PRAGMA journal_mode = WAL")
+        store = Store(path)
+        session = store.create("interview", goal="后端岗位")
+        with database(path) as db:
+            db.execute("UPDATE sessions SET status = 'finished' WHERE id = ?", (session["id"],))
+            db.execute(
+                "INSERT INTO interview_items(session_id, number, question, answer, feedback, skipped) "
+                "VALUES (?, 1, '问题', '回答', '反馈', 0)", (session["id"],),
+            )
+            db.execute(
+                "INSERT INTO messages(session_id, role, content, created_at) "
+                "VALUES (?, 'assistant', '总结', '2026-01-01')", (session["id"],),
+            )
+            db.commit()
+        read_session = store._read_session
+
+        def delete_after_session_read(db, session_id, kind):
+            result = read_session(db, session_id, kind)
+            store.delete_session_tree(session_id, kind)
+            return result
+
+        with patch.object(store, "_read_session", side_effect=delete_after_session_read):
+            snapshot = store.session_export_snapshot(session["id"], "interview")
+
+        self.assertEqual(snapshot["session"]["id"], session["id"])
+        self.assertEqual(snapshot["messages"][-1]["content"], "总结")
+        self.assertEqual(snapshot["report"]["items"][0]["question"], "问题")
+        self.assertEqual(snapshot["report"]["summary"], "总结")
+        self.assertIsNone(store.get(session["id"], "interview"))
+
     def test_schema_v1_upgrades_to_v2_without_losing_data(self):
         path = self.root / "career_agent.sqlite3"
         with database(path) as db:
