@@ -258,10 +258,50 @@
     ],
     "finding": "UTF-8 复测中 IF-04 与 IF-10 均完成网页使用的 start/answer SSE 流程，报告 finished，原回答和 evidence 完全一致，模型运行事件均 completed，测试材料和会话均清理成功。IF-04 此次通过，但结合前次 model_invalid_output 和本轮首次错误尝试，单次通过不能证明其输出稳定。"
   },
+  "after_browser_ui_retest": {
+    "date": "2026-11-02",
+    "code_commit": "59878d7",
+    "provider": "openai_compatible",
+    "model": "openai/gpt-oss-20b",
+    "flow": "本地浏览器 UI：材料表单保存并勾选材料；新建面试；填写岗位目标和题数；开始面试；提交回答；在页面查看复盘和回答依据。",
+    "cases": [
+      {
+        "id": "IF-04",
+        "material_selected": true,
+        "start_status": "awaiting_answer",
+        "answer_submitted_from_ui": true,
+        "report_status": "finished",
+        "question": "请描述一次你在接口变更过程中遇到的数据一致性问题，以及你如何定位和解决该问题的步骤？",
+        "feedback": "回答说明你参与了接口实现，但未涉及事务配置或架构设计，无法判断你在接口变更中的一致性处理。请提供具体的接口实现代码或日志来证明你如何定位和解决一致性问题。",
+        "evidence": ["我负责接口实现，但没有配置事务，也没有参与系统架构设计。"],
+        "answer_exactly_preserved": true,
+        "evidence_exactly_matches_answer": true
+      },
+      {
+        "id": "IF-10",
+        "material_selected": true,
+        "start_status": "awaiting_answer",
+        "answer_submitted_from_ui": true,
+        "report_status": "finished",
+        "question": "请描述您在项目中使用 Redis 的具体场景与实现细节。",
+        "feedback": "候选人承认使用过 Redis，但未能回忆起具体用途，说明当前无法判断其在项目中的实现细节。建议通过查看项目代码中 Redis 的调用位置、配置文件以及相关缓存或队列实现来确认其具体用途。",
+        "evidence": ["我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。"],
+        "answer_exactly_preserved": true,
+        "evidence_exactly_matches_answer": true,
+        "model_run_history": "页面显示两条模型运行记录均完成，提示版本 5ca5b19335cc。"
+      }
+    ],
+    "cleanup": {
+      "sessions_deleted": 2,
+      "materials_deleted": 2,
+      "http_statuses": [200, 200, 200, 200]
+    },
+    "finding": "两个固定案例都通过实际浏览器页面完成了选材、开始面试、回答和报告查看，页面显示 finished 且回答依据逐字匹配。IF-04 的反馈措辞与接口级复测不同，说明单次模型措辞并不固定；本轮成功不能替代 30 案例回归或证明模型输出稳定。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "历史复测中的传输方式不完全一致；本次按当前网页请求流程，IF-04 和 IF-10 的开始及回答均使用 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；本次重启后的 UTF-8 网页 SSE 复测中 IF-04 与 IF-10 均完成且证据匹配。IF-04 先前出现过 model_invalid_output，单次通过不足以证明稳定；失败运行状态已修正，失败日志只记录固定类别。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；本次重启后的浏览器 UI 复测中 IF-04 与 IF-10 均完成且证据匹配。IF-04 先前出现过 model_invalid_output，单次通过不足以证明稳定；失败运行状态已修正，失败日志只记录固定类别。"
   ]
 }
