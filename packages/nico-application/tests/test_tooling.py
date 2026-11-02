@@ -6,14 +6,19 @@ from nico_application import ToolCatalog, ToolGrantError, ToolGrantUseCases
 class FakeStore:
     def __init__(self):
         self.grants = []
+        self.status = "active"
 
     def tool_grants(self, session_id):
         return list(self.grants)
 
     def get(self, session_id, kind):
-        return None
+        if session_id != "session" or kind != "chat":
+            return None
+        return {"id": session_id, "kind": kind, "status": self.status}
 
-    def set_tool_grants(self, session_id, names):
+    def set_tool_grants_if_idle(self, session_id, kind, names):
+        if self.get(session_id, kind) is None or self.status == "running":
+            return None
         self.grants = sorted(set(names))
         return list(self.grants)
 
@@ -86,6 +91,18 @@ class ToolingTests(unittest.TestCase):
         grants = ToolGrantUseCases(FakeStore())
         with self.assertRaisesRegex(ValueError, "需要现有chat会话 ID"):
             grants.require_session("missing", "chat")
+
+    def test_tool_grants_reject_running_session(self):
+        store = FakeStore()
+        store.grants = ["existing"]
+        store.status = "running"
+        grants = ToolGrantUseCases(store)
+
+        with self.assertRaises(ToolGrantError) as error:
+            grants.replace("session", ["read"], [{"name": "read", "read_only": True}])
+
+        self.assertEqual(error.exception.kind, "conflict")
+        self.assertEqual(store.grants, ["existing"])
 
 
 if __name__ == "__main__":

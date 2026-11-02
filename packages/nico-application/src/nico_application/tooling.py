@@ -15,7 +15,9 @@ from nico_domain import tool_is_read_only
 class ToolGrantPort(Protocol):
     def get(self, session_id: str, kind: str) -> dict | None: ...
     def tool_grants(self, session_id: str) -> list[str]: ...
-    def set_tool_grants(self, session_id: str, names: list[str]) -> list[str]: ...
+    def set_tool_grants_if_idle(
+        self, session_id: str, kind: str, names: list[str],
+    ) -> list[str] | None: ...
 
 
 class ToolAdapterPort(Protocol):
@@ -112,7 +114,11 @@ class ToolCatalog:
 
 
 class ToolGrantError(ValueError):
-    def __init__(self, kind: Literal["unavailable", "write_disabled"], message: str):
+    def __init__(
+        self,
+        kind: Literal["unavailable", "write_disabled", "conflict", "not_found"],
+        message: str,
+    ):
         super().__init__(message)
         self.kind = kind
 
@@ -130,15 +136,29 @@ class ToolGrantUseCases:
     def list(self, session_id: str) -> list[str]:
         return self.store.tool_grants(session_id)
 
-    def replace(self, session_id: str, names: list[str], available: Iterable[dict]) -> list[str]:
+    def _set_if_idle(self, session_id: str, kind: str, names: list[str]) -> list[str]:
+        updated = self.store.set_tool_grants_if_idle(session_id, kind, names)
+        if updated is not None:
+            return updated
+        if self.store.get(session_id, kind) is None:
+            raise ToolGrantError("not_found", "会话不存在")
+        raise ToolGrantError("conflict", "运行中不能修改工具授权")
+
+    def replace(
+        self, session_id: str, names: list[str], available: Iterable[dict],
+        kind: str = "chat",
+    ) -> list[str]:
         tools = {item.get("name"): item for item in available if isinstance(item, dict)}
         if not set(names) <= tools.keys():
             raise ToolGrantError("unavailable", "工具不存在或未启用")
         if any(not tool_is_read_only(tools[name].get("read_only")) for name in names):
             raise ToolGrantError("write_disabled", "非只读工具尚未开放")
-        return self.store.set_tool_grants(session_id, names)
+        return self._set_if_idle(session_id, kind, names)
 
-    def grant(self, session_id: str, name: str, available: Iterable[dict]) -> list[str]:
+    def grant(
+        self, session_id: str, name: str, available: Iterable[dict],
+        kind: str = "chat",
+    ) -> list[str]:
         tools = {item.get("name"): item for item in available if isinstance(item, dict)}
         if name not in tools:
             raise ToolGrantError("unavailable", "工具不存在或未启用")
@@ -146,12 +166,12 @@ class ToolGrantUseCases:
             raise ToolGrantError("write_disabled", "非只读工具尚未开放")
         names = set(self.store.tool_grants(session_id))
         names.add(name)
-        return self.store.set_tool_grants(session_id, sorted(names))
+        return self._set_if_idle(session_id, kind, sorted(names))
 
-    def revoke(self, session_id: str, name: str) -> list[str]:
+    def revoke(self, session_id: str, name: str, kind: str = "chat") -> list[str]:
         names = set(self.store.tool_grants(session_id))
         names.discard(name)
-        return self.store.set_tool_grants(session_id, sorted(names))
+        return self._set_if_idle(session_id, kind, sorted(names))
 
 
 class ToolDiscoveryUseCases:

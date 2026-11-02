@@ -175,10 +175,10 @@ def run(args: argparse.Namespace, services: CLIServices) -> None:
                     raise ValueError("需要工具名称")
                 available, _ = asyncio.run(services.tool_discovery.list())
                 names = services.tool_grants.grant(
-                    args.session_id, args.tool_name, available,
+                    args.session_id, args.tool_name, available, kind=args.kind,
                 )
             else:
                 if not args.tool_name:
                     raise ValueError("需要工具名称")
-                names = services.tool_grants.revoke(args.session_id, args.tool_name)
+                names = services.tool_grants.revoke(args.session_id, args.tool_name, kind=args.kind)
             print(names)

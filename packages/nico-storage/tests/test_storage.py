@@ -79,6 +79,19 @@ class StorageTests(unittest.TestCase):
         self.assertEqual([event["kind"] for event in snapshot["events"]], ["chat"])
         self.assertIsNone(store.get(session["id"], "chat"))
 
+    def test_tool_grants_cannot_change_after_run_is_claimed(self):
+        store = Store(self.root / "tool-grants.sqlite3")
+        session = store.create("chat")
+        self.assertEqual(
+            store.set_tool_grants_if_idle(session["id"], "chat", ["read", "read"]), ["read"],
+        )
+
+        self.assertIsNotNone(store.claim_run(session["id"], "chat", "active", "开始运行"))
+
+        self.assertIsNone(store.set_tool_grants_if_idle(session["id"], "chat", ["other"]))
+        self.assertIsNone(store.set_tool_grants_if_idle(session["id"], "interview", ["other"]))
+        self.assertEqual(store.tool_grants(session["id"]), ["read"])
+
     def test_interview_report_uses_one_read_view_during_concurrent_delete(self):
         path = self.root / "interview.sqlite3"
         with database(path) as db:

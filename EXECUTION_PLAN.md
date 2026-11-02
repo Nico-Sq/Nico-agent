@@ -900,6 +900,13 @@ API/CLI/数据兼容：
 - 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”。随后确认报告会混合读取，导出可能因读取间删除而触发 `TypeError`。现由 storage 在显式读取事务中生成详情、完整报告和导出快照，application 负责缺失会话错误与 Markdown 渲染；Web 保留 `kind` 校验、HTTP 错误和下载响应映射。未改 schema 或 HTTP 响应形状。
 - 验证：application 测试 23 项、storage 测试 20 项、根目录全回归 160 项通过；API/认证/兼容子套件此前分别 33/5/8 项通过；独立连接删除及 `finish_run` 提交交错测试覆盖详情、面试报告和导出。报告读取在提交期间返回完整旧状态，下一次读取返回完整新状态。依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-storage` wheels，并在仓库外临时 venv 验证依赖安装和导入。
 
+工具授权竞态复审与修复（2026-11-02）：
+
+- 证据：`nico-web/tool_routes.py` 在写授权前先检查会话状态，再等待 MCP `discover()`；等待期间可由 `claim_run()` 把会话原子切为 `running`。旧授权写入只删除并重建授权行，不复查状态。用受控异步发现复现后，运行已开始但授权仍被写入。
+- 参考核对：Akashic 的 `agent/plugins/snapshot.py`、`agent/core/passive_turn.py` 与 `prompts/agent.py` 将插件能力快照、模型可见工具和工具执行检查放在运行链路；nanobot 的 `agent/context.py`、`templates/agent/tool_contract.md` 与 `agent/runner.py` 分开组装工具说明、schema 和执行前校验；Pi 的 `packages/agent/src/types.ts` 与 `packages/agent/src/agent-loop.ts` 以每轮 `AgentContext.tools` 同时生成模型工具声明和可执行集合。它们没有 Nico 这种 SQLite 会话级授权状态，因此只借鉴运行时工具集应有确定边界，不复制大型插件快照或提示词逻辑。
+- 实施：application 改用带会话类型的 `set_tool_grants_if_idle` 端口；Storage 在 `BEGIN IMMEDIATE` 中核验会话存在、类型和非运行状态后再替换授权，与 `claim_run` 的写锁串行。Web 将运行中冲突映射为 HTTP 409、异步期间已删除/类型不符映射为 404；CLI 的 grant/revoke 也传入会话类型。保留原 `set_tool_grants` 兼容接口和 schema。
+- 验证：application 24 项、storage 21 项、Web 包 1 项、受控发现竞态 1 项通过；仓库 `.venv` 根目录全套 244 项通过（FastAPI TestClient 有 1 条上游弃用警告）。依赖图检查、`compileall`、`git diff --check` 通过；九个 wheel 构建成功，本次受影响包及依赖在仓库外临时 venv 安装验证通过。系统 Anaconda Python 的 `pypdf` 为 5.9.0，不满足源码要求；最终验证使用仓库 `.venv`，未修改依赖声明。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

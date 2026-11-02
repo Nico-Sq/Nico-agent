@@ -136,6 +136,22 @@ class SessionRepositoryMixin:
                            [(session_id, name) for name in sorted(set(names))])
         return self.tool_grants(session_id)
 
+    def set_tool_grants_if_idle(
+        self, session_id: str, kind: str, names: list[str],
+    ) -> list[str] | None:
+        grants = sorted(set(names))
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            session = db.execute(
+                "SELECT status FROM sessions WHERE id = ? AND kind = ?", (session_id, kind),
+            ).fetchone()
+            if session is None or session["status"] == "running":
+                return None
+            db.execute("DELETE FROM session_tool_grants WHERE session_id = ?", (session_id,))
+            db.executemany("INSERT INTO session_tool_grants(session_id, tool_name) VALUES (?, ?)",
+                           [(session_id, name) for name in grants])
+        return grants
+
     def delete_session(self, session_id: str, kind: str) -> bool:
         return bool(self.delete_session_tree(session_id, kind))
 

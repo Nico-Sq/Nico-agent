@@ -60,9 +60,10 @@ async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
         raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
     try:
         names = ToolGrantUseCases(active_store()).replace(
-            session_id, body.names, available.values(),
+            session_id, body.names, available.values(), kind=kind,
         )
     except ToolGrantError as exc:
         message = "包含未配置的外部工具" if exc.kind == "unavailable" else str(exc)
-        raise HTTPException(422, message) from exc
+        status = {"conflict": 409, "not_found": 404}.get(exc.kind, 422)
+        raise HTTPException(status, message) from exc
     return {"names": names}
