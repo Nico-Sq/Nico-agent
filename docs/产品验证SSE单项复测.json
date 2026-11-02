@@ -96,10 +96,73 @@
     ],
     "finding": "提示词 v7 下 IF-10 的真实 SSE 流程通过，JSON API 仍有输出校验失败；IF-04 的 SSE 首题响应存在间歇性无效响应。运行时现对无工具副作用的面试无效响应/输出尝试一次纠正重试，待启动新进程后验证。"
   },
+  "after_feedback_quality_retest": {
+    "date": "2026-11-02",
+    "code_commit": "a29b61a",
+    "provider": "openai_compatible",
+    "model": "openai/gpt-oss-20b",
+    "prompt_policy_version": "9",
+    "interview_prompt_version": "0a1fb2e788c2",
+    "flow": "网页 SSE：start -> answers/claim -> answers/run；两个案例的 start 与 answers/run 均发送 Accept: text/event-stream, application/json",
+    "prompt_iteration": {
+      "before_runtime_retry_fix": {
+        "id": "IF-04",
+        "start_error": "model_invalid_response",
+        "tool_names": ["read_interview_goal"],
+        "cleanup": true
+      },
+      "finding": "该失败发生在读取岗位目标后；原重试条件把所有工具调用都排除在外。重试范围现放宽为无工具或仅内部只读工具，写操作和外部工具仍不重放。"
+    },
+    "cases": [
+      {
+        "id": "IF-04",
+        "start_http": 200,
+        "start_sse_errors": [],
+        "start_status": "awaiting_answer",
+        "claim_http": 200,
+        "answer_http": 200,
+        "answer_sse_errors": [],
+        "report_http": 200,
+        "report_status": "finished",
+        "question": "请谈谈在接口改动导致的数据一致性问题时，你会采用哪些策略来保证系统的数据一致性？",
+        "feedback": "您提到只负责接口实现，未配置事务，也未参与架构设计。根据此回答，无法判断您在接口改动时如何保证数据一致性。请提供具体措施，例如使用幂等性、补偿事务或事件驱动等，或展示相关代码/日志。",
+        "evidence": ["我负责接口实现，但没有配置事务，也没有参与系统架构设计。"],
+        "answer_exactly_preserved": true,
+        "evidence_exactly_matches_answer": true,
+        "model_run_prompt_version": "0a1fb2e788c2",
+        "cleanup": true
+      },
+      {
+        "id": "IF-10",
+        "start_http": 200,
+        "start_sse_errors": [],
+        "start_status": "awaiting_answer",
+        "claim_http": 200,
+        "answer_http": 200,
+        "answer_sse_errors": [],
+        "report_http": 200,
+        "report_status": "finished",
+        "question": "请说明在项目“复测-IF-10”中，Redis 主要是如何被使用的？请描述具体的功能场景、使用方式以及与其他组件的交互。",
+        "feedback": "您表示对 Redis 在该项目中的具体用途不确定，说明目前无法判断您是否熟悉其实际使用场景。请检查项目代码中 redis.NewClient 的调用位置以及相关配置文件，以确认 Redis 主要用于缓存还是其他功能。",
+        "evidence": ["我用过 Redis，但暂时想不起在这个项目中的具体用途；需要查代码确认，不能确定是缓存还是其他用途。"],
+        "answer_exactly_preserved": true,
+        "evidence_exactly_matches_answer": true,
+        "model_run_prompt_version": "0a1fb2e788c2",
+        "cleanup": true
+      }
+    ],
+    "verification": {
+      "targeted_test": "python -m pytest tests/test_core.py -k interview_retries_invalid -q",
+      "result": "2 passed, 50 deselected",
+      "scope_note": "新增定向用例模拟 read_interview_goal 后收到 model_invalid_response，确认内部只读工具后的纠正重试完成；最终网页 SSE 复测中的 IF-04 本身没有调用工具。",
+      "diff_check": "passed"
+    },
+    "finding": "重启后 IF-04 与 IF-10 的网页 SSE 完整流程均结束为 finished，回答原文和 evidence 完全一致。IF-10 反馈明确保留不确定边界，并给出查看 Redis 调用点和配置的步骤。此次仅覆盖两个固定案例；首轮 30 案例和第二位独立评审仍未通过或完成。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
-    "IF-04 的开始请求走 JSON API，回答请求走 SSE；IF-08 与 IF-10 的开始和回答均走 SSE。",
+    "历史复测中的传输方式不完全一致；本次按当前网页请求流程，IF-04 和 IF-10 的开始及回答均使用 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏 JSON；运行时单次纠正重试刚加入，待重启后复测。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；IF-04/IF-10 的本次 SSE 复测已完成。"
   ]
 }
