@@ -897,9 +897,8 @@ API/CLI/数据兼容：
 
 - 证据：`nico-web/routes.py` 直接调用 Store 获取会话列表、消息、事件、面试资源/复练来源和报告，并在 Web 层拼详情、归一标题及调用 Markdown 渲染；`route_support.py` 的 `require_session` 也直接读 Store。这样通用会话查询与导出依赖 HTTP 路由，CLI 或其他接口若需要相同行为会重复编排。
 - 参考核对：nanobot 的 `session/manager.py` 集中会话读写和列表预览，API 处理请求流程；Pi 的 `SessionManager.list` 管持久会话发现，没有对应浏览器服务层；Akashic 的 `bootstrap/chat_api.py` 列表路由直接穿过 channel 上下文读取内部 Store。调整后采用 Nico 已有的 application/port 边界；不复制任一项目的存储格式、分页机制或内部 Store 访问方式。
-- 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；使用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”的部分结果。现由 storage 在显式只读事务中一次读取详情数据，并让查询辅助方法共享该连接；application 继续负责缺失会话错误。Web 路由保留 `kind` 校验、HTTP 错误映射和下载响应。未改 schema 或 HTTP 响应形状。
-- 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；使用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”的部分结果。随后同样确认独立面试报告会混合读取，导出可能因会话与报告读取间删除而触发 `TypeError`。现由 storage 在显式读取事务中读取详情、完整报告和导出快照，查询辅助方法共享连接；application 继续负责缺失会话错误与 Markdown 渲染。Web 路由保留 `kind` 校验、HTTP 错误映射和下载响应。未改 schema 或 HTTP 响应形状。
-- 验证：application 测试 23 项、storage 测试 18 项、根目录全回归 160 项通过；API/认证/兼容子套件此前分别 33/5/8 项通过；独立连接删除交错测试覆盖详情、面试报告和导出。依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-storage` wheels，并在仓库外临时 venv 验证依赖安装和导入。
+- 实施：新增 `SessionStorePort` 与 `SessionUseCases`，将列表、详情数据组装、缺失会话错误、标题空白归一及 Markdown 渲染放在 application。详情原本分别打开连接读取会话、消息、事件与面试数据；用独立 SQLite 写连接在读取间删除会话可复现“旧会话 + 空消息”。随后确认报告会混合读取，导出可能因读取间删除而触发 `TypeError`。现由 storage 在显式读取事务中生成详情、完整报告和导出快照，application 负责缺失会话错误与 Markdown 渲染；Web 保留 `kind` 校验、HTTP 错误和下载响应映射。未改 schema 或 HTTP 响应形状。
+- 验证：application 测试 23 项、storage 测试 20 项、根目录全回归 160 项通过；API/认证/兼容子套件此前分别 33/5/8 项通过；独立连接删除及 `finish_run` 提交交错测试覆盖详情、面试报告和导出。报告读取在提交期间返回完整旧状态，下一次读取返回完整新状态。依赖图无环；`compileall`、`git diff --check` 通过；新构建 `nico-application` 与 `nico-storage` wheels，并在仓库外临时 venv 验证依赖安装和导入。
 
 ## 16. 给后续执行 AI 的直接指令
 

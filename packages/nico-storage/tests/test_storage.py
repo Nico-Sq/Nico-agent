@@ -30,6 +30,21 @@ class StorageTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def _running_interview(self, path):
+        with database(path) as db:
+            db.execute("PRAGMA journal_mode = WAL")
+        store = Store(path)
+        session = store.create("interview", goal="后端岗位")
+        started = store.claim_run(session["id"], "interview", "new")
+        store.finish_run(
+            session["id"], started["version"], "第 1 题：系统设计", "awaiting_answer", 1,
+            question="系统设计",
+        )
+        running = store.claim_run(
+            session["id"], "interview", "awaiting_answer", "我的答案", expected_question=1,
+        )
+        return store, session, running
+
     def test_new_and_current_databases_migrate_once(self):
         path = self.root / "career_agent.sqlite3"
         store = Store(path)
@@ -133,6 +148,63 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(snapshot["report"]["items"][0]["question"], "问题")
         self.assertEqual(snapshot["report"]["summary"], "总结")
         self.assertIsNone(store.get(session["id"], "interview"))
+
+    def test_interview_report_reads_one_snapshot_during_finish_run(self):
+        store, session, running = self._running_interview(self.root / "report-finish.sqlite3")
+        read_session = store._read_session
+        finished = []
+
+        def finish_after_session_read(db, session_id, kind):
+            result = read_session(db, session_id, kind)
+            finished.append(store.finish_run(
+                session_id, running["version"], "面试总结", "finished", 1,
+                feedback="最终反馈", evidence=("原文依据",),
+            ))
+            return result
+
+        with patch.object(store, "_read_session", side_effect=finish_after_session_read):
+            report = store.interview_report(session["id"])
+
+        self.assertEqual(finished, [True])
+        self.assertEqual(report["status"], "running")
+        self.assertIsNone(report["items"][0]["feedback"])
+        self.assertEqual(report["items"][0]["evidence"], [])
+        self.assertIsNone(report["summary"])
+
+        completed = store.interview_report(session["id"])
+        self.assertEqual(completed["status"], "finished")
+        self.assertEqual(completed["items"][0]["feedback"], "最终反馈")
+        self.assertEqual(completed["items"][0]["evidence"], ["原文依据"])
+        self.assertEqual(completed["summary"], "面试总结")
+
+    def test_interview_export_reads_one_snapshot_during_finish_run(self):
+        store, session, running = self._running_interview(self.root / "export-finish.sqlite3")
+        read_session = store._read_session
+        finished = []
+
+        def finish_after_session_read(db, session_id, kind):
+            result = read_session(db, session_id, kind)
+            finished.append(store.finish_run(
+                session_id, running["version"], "面试总结", "finished", 1,
+                feedback="最终反馈", evidence=("原文依据",),
+            ))
+            return result
+
+        with patch.object(store, "_read_session", side_effect=finish_after_session_read):
+            snapshot = store.session_export_snapshot(session["id"], "interview")
+
+        self.assertEqual(finished, [True])
+        self.assertEqual(snapshot["session"]["status"], "running")
+        self.assertEqual(snapshot["report"]["status"], "running")
+        self.assertIsNone(snapshot["report"]["items"][0]["feedback"])
+        self.assertEqual(snapshot["messages"][-1]["content"], "我的答案")
+        self.assertIsNone(snapshot["report"]["summary"])
+
+        completed = store.session_export_snapshot(session["id"], "interview")
+        self.assertEqual(completed["session"]["status"], "finished")
+        self.assertEqual(completed["report"]["items"][0]["feedback"], "最终反馈")
+        self.assertEqual(completed["report"]["summary"], "面试总结")
+        self.assertEqual(completed["messages"][-1]["content"], "面试总结")
 
     def test_schema_v1_upgrades_to_v2_without_losing_data(self):
         path = self.root / "career_agent.sqlite3"
