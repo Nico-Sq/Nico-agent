@@ -140,6 +140,55 @@ class StorageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "经历来源必须是简历或项目材料"):
                     store.create_claim("项目经历", material_id)
 
+    def test_interview_source_checks_and_links_share_one_write_transaction(self):
+        store = Store(self.root / "interview-sources.sqlite3")
+        material = store.create_material("project", "项目", "经历来源")
+        claim = store.create_claim("项目经历", material["id"])
+        store.confirm_claim(claim["id"])
+        statements = []
+        connection_id = 0
+        connect = store.connect
+
+        @contextmanager
+        def traced_connect():
+            nonlocal connection_id
+            current = connection_id
+            connection_id += 1
+            with connect() as db:
+                db.set_trace_callback(lambda statement: statements.append((current, statement.strip())))
+                yield db
+
+        with patch.object(store, "connect", side_effect=traced_connect):
+            session = store.create(
+                "interview", goal="后端开发", material_ids=(material["id"],), claim_ids=(claim["id"],),
+            )
+
+        def statement_index(prefix):
+            return next(
+                (index, owner) for index, (owner, statement) in enumerate(statements)
+                if statement.upper().startswith(prefix)
+            )
+
+        transaction_index, transaction_connection = statement_index("BEGIN IMMEDIATE")
+        material_index, material_connection = statement_index("SELECT 1 FROM MATERIALS")
+        claim_index, claim_connection = statement_index("SELECT 1 FROM CLAIMS")
+        session_index, session_connection = statement_index("INSERT INTO SESSIONS")
+        material_link_index, material_link_connection = statement_index("INSERT INTO SESSION_MATERIALS")
+        claim_link_index, claim_link_connection = statement_index("INSERT INTO SESSION_CLAIMS")
+
+        self.assertTrue(all(owner == transaction_connection for owner in (
+            material_connection, claim_connection, session_connection,
+            material_link_connection, claim_link_connection,
+        )))
+        self.assertLess(transaction_index, material_index)
+        self.assertLess(material_index, claim_index)
+        self.assertLess(claim_index, session_index)
+        self.assertLess(session_index, material_link_index)
+        self.assertLess(material_link_index, claim_link_index)
+        snapshot = store.session_snapshot(session["id"], "interview")
+        self.assertEqual(snapshot["resources"]["materials"][0]["id"], material["id"])
+        self.assertEqual(snapshot["resources"]["claims"][0]["id"], claim["id"])
+
     def test_interview_report_uses_one_read_view_during_concurrent_delete(self):
         path = self.root / "interview.sqlite3"
         with database(path) as db:

@@ -915,6 +915,14 @@ API/CLI/数据兼容：
 - 实施：`Store.create_claim()` 在同一个 `BEGIN IMMEDIATE` 事务中重新核验来源仍有效且不是岗位描述材料，再插入主张。application 仍负责输入规范化和领域校验；未改 API、schema 或旧版本保留规则。
 - 验证：storage 23 项、application 24 项、根目录全套 246 项通过；测试断言来源读取和主张插入处于同一写事务，并覆盖撤回来源与岗位描述材料均不能创建主张。依赖图、编译、`git diff --check` 通过；重建 `nico-storage` wheel，并在仓库外临时 venv 验证其及依赖安装。
 
+面试资源关联竞态复审与修复（2026-11-02）：
+
+- 证据：`Store.create()` 在新面试插入前查询所选材料与已确认经历；`StoreBase.connect()` 仅在上下文退出时提交，SQLite 会在首次写入时才启动隐式事务。SQL trace 观察到资源 `SELECT` 先于 `BEGIN`，所以另一写连接可以在校验和关联行插入之间撤回来源，新面试仍可能关联已失效记录。
+- 业务边界：`docs/项目定义.md` 规定材料/经历修订生成新 ID，既有面试保留原来源版本；本修复只让新面试的来源校验和关联创建串行，不改变旧面试快照语义。
+- 参考核对：Akashic `memory2/store.py` 在读取并变更持久状态前显式开启写事务；Pi `packages/durable/src/storage/sqlite/storage.ts` 将持久校验和一批写入放进同一事务。nanobot 的 `session/manager.py` 展示文件级原子替换，但与此 SQLite 并发边界不同。调整后采用 SQLite 写事务；三者均无 Nico 材料/经历领域规则或对应提示词/工具，不复制其存储与 agent 结构。
+- 实施：面试有材料或经历选择时，在校验前执行 `BEGIN IMMEDIATE`，并保持资源检查、会话插入、关联插入处于同一连接事务。无来源选择时沿用原有插入事务。没有改 schema、API、来源 ID 规则或目录结构。
+- 验证：storage 测试 24 项通过；新增 trace 测试确认写事务先于材料/经历检查，且会话与两类关联写入共享同一连接。根目录 `pytest --import-mode=importlib -q` 为 247 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-storage` wheel，并在仓库外临时 venv 安装验证 storage 及其 contracts/domain/application 依赖通过；安装阶段有一次 TLS 重试，之后使用缓存完成。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

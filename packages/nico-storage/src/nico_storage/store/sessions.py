@@ -17,6 +17,8 @@ class SessionRepositoryMixin:
         status = "active" if kind == "chat" else "new"
         with self.connect() as db:
             if kind == "interview":
+                if material_ids or claim_ids:
+                    db.execute("BEGIN IMMEDIATE")
                 for material_id in set(material_ids):
                     if not db.execute("SELECT 1 FROM materials WHERE id = ? AND revoked_at IS NULL", (material_id,)).fetchone():
                         raise ValueError(f"材料不存在或已撤回：{material_id}")
