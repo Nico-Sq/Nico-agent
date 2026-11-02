@@ -95,6 +95,67 @@ class InterviewApiTests(unittest.TestCase):
             "awaiting_answer",
         )
 
+    def test_interview_sse_flow_preserves_answer_and_report_evidence(self):
+        answer = "我负责接口实现，但没有配置事务，也没有参与系统架构设计。"
+
+        class SequenceProvider:
+            def __init__(self):
+                self.outputs = iter((
+                    json.dumps({
+                        "feedback": "", "question": "请描述一个接口一致性问题。",
+                        "finished": False, "evidence": [],
+                    }, ensure_ascii=False),
+                    json.dumps({
+                        "feedback": "回答说明了你的职责边界。", "question": "",
+                        "finished": True, "evidence": [answer],
+                        "summary": "已确认本轮回答的事实边界。",
+                    }, ensure_ascii=False),
+                ))
+
+            async def complete(self, messages, tools):
+                return {"content": next(self.outputs)}
+
+        main.runtime = AgentRuntime(main.store, SequenceProvider())
+        headers = {
+            "Accept": "text/event-stream, application/json",
+            "Content-Type": "application/json",
+        }
+        material = self.client.post("/api/materials", json={
+            "kind": "project", "title": "IF-04", "content": "候选人负责订单查询接口编码。",
+        }).json()
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "围绕接口一致性追问。", "max_questions": 1,
+            "material_ids": [material["id"]], "claim_ids": [], "model_id": "default",
+        }).json()
+
+        start = self.client.post(
+            f"/api/interview/sessions/{interview['id']}/start", headers=headers,
+        )
+        start_events = [json.loads(line[6:]) for line in start.text.splitlines()
+                        if line.startswith("data: ")]
+        self.assertEqual(start.status_code, 200)
+        self.assertIn("text/event-stream", start.headers["content-type"])
+        self.assertEqual(start_events[-1]["type"], "done")
+
+        claimed = self.client.post(
+            f"/api/interview/sessions/{interview['id']}/answers/claim",
+            json={"text": answer, "question_number": 1},
+        ).json()
+        result = self.client.post(
+            f"/api/interview/sessions/{interview['id']}/answers/run",
+            json={"version": claimed["version"]}, headers=headers,
+        )
+        result_events = [json.loads(line[6:]) for line in result.text.splitlines()
+                         if line.startswith("data: ")]
+        report = self.client.get(f"/api/interview/sessions/{interview['id']}/report")
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result_events[-1]["type"], "done")
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(report.json()["status"], "finished")
+        self.assertEqual(report.json()["items"][0]["answer"], answer)
+        self.assertEqual(report.json()["items"][0]["evidence"], [answer])
+
     def test_web_ui_exposes_memory_candidate_review_and_read_only_tool_state(self):
         page = self.client.get("/").text
         script = self.client.get("/static/settings.js").text
