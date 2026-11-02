@@ -20,6 +20,20 @@ class FakeStore:
     def list_sessions(self, kind, query=""):
         return [session for session in self.sessions.values() if session["kind"] == kind]
 
+    def session_snapshot(self, session_id, kind):
+        session = self.get(session_id, kind)
+        if session is None:
+            return None
+        result = {
+            "session": session,
+            "messages": self.messages(session_id, kind),
+            "events": self.events(session_id, kind),
+        }
+        if kind == "interview":
+            result["resources"] = self.interview_resources(session_id)
+            result["practice_source"] = self.practice_source(session_id)
+        return result
+
     def messages(self, session_id, kind, limit=None):
         return [{"role": "user", "content": "你好"}]
 

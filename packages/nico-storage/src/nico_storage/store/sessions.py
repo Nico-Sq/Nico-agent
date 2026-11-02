@@ -42,9 +42,28 @@ class SessionRepositoryMixin:
 
     def get(self, session_id: str, kind: str) -> dict | None:
         with self.connect() as db:
-            row = db.execute(
-                "SELECT * FROM sessions WHERE id = ? AND kind = ?", (session_id, kind)
-            ).fetchone()
+            return self._read_session(db, session_id, kind)
+
+    def session_snapshot(self, session_id: str, kind: str) -> dict | None:
+        with self.connect() as db:
+            db.execute("BEGIN")
+            session = self._read_session(db, session_id, kind)
+            if session is None:
+                return None
+            result = {
+                "session": session,
+                "messages": self._read_messages(db, session_id, kind),
+                "events": self._read_events(db, session_id, kind),
+            }
+            if kind == "interview":
+                result["resources"] = self._read_interview_resources(db, session_id)
+                result["practice_source"] = self._read_practice_source(db, session_id)
+            return result
+
+    def _read_session(self, db, session_id: str, kind: str) -> dict | None:
+        row = db.execute(
+            "SELECT * FROM sessions WHERE id = ? AND kind = ?", (session_id, kind)
+        ).fetchone()
         session = dict(row) if row else None
         if session:
             session.pop("run_started")
@@ -123,23 +142,30 @@ class SessionRepositoryMixin:
         return ids
 
     def messages(self, session_id: str, kind: str, limit: int | None = None) -> list[dict]:
+        with self.connect() as db:
+            return self._read_messages(db, session_id, kind, limit)
+
+    def _read_messages(self, db, session_id: str, kind: str,
+                       limit: int | None = None) -> list[dict]:
         # The kind check is part of the query, so interview context cannot read chat rows.
         sql = """SELECT m.id, m.role, m.content, m.created_at FROM messages m
                  JOIN sessions s ON s.id = m.session_id
                  WHERE m.session_id = ? AND s.kind = ?"""
-        with self.connect() as db:
-            if limit:
-                rows = db.execute(sql + " ORDER BY m.id DESC LIMIT ?",
-                                  (session_id, kind, limit)).fetchall()
-                return [dict(row) for row in reversed(rows)]
-            rows = db.execute(sql + " ORDER BY m.id", (session_id, kind)).fetchall()
+        if limit:
+            rows = db.execute(sql + " ORDER BY m.id DESC LIMIT ?",
+                              (session_id, kind, limit)).fetchall()
+            return [dict(row) for row in reversed(rows)]
+        rows = db.execute(sql + " ORDER BY m.id", (session_id, kind)).fetchall()
         return [dict(row) for row in rows]
 
     def events(self, session_id: str, kind: str) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("""SELECT e.kind, e.detail, e.created_at FROM events e
-                JOIN sessions s ON s.id = e.session_id
-                WHERE e.session_id = ? AND s.kind = ? ORDER BY e.id""", (session_id, kind)).fetchall()
+            return self._read_events(db, session_id, kind)
+
+    def _read_events(self, db, session_id: str, kind: str) -> list[dict]:
+        rows = db.execute("""SELECT e.kind, e.detail, e.created_at FROM events e
+            JOIN sessions s ON s.id = e.session_id
+            WHERE e.session_id = ? AND s.kind = ? ORDER BY e.id""", (session_id, kind)).fetchall()
         return [dict(row) for row in rows]
 
     def event(self, session_id: str, kind: str, detail: dict):

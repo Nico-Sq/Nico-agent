@@ -41,6 +41,29 @@ class StorageTests(unittest.TestCase):
         Store(path)
         self.assertFalse((self.root / "migration-backups").exists())
 
+    def test_session_snapshot_uses_one_read_view_during_concurrent_delete(self):
+        path = self.root / "career_agent.sqlite3"
+        with database(path) as db:
+            db.execute("PRAGMA journal_mode = WAL")
+        store = Store(path)
+        session = store.create("chat")
+        store.claim_run(session["id"], "chat", "active", "快照消息")
+        store.event(session["id"], "chat", {"action": "before-delete"})
+        read_session = store._read_session
+
+        def delete_after_session_read(db, session_id, kind):
+            result = read_session(db, session_id, kind)
+            store.delete_session_tree(session_id, kind)
+            return result
+
+        with patch.object(store, "_read_session", side_effect=delete_after_session_read):
+            snapshot = store.session_snapshot(session["id"], "chat")
+
+        self.assertEqual(snapshot["session"]["id"], session["id"])
+        self.assertEqual([message["content"] for message in snapshot["messages"]], ["快照消息"])
+        self.assertEqual([event["kind"] for event in snapshot["events"]], ["chat"])
+        self.assertIsNone(store.get(session["id"], "chat"))
+
     def test_schema_v1_upgrades_to_v2_without_losing_data(self):
         path = self.root / "career_agent.sqlite3"
         with database(path) as db:

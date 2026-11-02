@@ -8,15 +8,19 @@ from .base import now
 class InterviewRepositoryMixin:
     def interview_resources(self, session_id: str, include_content: bool = False) -> dict:
         with self.connect() as db:
-            materials = db.execute("""SELECT m.id, m.kind, m.title, m.content
-                FROM materials m JOIN session_materials sm ON sm.material_id = m.id
-                JOIN sessions s ON s.id = sm.session_id
-                WHERE s.id = ? AND s.kind = 'interview' ORDER BY m.created_at""", (session_id,)).fetchall()
-            claims = db.execute("""SELECT c.id, c.text, c.material_id
-                FROM claims c JOIN session_claims sc ON sc.claim_id = c.id
-                JOIN sessions s ON s.id = sc.session_id
-                WHERE s.id = ? AND s.kind = 'interview'
-                ORDER BY c.created_at""", (session_id,)).fetchall()
+            return self._read_interview_resources(db, session_id, include_content)
+
+    def _read_interview_resources(self, db, session_id: str,
+                                  include_content: bool = False) -> dict:
+        materials = db.execute("""SELECT m.id, m.kind, m.title, m.content
+            FROM materials m JOIN session_materials sm ON sm.material_id = m.id
+            JOIN sessions s ON s.id = sm.session_id
+            WHERE s.id = ? AND s.kind = 'interview' ORDER BY m.created_at""", (session_id,)).fetchall()
+        claims = db.execute("""SELECT c.id, c.text, c.material_id
+            FROM claims c JOIN session_claims sc ON sc.claim_id = c.id
+            JOIN sessions s ON s.id = sc.session_id
+            WHERE s.id = ? AND s.kind = 'interview'
+            ORDER BY c.created_at""", (session_id,)).fetchall()
         selected_materials = [dict(row) for row in materials]
         if not include_content:
             for material in selected_materials:
@@ -45,11 +49,14 @@ class InterviewRepositoryMixin:
 
     def practice_source(self, session_id: str) -> dict | None:
         with self.connect() as db:
-            row = db.execute("""SELECT p.source_session_id, p.question_number,
-                    i.question, i.answer, i.feedback
-                FROM practice_sessions p JOIN interview_items i
-                  ON i.session_id = p.source_session_id AND i.number = p.question_number
-                WHERE p.session_id = ?""", (session_id,)).fetchone()
+            return self._read_practice_source(db, session_id)
+
+    def _read_practice_source(self, db, session_id: str) -> dict | None:
+        row = db.execute("""SELECT p.source_session_id, p.question_number,
+                i.question, i.answer, i.feedback
+            FROM practice_sessions p JOIN interview_items i
+              ON i.session_id = p.source_session_id AND i.number = p.question_number
+            WHERE p.session_id = ?""", (session_id,)).fetchone()
         return dict(row) if row else None
 
     def create_practice(self, source_session_id: str, question_number: int) -> dict:

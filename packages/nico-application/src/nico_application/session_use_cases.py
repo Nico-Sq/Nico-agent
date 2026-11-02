@@ -18,15 +18,10 @@ class SessionUseCases:
         return session
 
     def detail(self, session_id: str, kind: str) -> dict:
-        result = {
-            "session": self.require_session(session_id, kind),
-            "messages": self.store.messages(session_id, kind),
-            "events": self.store.events(session_id, kind),
-        }
-        if kind == "interview":
-            result["resources"] = self.store.interview_resources(session_id)
-            result["practice_source"] = self.store.practice_source(session_id)
-        return result
+        snapshot = self.store.session_snapshot(session_id, kind)
+        if snapshot is None:
+            raise UseCaseError("not_found", "会话不存在")
+        return snapshot
 
     def set_title(self, session_id: str, kind: str, title: str) -> dict:
         title = " ".join(title.split())
