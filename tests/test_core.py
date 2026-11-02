@@ -421,6 +421,47 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(result["session"]["status"], "finished")
                 self.assertEqual(report["items"][0]["evidence"], [answer_text])
 
+    def test_interview_retries_invalid_response_after_read_only_tool(self):
+        answer_text = "我负责接口实现，但没有配置事务。"
+        valid = json.dumps({
+            "feedback": "目前无法判断具体做法。",
+            "question": "", "finished": True, "evidence": [answer_text],
+            "summary": "本轮已完成。",
+        }, ensure_ascii=False)
+
+        class RepairingProvider:
+            def __init__(self):
+                self.calls = 0
+                self.messages = []
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                self.messages.append(list(messages))
+                if self.calls == 1:
+                    return {"content": "", "finish_reason": "tool_calls", "tool_calls": [{
+                        "id": "goal-1", "function": {
+                            "name": "read_interview_goal", "arguments": "{}",
+                        },
+                    }]}
+                if self.calls == 2:
+                    raise ModelError("model_invalid_response", "模型服务返回了无效响应")
+                return {"content": valid}
+
+        interview = self.store.create("interview", "后端工程师", max_questions=1)
+        first = self.store.claim_run(interview["id"], "interview", "new")
+        run_demo(self.runtime.run(first))
+        answer = self.store.claim_run(
+            interview["id"], "interview", "awaiting_answer", answer_text,
+        )
+        provider = RepairingProvider()
+        result = run_demo(AgentRuntime(self.store, provider).run(answer))
+        report = self.store.interview_report(interview["id"])
+
+        self.assertEqual(provider.calls, 3)
+        self.assertIn("[INTERVIEW_OUTPUT_RETRY]", provider.messages[2][-1]["content"])
+        self.assertEqual(result["session"]["status"], "finished")
+        self.assertEqual(report["items"][0]["evidence"], [answer_text])
+
     def test_chat_memory_survives_context_window(self):
         chat = self.store.create("chat")
         self.store.set_chat_memory(chat["id"], "重点准备后端岗位")

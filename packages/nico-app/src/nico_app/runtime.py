@@ -211,14 +211,15 @@ class AgentRuntime:
                 content = await self.core.run(request)
             except ModelError as exc:
                 if (kind != "interview" or exc.code != "model_invalid_response"
-                        or trace.tool_names):
+                        or any(name not in READ_ONLY_TOOLS for name in trace.tool_names)):
                     raise
                 retried = True
                 content = await self._retry_interview_response(request, trace, exc)
             try:
                 result = self._finalize_run_result(session, content, result_handler)
             except ValueError as exc:
-                if kind != "interview" or retried or trace.tool_names:
+                if (kind != "interview" or retried
+                        or any(name not in READ_ONLY_TOOLS for name in trace.tool_names)):
                     raise
                 content = await self._retry_interview_response(request, trace, exc)
                 result = self._finalize_run_result(session, content, result_handler)

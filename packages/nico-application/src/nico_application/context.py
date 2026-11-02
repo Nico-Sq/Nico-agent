@@ -12,7 +12,7 @@ from nico_contracts.messages import AgentMessage
 
 MAX_CONTEXT_CHARS = 32_000
 # 修改系统提示拼接规则时同步递增此版本。
-PROMPT_POLICY_VERSION = "7"
+PROMPT_POLICY_VERSION = "9"
 
 
 class ContextBudgetError(ValueError):
