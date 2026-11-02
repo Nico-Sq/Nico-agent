@@ -23,10 +23,21 @@ def skill_file(kind: str):
     return files("nico_application").joinpath("resources", "prompts", f"{kind}.md")
 
 
+def interview_retry_file():
+    return files("nico_application").joinpath("resources", "prompts", "interview_retry.md")
+
+
 def prompt_version(kind: str) -> str:
-    """Identify the effective system prompt: skill text plus the policy version."""
+    """Fingerprint prompt resources used for the run, plus the policy version."""
     prompt = skill_file(kind).read_bytes()
+    if kind == "interview":
+        prompt += b"\0INTERVIEW_RETRY\0" + interview_retry_file().read_bytes()
     return hashlib.sha256(PROMPT_POLICY_VERSION.encode() + prompt).hexdigest()[:12]
+
+
+def interview_retry_message(error: Exception) -> AgentMessage:
+    prompt = interview_retry_file().read_text(encoding="utf-8").rstrip("\n")
+    return {"role": "user", "content": prompt.replace("{{ERROR}}", str(error))}
 
 
 def _fit(blocks: list[tuple[bool, str, dict]], messages: list[dict]) -> tuple[list[dict], list[str]]:

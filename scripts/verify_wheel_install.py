@@ -56,6 +56,7 @@ def verify_wheel_contents(wheels: list[tuple[str, Path]]) -> None:
         "nico_application": {
             "nico_application/resources/prompts/chat.md",
             "nico_application/resources/prompts/interview.md",
+            "nico_application/resources/prompts/interview_retry.md",
         },
         "nico_web": {
             "nico_web/resources/static/index.html",

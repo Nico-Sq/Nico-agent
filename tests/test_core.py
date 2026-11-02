@@ -711,6 +711,37 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(detail["usage_coverage"], "exact")
         self.assertTrue(detail["prompt_version"])
 
+    def test_interview_prompt_version_tracks_retry_prompt_resource(self):
+        from nico_application import context as prompt_context
+
+        with tempfile.TemporaryDirectory() as directory:
+            system_prompt = Path(directory) / "interview.md"
+            retry_prompt = Path(directory) / "interview_retry.md"
+            system_prompt.write_text("system prompt", encoding="utf-8")
+            retry_prompt.write_text("retry prompt", encoding="utf-8")
+            with patch.object(prompt_context, "skill_file", return_value=system_prompt), \
+                    patch.object(prompt_context, "interview_retry_file", return_value=retry_prompt):
+                interview_version = prompt_context.prompt_version("interview")
+                chat_version = prompt_context.prompt_version("chat")
+                retry_prompt.write_text("updated retry prompt", encoding="utf-8")
+                updated_interview_version = prompt_context.prompt_version("interview")
+                updated_chat_version = prompt_context.prompt_version("chat")
+
+        self.assertNotEqual(interview_version, updated_interview_version)
+        self.assertEqual(chat_version, updated_chat_version)
+
+    def test_interview_retry_message_uses_resource_text(self):
+        from nico_application.context import interview_retry_message
+
+        self.assertEqual(interview_retry_message(ValueError("验证失败")), {
+            "role": "user",
+            "content": (
+                "[INTERVIEW_OUTPUT_RETRY]\n上一条面试结果未通过校验：验证失败\n"
+                "请依据同一题目和同一回答重新生成完整 JSON。回答未包含具体项目事实时，也要引用用户表达不确定或待核实的原句；"
+                "引用不代表项目事实已验证。达到题数上限时 finished 必须为 true，question 必须为空。不要添加 JSON 以外的文字。"
+            ),
+        })
+
     def test_duplicate_run_does_not_call_model_twice(self):
         class SlowProvider:
             def __init__(self):
