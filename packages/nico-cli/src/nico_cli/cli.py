@@ -66,7 +66,8 @@ async def run_channel(channel: TextChannel, router: ChannelRouter, chat: ChatUse
         router.model_id = model_id
         session = router.ensure_session(sender_id, conversation_id)
     chat.validate_model(session["model_id"])
-    banner = f"{session_banner(session, tool_grants)}，输入 /retry 重试失败轮次，/exit 结束。"
+    banner = (f"{session_banner(session, tool_grants)}，输入 /retry 重试失败轮次，"
+              "/retry-delivery <message_id> 重投已生成回复，/exit 结束。")
     await channel.send(
         conversation_id, banner, f"{router.channel_name}:banner:{session['id']}"
     )
@@ -75,6 +76,23 @@ async def run_channel(channel: TextChannel, router: ChannelRouter, chat: ChatUse
         if incoming is None:
             return router.session_id(sender_id, conversation_id)
         if not incoming.text.strip():
+            continue
+        command = incoming.text.strip()
+        retry_delivery_command = "/retry-delivery"
+        if command == retry_delivery_command or command.startswith(retry_delivery_command + " "):
+            message_id = command[len(retry_delivery_command):].strip()
+            if not message_id:
+                print("用法：/retry-delivery <message_id>")
+                continue
+            try:
+                await router.retry_delivery(
+                    message_id, incoming.conversation_id, channel.send,
+                    sender_id=incoming.sender_id,
+                )
+            except ChannelDeliveryError as exc:
+                print(f"渠道投递失败：message_id={exc.message_id} delivery_id={exc.delivery_id}")
+            except ValueError as exc:
+                print(f"无法重试渠道投递：{exc}")
             continue
 
         async def handle(current_session: dict, message: TextMessage) -> str:

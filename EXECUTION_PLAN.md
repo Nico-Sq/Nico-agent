@@ -946,6 +946,13 @@ AgentCore 运行登记跨线程竞态复审与修复（2026-11-02）：
 - 实施：对 `_ACTIVE_RUNS` 的登记、移除和取消任务快照使用一个 `threading.Lock`；调度 `task.cancel()` 保持在锁外，避免在临界区调用事件循环。
 - 验证：agent-core 定向测试 9 项通过，新增测试以事件门控确定性覆盖“取消快照与另一线程完成任务”的交错；根目录全回归 250 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-agent-core` wheel，并在仓库外临时 venv 安装验证其及 contracts 依赖通过。
 
+渠道账本重投命令可达性复审与修复（2026-11-03）：
+
+- 证据：`ChannelRouter.retry_delivery()` 已能从 SQLite 读取回复并复用 delivery ID，但仓库原先没有调用方。`nico-cli.run_channel()` 只在发送失败时打印原 message ID；Console 每次接收输入都会创建新 UUID，因此用户无法重放相同消息。现有 `/retry` 调用 `ChatUseCases.retry_message()`，重跑聊天轮次而不是投递已保存回复。
+- 参考核对：nanobot `channels/manager.py::_send_with_retry()` 对传输错误作有限退避重试，并以 fingerprint 抑制重复 outbound；Akashic `infra/channels/base.py::MessageDeduper` 只处理入站去重，`infra/channels/delivery.py::deliver_message_parts()` 返回 failed/partial receipt；Pi `packages/chord/src/next/link/channel.ts` 是 peer link 协议，不提供用户聊天回复账本。调整后沿用 Nico 已有的 SQLite ledger 和 application retry use case，只补 CLI 入口，不添加后台队列或新重试策略。
+- 实施：新增 `/retry-delivery <message_id>` 命令，使用入站消息的 sender/conversation 调用 `ChannelRouter.retry_delivery()`；无 ID、记录不存在或发送失败时给出 CLI 提示。`/retry` 仍只重试聊天失败轮次。README 与项目定义同步说明可达的重投方式，并修正文档中“渠道身份和幂等状态仅限进程”的过期描述。
+- 验证：CLI 定向测试 5 项、CLI 与 application 渠道测试共 10 项通过（含拒绝其他 sender 重投）；根目录全回归 253 项通过（FastAPI TestClient 有 1 条 Starlette 上游弃用警告）。依赖图无环、`compileall`、`git diff --check` 通过；9 个 wheel 全部重建并在仓库外临时 venv 安装验证。首次 changed-wheel 验证发现 `dist/` 中旧 `nico_application` wheel 缺少 prompt resource，完整重建后全包 wheel 验证通过。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

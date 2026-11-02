@@ -390,6 +390,40 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         self.assertIn("演示模式已收到：你好", channel.outputs[-1])
         self.assertEqual(len(self.store.messages(session_id, "chat")), 2)
 
+    def test_cli_retries_saved_channel_delivery_without_rerunning_chat(self):
+        class Channel:
+            def __init__(self):
+                self.inputs = iter([
+                    TextMessage("local", "test", "message-1", "你好"),
+                    TextMessage("local", "test", "command-1",
+                                "/retry-delivery message-1"),
+                    None,
+                ])
+                self.outputs = []
+                self.response_attempts = []
+                self.sender_id = "local"
+                self.conversation_id = "test"
+                self.allowed_senders = {"local"}
+                self.name = "test"
+
+            async def receive(self):
+                return next(self.inputs)
+
+            async def send(self, conversation_id, text, delivery_id):
+                if text.startswith("演示模式已收到："):
+                    self.response_attempts.append((text, delivery_id))
+                    if len(self.response_attempts) == 1:
+                        raise ConnectionError("临时断开")
+                self.outputs.append((text, delivery_id))
+
+        channel = Channel()
+        session_id = asyncio.run(run_channel(channel, self.store))
+
+        self.assertEqual(len(self.store.messages(session_id, "chat")), 2)
+        self.assertEqual(len(channel.response_attempts), 2)
+        self.assertEqual(channel.response_attempts[0], channel.response_attempts[1])
+        self.assertEqual(channel.outputs[-1], channel.response_attempts[-1])
+
     def test_cli_channel_retry_reuses_unanswered_message(self):
         class Channel:
             def __init__(self):

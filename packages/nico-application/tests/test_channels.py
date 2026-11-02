@@ -122,6 +122,38 @@ class ChannelUseCaseTests(unittest.TestCase):
         self.assertEqual(calls, ["message-1"])
         self.assertEqual(delivery_ids[0], delivery_ids[1])
 
+    def test_manual_delivery_retry_checks_sender_and_reuses_reply(self):
+        calls = []
+        delivery_ids = []
+
+        async def handle(session, message):
+            calls.append(message.message_id)
+            return "只生成一次"
+
+        async def fail(conversation_id, text, delivery_id):
+            delivery_ids.append(delivery_id)
+            raise ConnectionError("offline")
+
+        async def succeed(conversation_id, text, delivery_id):
+            delivery_ids.append(delivery_id)
+
+        async def scenario():
+            with self.assertRaises(ChannelDeliveryError):
+                await self.router.process(self.message, handle, fail)
+            with self.assertRaises(ChannelAccessError):
+                await self.router.retry_delivery(
+                    "message-1", "console", succeed, sender_id="other",
+                )
+            return await self.router.retry_delivery(
+                "message-1", "console", succeed, sender_id="local",
+            )
+
+        result = asyncio.run(scenario())
+        self.assertTrue(result.duplicate)
+        self.assertEqual(result.response, "只生成一次")
+        self.assertEqual(calls, ["message-1"])
+        self.assertEqual(delivery_ids[0], delivery_ids[1])
+
     def test_claimed_message_with_unknown_result_is_not_run_again(self):
         session = self.router.ensure_session("local", "console")
         self.ledger.claim_inbound("console", "console", "message-1", "local",
