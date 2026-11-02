@@ -200,12 +200,23 @@
         "cleanup": true
       }
     ],
-    "finding": "在 Java/Spring Boot 材料下，IF-10 本次给出与语言无关的 Redis 调用与配置检查建议。IF-04 的一次后续运行在回答阶段再次出现 model_invalid_output；同一案例此前完成过，因此重试后输出稳定性仍未证明。失败事件的 model_run 状态仍记录为 running，是后续可修复的观测问题。"
+    "finding": "在 Java/Spring Boot 材料下，IF-10 本次给出与语言无关的 Redis 调用与配置检查建议。IF-04 的一次后续运行在回答阶段再次出现 model_invalid_output；同一案例此前完成过，因此重试后输出稳定性仍未证明。该历史失败事件的 model_run 状态曾错误记录为 running，已在 de7aebf 修正并由定向用例验证。"
+  },
+  "after_failure_diagnostics": {
+    "date": "2026-11-02",
+    "code_commit": "59878d7",
+    "changes": "面试输出校验失败时只记录固定类别：invalid_json、evidence_validation 或 output_validation；不记录模型原文、回答或材料内容。",
+    "verification": {
+      "targeted_test": "python -m pytest tests/test_core.py -k \"interview_retries_invalid or failed_interview_retry_records_failed_run_status\" -q",
+      "result": "3 passed, 50 deselected",
+      "scope_note": "覆盖内部只读工具后的纠正重试、失败事件终态以及校验日志不包含模型输出文本。"
+    },
+    "live_retest": "未在此代码提交后重跑网页模型流程；需重启服务使新日志代码生效。"
   },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "历史复测中的传输方式不完全一致；本次按当前网页请求流程，IF-04 和 IF-10 的开始及回答均使用 SSE。",
     "旧提示词下 IF-04 与 IF-10 的流式反馈出现了缺少行为证据的态度推断；新提示词复测后，IF-10 不再作此类推断。",
-    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；IF-10 通过后续栈一致性复测，但 IF-04 的 model_invalid_output 仍间歇出现。"
+    "面试解析器已处理终止轮次的多余问题，网页流式显示已隐藏原始 JSON；IF-10 通过后续栈一致性复测，但 IF-04 的 model_invalid_output 仍间歇出现。失败运行状态已修正；后续失败会记录不含原文的校验类别，IF-04 输出稳定性仍待复测。"
   ]
 }
