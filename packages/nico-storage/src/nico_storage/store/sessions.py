@@ -103,6 +103,9 @@ class SessionRepositoryMixin:
         return self.tool_grants(session_id)
 
     def delete_session(self, session_id: str, kind: str) -> bool:
+        return bool(self.delete_session_tree(session_id, kind))
+
+    def delete_session_tree(self, session_id: str, kind: str) -> list[str]:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute("""WITH RECURSIVE related(id) AS (
@@ -112,12 +115,12 @@ class SessionRepositoryMixin:
                 ) SELECT id FROM related""", (session_id, kind)).fetchall()
             ids = [row["id"] for row in rows]
             if not ids:
-                return False
+                return []
             for table in ("interview_evidence", "interview_items", "session_materials",
                           "session_claims", "session_tool_grants", "messages", "events", "practice_sessions"):
                 db.executemany(f"DELETE FROM {table} WHERE session_id = ?", [(item,) for item in ids])
             db.executemany("DELETE FROM sessions WHERE id = ?", [(item,) for item in ids])
-        return True
+        return ids
 
     def messages(self, session_id: str, kind: str, limit: int | None = None) -> list[dict]:
         # The kind check is part of the query, so interview context cannot read chat rows.

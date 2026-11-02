@@ -779,7 +779,11 @@ class InterviewApiTests(unittest.TestCase):
         nested_id = self.client.post(f"/api/interview/sessions/{practice_id}/practice", json={
             "question_number": 1,
         }).json()["id"]
-        self.assertEqual(self.client.delete(f"/api/interview/sessions/{source_id}").status_code, 200)
+        cancelled = []
+        with patch("nico_web.routes.active_backend") as backend:
+            backend.return_value.cancel_session_runs.side_effect = cancelled.append
+            self.assertEqual(self.client.delete(f"/api/interview/sessions/{source_id}").status_code, 200)
+        self.assertEqual(set(cancelled), {source_id, practice_id, nested_id})
         for session_id in (source_id, practice_id, nested_id):
             self.assertEqual(self.client.get(f"/api/interview/sessions/{session_id}").status_code, 404)
         self.assertEqual(self.client.get("/api/interview/sessions").json(), [])

@@ -44,6 +44,10 @@ class ChatSessionReader(RepositoryPort, Protocol):
     pass
 
 
+class SessionDeletionStorePort(Protocol):
+    def delete_session_tree(self, session_id: str, kind: str) -> list[str]: ...
+
+
 class ChatStorePort(ChatSessionReader, Protocol):
     def create(self, kind: str, *args, **kwargs) -> dict: ...
     def set_chat_memory(self, session_id: str, text: str) -> dict | None: ...
@@ -121,6 +125,15 @@ class UseCaseError(ValueError):
     def __init__(self, kind: Literal["not_found", "conflict", "invalid"], message: str):
         super().__init__(message)
         self.kind = kind
+
+
+def delete_session_and_cancel_runs(store: SessionDeletionStorePort, session_id: str, kind: str,
+                                   cancel_runs: Callable[[str], object]) -> None:
+    deleted_ids = store.delete_session_tree(session_id, kind)
+    if not deleted_ids:
+        raise UseCaseError("not_found", "会话不存在")
+    for deleted_id in deleted_ids:
+        cancel_runs(deleted_id)
 
 
 class ChatUseCases:

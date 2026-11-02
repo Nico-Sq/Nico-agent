@@ -18,6 +18,7 @@ from nico_application import (
     ToolGrantError,
     ToolGrantUseCases,
     UseCaseError,
+    delete_session_and_cancel_runs,
 )
 from nico_application.export import render_session_markdown
 from nico_contracts.errors import ModelError
@@ -559,9 +560,11 @@ def get_session(kind: str, session_id: str):
 def delete_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
-    if not active_store().delete_session(session_id, kind):
-        raise HTTPException(404, "会话不存在")
-    active_backend().cancel_session_runs(session_id)
+    try:
+        delete_session_and_cancel_runs(active_store(), session_id, kind,
+                                       active_backend().cancel_session_runs)
+    except UseCaseError as exc:
+        raise http_use_case_error(exc) from exc
     return {"deleted": True}
 
 

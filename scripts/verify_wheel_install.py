@@ -93,6 +93,12 @@ def main() -> int:
 
     present = existing_packages()
     selected = set(present) if args.all or not args.changed else changed_package_names()
+    pending = list(selected)
+    while pending:
+        for dependency in PACKAGES[pending.pop()]["depends"]:
+            if dependency not in selected:
+                selected.add(dependency)
+                pending.append(dependency)
     order = [name for name in topological_order() if name in selected and name in present]
     if not order:
         print("No materialized package wheels selected.")
@@ -153,17 +159,18 @@ def main() -> int:
             "        store=Store(Path(directory) / 'career_agent.sqlite3')\n"
             "        with store.connect() as db:\n"
             "            assert db.execute('PRAGMA user_version').fetchone()[0] == BUSINESS_SCHEMA_VERSION\n"
-            "import career_agent, career_agent.context, career_agent.extract, career_agent.main\n"
-            "from fastapi.testclient import TestClient\n"
-            "with TestClient(career_agent.main.app) as client:\n"
-            "    assert client.get('/').status_code == 200\n"
-            "    assert client.get('/static/shared.js').status_code == 200\n"
-            "    assert client.get('/api/config').status_code == 200\n"
-            "    created=client.post('/api/chat/sessions', json={}).json()\n"
-            "    response=client.post(f\"/api/chat/sessions/{created['id']}/messages\", json={'text':'wheel smoke'})\n"
-            "    assert response.status_code == 200, response.text\n"
-            "prompt=career_agent.context.skill_file('chat').read_text(encoding='utf-8')\n"
-            "assert prompt\n"
+            "if 'nico_app' in modules:\n"
+            "    import career_agent, career_agent.context, career_agent.extract, career_agent.main\n"
+            "    from fastapi.testclient import TestClient\n"
+            "    with TestClient(career_agent.main.app) as client:\n"
+            "        assert client.get('/').status_code == 200\n"
+            "        assert client.get('/static/shared.js').status_code == 200\n"
+            "        assert client.get('/api/config').status_code == 200\n"
+            "        created=client.post('/api/chat/sessions', json={}).json()\n"
+            "        response=client.post(f\"/api/chat/sessions/{created['id']}/messages\", json={'text':'wheel smoke'})\n"
+            "        assert response.status_code == 200, response.text\n"
+            "    prompt=career_agent.context.skill_file('chat').read_text(encoding='utf-8')\n"
+            "    assert prompt\n"
             "print(json.dumps({'loaded': loaded, 'tool_adapters': tool_adapters, 'channels': channels, "
             "'cwd': __import__('os').getcwd()}))\n"
         )
@@ -187,21 +194,22 @@ def main() -> int:
             return 1
         for name, wheel in wheels:
             print(f"Verified outside repository: {name} <= {wheel.name}")
-        for module in ("career_agent.cli", "career_agent.restore"):
-            subprocess.run([str(python), "-m", module, "--help"], cwd=work_dir,
-                           env=environment, check=True, stdout=subprocess.DEVNULL)
-        path_check = (
-            "from nico_app.config import data_dir\n"
-            "import os\n"
-            "from pathlib import Path\n"
-            "expected=(Path(os.getenv('LOCALAPPDATA') or (Path.home()/'AppData'/'Local'))/'Nico-agent') if os.name=='nt' else "
-            "(Path(os.environ['XDG_DATA_HOME'])/'nico-agent' if os.getenv('XDG_DATA_HOME') else Path.home()/'.nico-agent')\n"
-            "assert data_dir() == expected, (data_dir(), expected)\n"
-        )
-        default_environment = environment.copy()
-        default_environment.pop("DATA_DIR", None)
-        subprocess.run([str(python), "-c", path_check], cwd=work_dir,
-                       env=default_environment, check=True)
+        if "nico_app" in modules:
+            for module in ("career_agent.cli", "career_agent.restore"):
+                subprocess.run([str(python), "-m", module, "--help"], cwd=work_dir,
+                               env=environment, check=True, stdout=subprocess.DEVNULL)
+            path_check = (
+                "from nico_app.config import data_dir\n"
+                "import os\n"
+                "from pathlib import Path\n"
+                "expected=(Path(os.getenv('LOCALAPPDATA') or (Path.home()/'AppData'/'Local'))/'Nico-agent') if os.name=='nt' else "
+                "(Path(os.environ['XDG_DATA_HOME'])/'nico-agent' if os.getenv('XDG_DATA_HOME') else Path.home()/'.nico-agent')\n"
+                "assert data_dir() == expected, (data_dir(), expected)\n"
+            )
+            default_environment = environment.copy()
+            default_environment.pop("DATA_DIR", None)
+            subprocess.run([str(python), "-c", path_check], cwd=work_dir,
+                           env=default_environment, check=True)
     return 0
 
 
