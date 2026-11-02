@@ -1,22 +1,14 @@
 """HTTP routes and request models for Nico-agent."""
 
-import asyncio
-import json
-import logging
-from collections.abc import Awaitable, Callable
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from nico_application import (
-    ChatUseCases,
-    InterviewUseCases,
     UseCaseError,
     delete_session_and_cancel_runs,
 )
 from nico_application.export import render_session_markdown
-from nico_contracts.errors import ModelError
-from nico_contracts.events import RunEventSink
 
 from .auth_routes import (
     Credentials,
@@ -61,6 +53,35 @@ from .memory_routes import (
     router as memory_router,
     update_memory_candidate,
 )
+from .chat_routes import (
+    ChatCreateInput,
+    ChatMemoryInput,
+    claim_chat_message,
+    chat_message,
+    create_chat,
+    interrupt_chat,
+    router as chat_router,
+    retry_chat_message,
+    run_chat_message,
+    update_chat_memory,
+)
+from .interview_routes import (
+    InterviewAnswerInput,
+    InterviewInput,
+    PracticeInput,
+    answer_interview,
+    cancel_interview,
+    claim_interview_answer,
+    create_interview,
+    create_practice,
+    interview_report,
+    pause_interview,
+    resume_interview,
+    router as interview_router,
+    run_interview_answer,
+    skip_interview_question,
+    start_interview,
+)
 from .route_support import http_interview_use_case_error, http_use_case_error, require_session
 from .tool_routes import (
     ToolGrantsInput,
@@ -71,11 +92,24 @@ from .tool_routes import (
     router as tool_router,
     set_session_tools,
 )
-from .backend import active_backend, active_runtime as _active_runtime, active_store as _active_store
+from .workflow_support import (
+    ChatRunInput,
+    TextInput,
+    active_chat_use_cases,
+    active_interview_use_cases,
+    active_runtime,
+    active_store,
+    complete_chat_request,
+    complete_interview_request,
+    run_chat_session,
+    run_interview_session,
+    stream_response,
+    wants_sse,
+)
+from .backend import active_backend
 
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 # Keep the legacy ``career_agent.main`` route imports explicit without leaking
 # FastAPI, Pydantic, and other implementation imports into that module.
@@ -171,157 +205,8 @@ __all__ = (
 )
 
 
-def active_store():
-    return _active_store()
-
-
-def active_runtime():
-    return _active_runtime()
-
-
-def active_chat_use_cases():
-    backend = active_backend()
-    return ChatUseCases(active_store(), backend.model_catalog(), run_chat_session,
-                        backend.cancel_session_runs)
-
-
-def active_interview_use_cases():
-    backend = active_backend()
-    return InterviewUseCases(active_store(), backend.model_catalog(), run_interview_session,
-                             backend.cancel_session_runs)
-
-
-async def run_chat_session(session: dict, on_event: RunEventSink | None = None) -> dict:
-    backend = active_backend()
-    selected = session.get("model_id", "default")
-    run = active_runtime() if selected == "default" else backend.make_runtime(
-        active_store(), backend.model_catalog().get(selected),
-    )
-    return await run.run(session, on_event=on_event)
-
-
-async def run_interview_session(session: dict, result_handler,
-                                on_event: RunEventSink | None = None) -> dict:
-    backend = active_backend()
-    selected = session.get("model_id", "default")
-    run = active_runtime() if selected == "default" else backend.make_runtime(
-        active_store(), backend.model_catalog().get(selected),
-    )
-    return await run.run(session, result_handler=result_handler, on_event=on_event)
-
-
-def wants_sse(request: Request) -> bool:
-    return "text/event-stream" in request.headers.get("accept", "").lower()
-
-
-def stream_response(operation: Callable[[RunEventSink], Awaitable[dict]]) -> StreamingResponse:
-    async def events():
-        queue = asyncio.Queue()
-        finished = object()
-
-        async def run():
-            try:
-                await operation(queue.put_nowait)
-                queue.put_nowait({"type": "done"})
-            except UseCaseError as exc:
-                status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
-                queue.put_nowait({"type": "error", "detail": str(exc), "code": "request_rejected",
-                                  "status": status})
-            except ModelError as exc:
-                logger.warning("Model run failed: code=%s", exc.code)
-                queue.put_nowait({"type": "error", "detail": str(exc), "code": exc.code,
-                                  "status": exc.status_code})
-            except ValueError:
-                logger.warning("Model run failed: code=model_invalid_output")
-                queue.put_nowait({"type": "error", "detail": "模型输出或上下文不符合要求",
-                                  "code": "model_invalid_output", "status": 502})
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.error("Model run failed: code=model_run_failed")
-                queue.put_nowait({"type": "error", "detail": "模型运行失败，请稍后重试",
-                                  "code": "model_run_failed", "status": 502})
-            finally:
-                queue.put_nowait(finished)
-
-        task = asyncio.create_task(run())
-        try:
-            yield "data: {\"type\":\"started\"}\n\n"
-            while True:
-                event = await queue.get()
-                if event is finished:
-                    break
-                yield f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        finally:
-            if not task.done():
-                task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-    return StreamingResponse(
-        events(), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-async def complete_chat_request(result) -> dict | JSONResponse:
-    try:
-        return await result
-    except UseCaseError:
-        raise
-    except ModelError as exc:
-        logger.warning("Model run failed: code=%s", exc.code)
-        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status_code)
-    except ValueError:
-        logger.warning("Model run failed: code=model_invalid_output")
-        return JSONResponse({"detail": "模型输出或上下文不符合要求", "code": "model_invalid_output"}, status_code=502)
-    except Exception:
-        logger.error("Model run failed: code=model_run_failed")
-        return JSONResponse({"detail": "模型运行失败，请稍后重试", "code": "model_run_failed"}, status_code=502)
-
-
-async def complete_interview_request(result) -> dict | JSONResponse:
-    try:
-        return await complete_chat_request(result)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-class TextInput(BaseModel):
-    text: str = Field(min_length=1, max_length=12000)
-
-
-class InterviewInput(BaseModel):
-    goal: str = Field(min_length=1, max_length=500)
-    max_questions: int = Field(default=3, ge=1, le=10)
-    material_ids: list[str] = Field(default_factory=list, max_length=5)
-    claim_ids: list[str] = Field(default_factory=list, max_length=10)
-    model_id: str = Field(default="default", min_length=1, max_length=80)
-
-
-class ChatCreateInput(BaseModel):
-    model_id: str = Field(default="default", min_length=1, max_length=80)
-
-
-class ChatRunInput(BaseModel):
-    version: int = Field(ge=1)
-
-
-class ChatMemoryInput(BaseModel):
-    text: str = Field(max_length=2000)
-
-
 class SessionTitleInput(BaseModel):
     title: str = Field(max_length=80)
-
-
-class InterviewAnswerInput(TextInput):
-    question_number: int = Field(ge=1)
-
-
-class PracticeInput(BaseModel):
-    question_number: int = Field(ge=1)
 
 
 @router.get("/api/config")
@@ -402,185 +287,5 @@ def export_session(kind: str, session_id: str):
                     headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
 
-@router.post("/api/chat/sessions")
-def create_chat(body: ChatCreateInput | None = None):
-    model_id = body.model_id if body else "default"
-    try:
-        return active_chat_use_cases().create(model_id)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.put("/api/chat/sessions/{session_id}/memory")
-def update_chat_memory(session_id: str, body: ChatMemoryInput):
-    try:
-        return {"text": active_chat_use_cases().set_memory(session_id, body.text)}
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/messages")
-async def chat_message(session_id: str, body: TextInput, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_chat_use_cases().send_message(
-            session_id, body.text, on_event,
-        ))
-    try:
-        return await complete_chat_request(
-            active_chat_use_cases().send_message(session_id, body.text)
-        )
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/messages/claim")
-def claim_chat_message(session_id: str, body: TextInput):
-    try:
-        return active_chat_use_cases().claim_message(session_id, body.text)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/messages/run")
-async def run_chat_message(session_id: str, body: ChatRunInput, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_chat_use_cases().run_claimed_message(
-            session_id, body.version, on_event,
-        ))
-    try:
-        return await complete_chat_request(
-            active_chat_use_cases().run_claimed_message(session_id, body.version)
-        )
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/retry")
-async def retry_chat_message(session_id: str, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_chat_use_cases().retry_message(
-            session_id, on_event,
-        ))
-    try:
-        return await complete_chat_request(
-            active_chat_use_cases().retry_message(session_id)
-        )
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.post("/api/chat/sessions/{session_id}/interrupt")
-def interrupt_chat(session_id: str):
-    try:
-        return active_chat_use_cases().interrupt(session_id)
-    except UseCaseError as exc:
-        raise http_use_case_error(exc) from exc
-
-
-@router.post("/api/interview/sessions")
-def create_interview(body: InterviewInput):
-    try:
-        return active_interview_use_cases().create(
-            body.goal, tuple(body.material_ids), tuple(body.claim_ids),
-            body.max_questions, body.model_id,
-        )
-    except ValueError as exc:
-        message = "内容不能为空" if str(exc) == "岗位目标不能为空" else str(exc)
-        raise HTTPException(422, message) from exc
-
-
-@router.get("/api/interview/sessions/{session_id}/report")
-def interview_report(session_id: str):
-    try:
-        return active_interview_use_cases().report(session_id)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-
-@router.post("/api/interview/sessions/{session_id}/practice")
-def create_practice(session_id: str, body: PracticeInput):
-    try:
-        return active_interview_use_cases().create_practice(session_id, body.question_number)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-
-
-@router.post("/api/interview/sessions/{session_id}/start")
-async def start_interview(session_id: str, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_interview_use_cases().start(
-            session_id, on_event,
-        ))
-    return await complete_interview_request(active_interview_use_cases().start(session_id))
-
-
-@router.post("/api/interview/sessions/{session_id}/answers")
-async def answer_interview(session_id: str, body: TextInput, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_interview_use_cases().answer(
-            session_id, body.text, on_event,
-        ))
-    return await complete_interview_request(active_interview_use_cases().answer(session_id, body.text))
-
-
-@router.post("/api/interview/sessions/{session_id}/answers/claim")
-def claim_interview_answer(session_id: str, body: InterviewAnswerInput):
-    try:
-        return active_interview_use_cases().claim_answer(
-            session_id, body.text, body.question_number,
-        )
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-
-@router.post("/api/interview/sessions/{session_id}/answers/run")
-async def run_interview_answer(session_id: str, body: ChatRunInput, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_interview_use_cases().run_claimed_answer(
-            session_id, body.version, on_event,
-        ))
-    return await complete_interview_request(
-        active_interview_use_cases().run_claimed_answer(session_id, body.version)
-    )
-
-
-@router.post("/api/interview/sessions/{session_id}/skip")
-async def skip_interview_question(session_id: str, body: PracticeInput, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_interview_use_cases().skip(
-            session_id, body.question_number, on_event,
-        ))
-    return await complete_interview_request(
-        active_interview_use_cases().skip(session_id, body.question_number)
-    )
-
-
-@router.post("/api/interview/sessions/{session_id}/pause")
-def pause_interview(session_id: str):
-    try:
-        return active_interview_use_cases().pause(session_id)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-
-@router.post("/api/interview/sessions/{session_id}/cancel")
-def cancel_interview(session_id: str):
-    try:
-        return active_interview_use_cases().cancel(session_id)
-    except UseCaseError as exc:
-        raise http_interview_use_case_error(exc) from exc
-
-
-@router.post("/api/interview/sessions/{session_id}/resume")
-async def resume_interview(session_id: str, request: Request):
-    if wants_sse(request):
-        return stream_response(lambda on_event: active_interview_use_cases().resume(
-            session_id, on_event,
-        ))
-    return await complete_interview_request(active_interview_use_cases().resume(session_id))
+router.include_router(chat_router)
+router.include_router(interview_router)

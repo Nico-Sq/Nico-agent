@@ -54,6 +54,10 @@ Nico-agent 是仅在本机运行、可长期扩展的求职 Agent。当前产品
 ```mermaid
 flowchart LR
   WebUI[nico-web/resources/static] --> Web[nico-web/routes.py]
+  Web --> ChatRoutes[nico-web/chat_routes.py]
+  Web --> InterviewRoutes[nico-web/interview_routes.py]
+  ChatRoutes --> WebFlow[nico-web/workflow_support.py]
+  InterviewRoutes --> WebFlow
   CLI[nico-cli/cli.py] --> Cases[nico-application/use_cases.py]
   CLI --> InterviewCases[nico-application/interview_use_cases.py]
   Web --> Cases
@@ -63,7 +67,7 @@ flowchart LR
   Cases --> Domain[nico-domain]
   InterviewCases --> Domain
   Store[nico-storage/store] --> Ports
-  Web --> Runtime[nico-app/runtime.py]
+  WebFlow --> Runtime[nico-app/runtime.py]
   CLI --> Runtime
   Runtime --> Core[nico-agent-core]
   Runtime --> Context[nico-application/context.py + prompts]
@@ -80,7 +84,7 @@ flowchart LR
 当前主要事实：
 
 - `nico-app/main.py` 与 `nico-app/cli.py` 装配存储、模型、工具适配器和运行时；`career_agent.*` 是保留的旧导入及入口。
-- `nico-web/routes.py` 处理 HTTP/SSE，`nico-cli/cli.py` 处理终端命令；聊天、材料和记忆用例由 `nico-application/use_cases.py` 协调，面试状态与结果提交由 `interview_use_cases.py` 协调。两者使用 `contracts.py` 的端口和错误类型，并依赖 `nico-domain` 的规则；`nico-storage` 实现存储端口。
+- `nico-web/routes.py` 组合 HTTP 子路由；`chat_routes.py` 与 `interview_routes.py` 分别处理对应业务接口，共用 SSE 与运行响应转换位于 `workflow_support.py`。`nico-cli/cli.py` 处理终端命令；聊天、材料和记忆用例由 `nico-application/use_cases.py` 协调，面试状态与结果提交由 `interview_use_cases.py` 协调。两者使用 `contracts.py` 的端口和错误类型，并依赖 `nico-domain` 的规则；`nico-storage` 实现存储端口。
 - `nico-app/runtime.py` 将 `nico-agent-core` 的模型/工具循环连接到上下文、内置工具、外部适配器和存储；提示词位于 `nico-application/resources/prompts/`。
 - `nico-storage` 负责 SQLite schema、业务记录、账户、备份和恢复；`store/materials.py` 管材料与经历，`store/interviews.py` 管面试资源、报告和复练；根 `pyproject.toml` 列出九个独立发行包。
 

@@ -126,6 +126,9 @@ class CompatibilitySnapshotTests(unittest.TestCase):
 
         self.assertTrue(callable(main.claim_chat_message))
         self.assertTrue(callable(main.interrupt_chat))
+        self.assertTrue(callable(main.create_interview))
+        self.assertTrue(callable(main.start_interview))
+        self.assertTrue(callable(main.answer_interview))
         self.assertTrue(callable(main.register))
         self.assertTrue(callable(main.login))
         self.assertTrue(callable(main.current_user))
@@ -136,6 +139,7 @@ class CompatibilitySnapshotTests(unittest.TestCase):
         self.assertTrue(callable(main.get_session_tools))
         self.assertTrue(callable(main.set_session_tools))
         self.assertIsNotNone(main.TextInput)
+        self.assertIsNotNone(main.InterviewInput)
         self.assertIsNotNone(main.Credentials)
         self.assertIsNotNone(main.MaterialInput)
         self.assertIsNotNone(main.ClaimInput)
