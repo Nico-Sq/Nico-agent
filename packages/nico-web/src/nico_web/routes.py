@@ -11,8 +11,6 @@ from pydantic import BaseModel, Field
 from nico_application import (
     ChatUseCases,
     InterviewUseCases,
-    ToolGrantError,
-    ToolGrantUseCases,
     UseCaseError,
     delete_session_and_cancel_runs,
 )
@@ -64,6 +62,15 @@ from .memory_routes import (
     update_memory_candidate,
 )
 from .route_support import http_interview_use_case_error, http_use_case_error, require_session
+from .tool_routes import (
+    ToolGrantsInput,
+    get_session_tools,
+    list_mcp_servers,
+    list_mcp_tools,
+    list_tools,
+    router as tool_router,
+    set_session_tools,
+)
 from .backend import active_backend, active_runtime as _active_runtime, active_store as _active_store
 
 
@@ -297,10 +304,6 @@ class ChatCreateInput(BaseModel):
     model_id: str = Field(default="default", min_length=1, max_length=80)
 
 
-class ToolGrantsInput(BaseModel):
-    names: list[str] = Field(default_factory=list, max_length=20)
-
-
 class ChatRunInput(BaseModel):
     version: int = Field(ge=1)
 
@@ -333,58 +336,7 @@ def list_models():
 
 
 router.include_router(memory_router)
-
-
-@router.get("/api/mcp/tools")
-async def list_mcp_tools():
-    try:
-        return await active_backend().mcp_servers().discover()
-    except Exception as exc:
-        raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
-
-
-@router.get("/api/mcp/servers")
-async def list_mcp_servers():
-    """Report each configured server so operators can see why a tool is missing."""
-    return {"servers": await active_backend().mcp_servers().report()}
-
-
-@router.get("/api/tools")
-async def list_tools():
-    try:
-        return active_backend().local_plugins().discover() + await active_backend().mcp_servers().discover()
-    except Exception as exc:
-        raise HTTPException(502, "工具发现失败，请检查本地插件或 MCP 配置") from exc
-
-
-@router.get("/api/{kind}/sessions/{session_id}/tools")
-def get_session_tools(kind: str, session_id: str):
-    if kind not in ("chat", "interview"):
-        raise HTTPException(404)
-    require_session(session_id, kind)
-    return {"names": ToolGrantUseCases(active_store()).list(session_id)}
-
-
-@router.put("/api/{kind}/sessions/{session_id}/tools")
-async def set_session_tools(kind: str, session_id: str, body: ToolGrantsInput):
-    if kind not in ("chat", "interview"):
-        raise HTTPException(404)
-    session = require_session(session_id, kind)
-    if session["status"] == "running":
-        raise HTTPException(409, "运行中不能修改工具授权")
-    try:
-        available = {item["name"]: item
-                     for item in active_backend().local_plugins().discover() + await active_backend().mcp_servers().discover()}
-    except Exception as exc:
-        raise HTTPException(502, "MCP 工具发现失败，请检查本地服务器配置") from exc
-    try:
-        names = ToolGrantUseCases(active_store()).replace(
-            session_id, body.names, available.values(),
-        )
-    except ToolGrantError as exc:
-        message = "包含未配置的外部工具" if exc.kind == "unavailable" else str(exc)
-        raise HTTPException(422, message) from exc
-    return {"names": names}
+router.include_router(tool_router)
 
 
 @router.get("/api/data/backup")
