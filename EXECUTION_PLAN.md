@@ -923,6 +923,14 @@ API/CLI/数据兼容：
 - 实施：面试有材料或经历选择时，在校验前执行 `BEGIN IMMEDIATE`，并保持资源检查、会话插入、关联插入处于同一连接事务。无来源选择时沿用原有插入事务。没有改 schema、API、来源 ID 规则或目录结构。
 - 验证：storage 测试 24 项通过；新增 trace 测试确认写事务先于材料/经历检查，且会话与两类关联写入共享同一连接。根目录 `pytest --import-mode=importlib -q` 为 247 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-storage` wheel，并在仓库外临时 venv 安装验证 storage 及其 contracts/domain/application 依赖通过；安装阶段有一次 TLS 重试，之后使用缓存完成。
 
+材料上传请求体边界复审与修复（2026-11-02）：
+
+- 面试复练链路复查：application 先校验并返回业务错误，`Store.create_practice()` 又在 `BEGIN IMMEDIATE` 中核验来源状态/题目反馈并复制关联，HTTP 路由把并发失效映射为 409；没有发现需要改动的竞态。
+- 证据：`material_routes.extract_material()` 的 `UploadFile.read(max_file_bytes + 1)` 在 FastAPI 完成 multipart 解析后才运行。当前 Starlette 的 `MultiPartParser.on_part_data()` 对文件 part 排队并在 `parse()` 中写入 `UploadFile`；`max_part_size` 只约束普通字段。故 5 MB 提取限制没有限制解析期间整份上传写入内存/临时文件的请求体大小。
+- 参考核对：Akashic `bootstrap/chat_api.py` 在接收端校验声明长度，并把实际 `request.stream()` 交给带字节上限的保存器；调整后采用“声明长度预检 + 实际流量累计”的边界。nanobot `nanobot/api/server.py::_parse_multipart()` 先读取完整 part 再检查大小，不足以解决解析前资源占用；Pi coding-agent 未发现对应的 HTTP 上传入口，其本地文件工具输出限额与本问题不同，均不照搬。
+- 实施：在 `nico-web/app.py` 增加仅匹配材料提取 POST 路由的 ASGI 限制；用 `Content-Length` 快速拒绝，并逐块累计请求体以覆盖缺少长度头的请求。上限为现有文件字节上限加 64 KiB multipart 开销，超限返回 413；现有提取器仍按单文件上限验证。未改提取格式、路由契约或文件大小策略。
+- 验证：新增 Web 测试覆盖带长度头的大请求在提取器运行前返回 413、无长度头时逐块计数并返回 413；Web 定向测试 2 项、API 材料提取测试 2 项、适配器 PDF 解压限制测试 2 项通过。根目录全套测试 248 项通过（FastAPI TestClient 有 1 条上游弃用警告）；依赖图、`compileall`、`git diff --check` 通过。重建 `nico-web` wheel，并在仓库外临时 venv 安装验证 web 及 contracts/domain/application 依赖通过。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

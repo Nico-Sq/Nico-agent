@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .backend import (
     WebBackend,
@@ -17,8 +18,64 @@ from .backend import (
 from .routes import router
 
 
+_MATERIAL_UPLOAD_OVERHEAD_BYTES = 64 * 1024
+
+
+class _RequestBodyTooLarge(Exception):
+    pass
+
+
+class _MaterialUploadBodyLimitMiddleware:
+    def __init__(self, app: ASGIApp, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (scope["type"] != "http" or scope["method"] != "POST"
+                or scope["path"] != "/api/materials/extract"):
+            await self.app(scope, receive, send)
+            return
+
+        content_length = next(
+            (value for name, value in scope["headers"] if name == b"content-length"), None,
+        )
+        declared_length = None
+        if content_length is not None:
+            try:
+                declared_length = int(content_length)
+            except ValueError:
+                pass
+        if declared_length is not None and declared_length > self.max_bytes:
+            await JSONResponse({"detail": "上传请求超过大小限制"}, status_code=413)(
+                scope, receive, send,
+            )
+            return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise _RequestBodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except _RequestBodyTooLarge:
+            await JSONResponse({"detail": "上传请求超过大小限制"}, status_code=413)(
+                scope, receive, send,
+            )
+
+
 def create_app(backend: WebBackend, *, lifespan: Any = None) -> FastAPI:
     app = FastAPI(title="双线求职 Agent", lifespan=lifespan)
+    app.add_middleware(
+        _MaterialUploadBodyLimitMiddleware,
+        max_bytes=backend.max_file_bytes + _MATERIAL_UPLOAD_OVERHEAD_BYTES,
+    )
     app.include_router(router)
     static_root = files("nico_web").joinpath("resources", "static")
     app.mount("/static", StaticFiles(directory=str(static_root)), name="static")
