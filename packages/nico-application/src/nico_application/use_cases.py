@@ -52,7 +52,7 @@ def delete_session_and_cancel_runs(store: SessionDeletionStorePort, session_id: 
 class ChatUseCases:
     def __init__(self, store: ChatStorePort, model_catalog: ModelCatalogPort,
                  run: Callable[..., Awaitable[dict]],
-                 cancel_runs: Callable[[str], object]):
+                 cancel_runs: Callable[[str, int], object]):
         self.store = store
         self.model_catalog = model_catalog
         self.run = run
@@ -76,9 +76,10 @@ class ChatUseCases:
 
     def set_memory(self, session_id: str, text: str) -> str:
         text = text.strip()
-        if self.store.set_chat_memory(session_id, text) is None:
+        session = self.store.set_chat_memory(session_id, text)
+        if session is None:
             raise UseCaseError("not_found", "聊天会话不存在")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, session["version"])
         return text
 
     def _claim_message(self, session_id: str, text: str) -> dict:
@@ -94,7 +95,7 @@ class ChatUseCases:
         )
         if session is None:
             raise UseCaseError("conflict", "当前不能发送消息")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, session["version"])
         return session
 
     async def send_message(self, session_id: str, text: str,
@@ -122,7 +123,7 @@ class ChatUseCases:
         session = self.store.retry_chat(session_id)
         if session is None:
             raise UseCaseError("conflict", "当前没有待重试的消息")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, session["version"])
         return await self._run(session, on_event)
 
     def interrupt(self, session_id: str) -> dict:
@@ -130,7 +131,7 @@ class ChatUseCases:
         session = self.store.interrupt(session_id, "chat")
         if session is None:
             raise UseCaseError("conflict", "当前没有可中断的运行")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, session["version"])
         return session
 
 

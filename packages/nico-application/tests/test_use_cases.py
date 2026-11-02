@@ -246,12 +246,27 @@ class UseCaseTests(unittest.TestCase):
             self.store,
             FakeCatalog(),
             run,
-            lambda session_id: effects.append(("cancel", session_id)),
+            lambda session_id, before_version: effects.append(
+                ("cancel", session_id, before_version),
+            ),
         )
         result = asyncio.run(chat.send_message("chat-1", "  hello  "))
         self.assertEqual(result, {"message": "reply"})
         self.assertEqual(self.store.calls[0], ("claim_run", "chat-1", "hello"))
-        self.assertEqual(effects, [("cancel", "chat-1"), ("run", 2)])
+        self.assertEqual(effects, [("cancel", "chat-1", 2), ("run", 2)])
+
+    def test_chat_memory_cancels_only_runs_before_updated_version(self):
+        self.store.set_chat_memory = lambda session_id, text: {
+            **self.store.session, "version": 8,
+        }
+        cancelled = []
+        chat = ChatUseCases(
+            self.store, FakeCatalog(), lambda *_: None,
+            lambda session_id, before_version: cancelled.append((session_id, before_version)),
+        )
+
+        self.assertEqual(chat.set_memory("chat-1", "备注"), "备注")
+        self.assertEqual(cancelled, [("chat-1", 8)])
 
     def test_chat_rejects_blank_input_before_claiming(self):
         async def run(session):

@@ -19,7 +19,7 @@ class WebBackend:
     local_plugins: Callable[[], Any]
     make_store: Callable[[Path], Any]
     make_runtime: Callable[[Any, Any], Any]
-    cancel_session_runs: Callable[[str], int]
+    cancel_session_runs: Callable[..., int]
     max_file_bytes: int
     extract_text: Callable[[str, bytes], str]
     login_rate_limited_error: type[Exception]

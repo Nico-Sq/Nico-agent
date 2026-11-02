@@ -953,6 +953,13 @@ AgentCore 运行登记跨线程竞态复审与修复（2026-11-02）：
 - 实施：新增 `/retry-delivery <message_id>` 命令，使用入站消息的 sender/conversation 调用 `ChannelRouter.retry_delivery()`；无 ID、记录不存在或发送失败时给出 CLI 提示。`/retry` 仍只重试聊天失败轮次。README 与项目定义同步说明可达的重投方式，并修正文档中“渠道身份和幂等状态仅限进程”的过期描述。
 - 验证：CLI 定向测试 5 项、CLI 与 application 渠道测试共 10 项通过（含拒绝其他 sender 重投）；根目录全回归 253 项通过（FastAPI TestClient 有 1 条 Starlette 上游弃用警告）。依赖图无环、`compileall`、`git diff --check` 通过；9 个 wheel 全部重建并在仓库外临时 venv 安装验证。首次 changed-wheel 验证发现 `dist/` 中旧 `nico_application` wheel 缺少 prompt resource，完整重建后全包 wheel 验证通过。
 
+运行取消与状态版本交错复审及修复（2026-11-03）：
+
+- 证据：`AgentCore._ACTIVE_RUNS` 按 session/version 登记任务，但旧 `cancel_session_runs()` 只按 session 取消所有版本。`ChatUseCases.set_memory()` 先让数据库版本递增、恢复 active，再调用 session 级取消；并发的新消息可在状态更新后、取消快照前登记为更高版本，从而被旧操作误取消。面试暂停后快速恢复也有相同的版本窗口。新增测试先复现取消器没有版本边界，application 测试复现固定备注更新未把状态版本传给取消器。
+- 参考核对：Akashic `agent/looping/core.py` 的活动任务以 session 为键并由 loop 内 interrupt 取单个任务；nanobot `agent/loop.py::_cancel_active_tasks()` 对 session 下任务整体取消；Pi `packages/agent/src/agent-loop.ts` 将 `AbortSignal` 传入模型与工具执行，但不处理 Nico 的 SQLite session version。三者没有可直接复用的跨请求版本边界；调整后采用 Nico 已有 session version，只取消低于触发操作新版本的任务，删除会话仍取消全部登记任务。
+- 实施：`AgentCore.cancel_session_runs()` 增加可选 `before_version`，只取消版本小于边界的 task；聊天消息认领/重试/中断、固定备注更新，以及面试回答/跳题/暂停/结束都传入其状态变更版本。新版本及其后的任务不再被旧操作取消；保留无边界调用以覆盖会话删除。
+- 验证：agent-core 与 application 定向测试共 36 项、根目录全回归 255 项通过（FastAPI TestClient 有 1 条 Starlette 上游弃用警告）；依赖图无环、`compileall`、`git diff --check` 通过。重建受影响的 agent-core、application、web、app wheels，并在仓库外临时 venv 验证安装；依赖下载有一次 TLS EOF 重试，使用本机缓存继续并成功。
+
 ## 16. 给后续执行 AI 的直接指令
 
 ```text

@@ -120,6 +120,39 @@ class AgentCoreTests(unittest.TestCase):
         self.assertTrue(finish_completed.is_set())
         self.assertEqual(errors, [])
 
+    def test_session_cancel_can_preserve_the_newer_run_version(self):
+        async def scenario():
+            release = asyncio.Event()
+
+            async def wait_for_release():
+                await release.wait()
+
+            older = asyncio.create_task(wait_for_release())
+            newer = asyncio.create_task(wait_for_release())
+            AgentCore.track_session_run("version-boundary", 1, older)
+            AgentCore.track_session_run("version-boundary", 2, newer)
+            try:
+                self.assertEqual(
+                    AgentCore.cancel_session_runs("version-boundary", before_version=2), 1,
+                )
+                await asyncio.sleep(0)
+                self.assertTrue(older.cancelled())
+                self.assertFalse(newer.cancelled())
+                try:
+                    await older
+                except asyncio.CancelledError:
+                    pass
+            finally:
+                newer.cancel()
+                try:
+                    await newer
+                except asyncio.CancelledError:
+                    pass
+                AgentCore.finish_session_run("version-boundary", 1, older)
+                AgentCore.finish_session_run("version-boundary", 2, newer)
+
+        asyncio.run(scenario())
+
     def test_tool_cycle_uses_generic_executor_and_usage(self):
         tool_call = {"id": "call-1", "function": {"name": "lookup", "arguments": "{}"}}
         reply = FakeModel(

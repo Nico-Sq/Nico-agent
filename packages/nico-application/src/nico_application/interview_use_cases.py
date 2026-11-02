@@ -48,7 +48,7 @@ def commit_interview_result(
 
 class InterviewUseCases:
     def __init__(self, store: InterviewStorePort, model_catalog: ModelCatalogPort,
-                 run: InterviewRunner, cancel_runs: Callable[[str], object]):
+                 run: InterviewRunner, cancel_runs: Callable[[str, int], object]):
         self.store = store
         self.model_catalog = model_catalog
         self.run = run
@@ -119,7 +119,7 @@ class InterviewUseCases:
         if running is None:
             message = "当前题目已变化，无法提交回答" if expected_question is not None else "当前不能提交回答"
             raise UseCaseError("conflict", message)
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, running["version"])
         return running
 
     async def answer(self, session_id: str, text: str,
@@ -155,7 +155,7 @@ class InterviewUseCases:
         running = self.store.skip_interview_question(session_id, question_number)
         if running is None:
             raise UseCaseError("conflict", "当前题目已变化，无法跳过")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, running["version"])
         return running
 
     async def skip(self, session_id: str, question_number: int,
@@ -169,7 +169,7 @@ class InterviewUseCases:
         paused = self.store.interrupt(session_id, "interview")
         if paused is None:
             raise UseCaseError("conflict", "当前不能暂停")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, paused["version"])
         return paused
 
     def cancel(self, session_id: str) -> dict:
@@ -179,7 +179,7 @@ class InterviewUseCases:
         cancelled = self.store.cancel_interview(session_id)
         if cancelled is None:
             raise UseCaseError("conflict", "当前不能结束面试")
-        self.cancel_runs(session_id)
+        self.cancel_runs(session_id, cancelled["version"])
         return cancelled
 
     async def resume(self, session_id: str, on_event: RunEventSink | None = None) -> dict:

@@ -61,9 +61,9 @@ class AgentRuntime:
         self.core = AgentCore()
 
     @classmethod
-    def cancel_session_runs(cls, session_id: str) -> int:
+    def cancel_session_runs(cls, session_id: str, before_version: int | None = None) -> int:
         """Cancel tasks still working on a session after its version changed."""
-        return AgentCore.cancel_session_runs(session_id)
+        return AgentCore.cancel_session_runs(session_id, before_version)
 
     def build_context(self, session: dict) -> list[AgentMessage]:
         """Delegate prompt assembly to the context module."""

@@ -91,12 +91,15 @@ class AgentCore:
                     _ACTIVE_RUNS.pop(session_id, None)
 
     @classmethod
-    def cancel_session_runs(cls, session_id: str) -> int:
-        """Cancel tasks still working on a session after its version changed."""
+    def cancel_session_runs(cls, session_id: str, before_version: int | None = None) -> int:
+        """Cancel older runs, optionally keeping runs at or after a state version."""
         with _ACTIVE_RUNS_LOCK:
             runs = _ACTIVE_RUNS.get(session_id, {})
-            tasks = [task for task in runs.values() if not task.done()]
-            if runs and not tasks:
+            tasks = [
+                task for version, task in runs.items()
+                if not task.done() and (before_version is None or version < before_version)
+            ]
+            if runs and not any(not task.done() for task in runs.values()):
                 _ACTIVE_RUNS.pop(session_id, None)
         try:
             current_loop = asyncio.get_running_loop()
