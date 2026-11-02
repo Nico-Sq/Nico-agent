@@ -1,4 +1,6 @@
 import argparse
+from contextlib import redirect_stdout
+from io import StringIO
 import unittest
 from types import SimpleNamespace
 
@@ -38,6 +40,21 @@ class CLITests(unittest.TestCase):
         args = build_parser().parse_args(["tools", "grant", "missing", "read"])
         with self.assertRaisesRegex(ValueError, "需要现有chat会话 ID"):
             run(args, SimpleNamespace(tool_grants=ToolGrants()))
+
+    def test_memory_add_command_keeps_validation_and_output(self):
+        class Memory:
+            def add(self, content):
+                return {"id": "memory-1", "created": True}
+
+        args = build_parser().parse_args(["memory", "add", "偏好后端"])
+        output = StringIO()
+        with redirect_stdout(output):
+            run(args, SimpleNamespace(memory=Memory()))
+        self.assertEqual(output.getvalue(), "memory-1\n")
+
+        args = build_parser().parse_args(["memory", "add", " "])
+        with self.assertRaisesRegex(ValueError, "记忆内容需为 1–2000 字"):
+            run(args, SimpleNamespace(memory=Memory()))
 
 
 if __name__ == "__main__":
