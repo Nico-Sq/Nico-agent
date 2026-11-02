@@ -298,6 +298,13 @@
     },
     "finding": "两个固定案例都通过实际浏览器页面完成了选材、开始面试、回答和报告查看，页面显示 finished 且回答依据逐字匹配。IF-04 的反馈措辞与接口级复测不同，说明单次模型措辞并不固定；本轮成功不能替代 30 案例回归或证明模型输出稳定。"
   },
+  "automated_sse_regression": {
+    "code_commit": "af9deb3",
+    "test": "test_interview_sse_flow_preserves_answer_and_report_evidence",
+    "command": "& .\\.venv\\Scripts\\python.exe -m pytest tests/test_api.py -k interview_sse_flow_preserves_answer_and_report_evidence -q",
+    "result": "1 passed, 31 deselected",
+    "scope_note": "使用固定假模型覆盖创建材料、创建面试、start SSE、answers/claim、answers/run SSE 到 report 的完整 API 顺序；不调用真实模型服务，也不替代浏览器 UI 测试。"
+  },
   "findings": [
     "网页使用 SSE 流式接口；此前 JSON API 复测不能代表网页的完整请求路径。",
     "历史复测中的传输方式不完全一致；本次按当前网页请求流程，IF-04 和 IF-10 的开始及回答均使用 SSE。",
