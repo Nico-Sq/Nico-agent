@@ -51,6 +51,15 @@ class ChatStorePort(ChatSessionReader, Protocol):
                   user_text: str | None = None) -> dict | None: ...
     def retry_chat(self, session_id: str) -> dict | None: ...
     def interrupt(self, session_id: str, kind: str) -> dict | None: ...
+    def finish_run(self, session_id: str, version: int, content: str, status: str,
+                   question_count: int) -> bool: ...
+
+
+def commit_chat_result(store: ChatStorePort, session: dict, content: str) -> dict:
+    committed = store.finish_run(session["id"], session["version"], content, "active", 0)
+    if not committed:
+        return {"interrupted": True, "session": store.get(session["id"], "chat")}
+    return {"message": content, "session": store.get(session["id"], "chat")}
 
 
 class MaterialStorePort(Protocol):

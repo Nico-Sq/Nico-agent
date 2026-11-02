@@ -53,33 +53,31 @@ Nico-agent 是仅在本机运行、可长期扩展的求职 Agent。当前产品
 
 ```mermaid
 flowchart LR
-  Web[WebUI static/app.js] --> Main[FastAPI main.py]
-  CLI[cli.py] --> Chan[channels.py]
-  CLI --> MainStore[store.py]
-  Main --> Runtime[runtime.py]
+  WebUI[nico-web/resources/static] --> Web[nico-web/routes.py]
+  CLI[nico-cli/cli.py] --> Cases[nico-application/use_cases.py]
+  Web --> Cases
+  Cases --> Domain[nico-domain]
+  Cases --> Store[nico-storage/store]
+  Web --> Runtime[nico-app/runtime.py]
   CLI --> Runtime
-  Main --> MainStore
-  Runtime --> Ctx[context.py + skills/*.md]
-  Runtime --> Store[store.py]
-  Ctx --> Store
-  Runtime --> Provider[provider.py / models.py / providers/*]
-  Runtime --> Tools[tools.py]
-  Runtime --> MCP[mcp.py]
-  Runtime --> Plugins[plugins.py]
-  Main --> Auth[auth.py]
-  Main --> Backup[auto_backup.py]
-  Restore[restore.py] --> DB[(SQLite 业务库)]
-  Store --> DB
+  Runtime --> Core[nico-agent-core]
+  Runtime --> Context[nico-application/context.py + prompts]
+  Runtime --> Tools[nico-application/tools.py]
+  Runtime --> Adapters[nico-adapters/models + mcp + plugins]
+  Runtime --> Store
+  Context --> Store
+  Store --> DB[(SQLite 业务库)]
+  App[nico-app/main.py + cli.py] --> Web
+  App --> CLI
+  App --> Runtime
 ```
 
 当前主要事实：
 
-- `career_agent/main.py` 既是 FastAPI 路由层，又负责全局配置、账户 DB 选择、运行协调和入口装配。
-- `career_agent/runtime.py` 同时包含通用模型/工具循环、工具审批检查、取消登记和面试输出校验。
-- `career_agent/store.py` 同时负责建表/增列、事务、查询、面试状态转换、工具授权、记忆候选和备份。
-- `career_agent/cli.py` 直接组装 Store、ModelCatalog、MCP、插件和 Runtime，业务流程与命令解析混在一起。
-- `career_agent/context.py` 和两份 Skill 已有真实调用链；`career_agent/tools.py` 定义内置工具与只读工具集合。
-- 当前只有一个根 `pyproject.toml`，包发布名是 `nico-agent`，实际 Python 包是 `career_agent`。
+- `nico-app/main.py` 与 `nico-app/cli.py` 装配存储、模型、工具适配器和运行时；`career_agent.*` 是保留的旧导入及入口。
+- `nico-web/routes.py` 处理 HTTP/SSE，`nico-cli/cli.py` 处理终端命令；聊天、面试、材料和记忆流程由 `nico-application/use_cases.py` 协调，状态和输出校验依赖 `nico-domain`。
+- `nico-app/runtime.py` 将 `nico-agent-core` 的模型/工具循环连接到上下文、内置工具、外部适配器和存储；提示词位于 `nico-application/resources/prompts/`。
+- `nico-storage` 负责 SQLite schema、业务记录、账户、备份和恢复；根 `pyproject.toml` 列出九个独立发行包。
 
 ### 2.2 能力盘点
 

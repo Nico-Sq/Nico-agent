@@ -8,6 +8,7 @@ from nico_application import (
     MaterialUseCases,
     MemoryUseCases,
     UseCaseError,
+    commit_chat_result,
     commit_interview_result,
 )
 
@@ -17,6 +18,7 @@ class FakeStore:
         self.session = {"id": "chat-1", "kind": "chat", "status": "active", "version": 1}
         self.candidate = {"id": "candidate-1", "status": "pending"}
         self.calls = []
+        self.commit = True
 
     def create(self, kind, model_id="default"):
         self.calls.append(("create", kind, model_id))
@@ -40,6 +42,10 @@ class FakeStore:
     def interrupt(self, session_id, kind):
         self.calls.append(("interrupt", session_id, kind))
         return {**self.session, "status": "active"}
+
+    def finish_run(self, session_id, version, content, status, question_count):
+        self.calls.append(("finish_run", session_id, version, content, status, question_count))
+        return self.commit
 
     def list_materials(self):
         return []
@@ -218,6 +224,16 @@ class InterviewUseCaseTests(unittest.TestCase):
 class UseCaseTests(unittest.TestCase):
     def setUp(self):
         self.store = FakeStore()
+
+    def test_chat_result_commits_once_and_rejects_stale_run(self):
+        session = dict(self.store.session)
+        result = commit_chat_result(self.store, session, "reply")
+        self.assertEqual(result["message"], "reply")
+        self.store.commit = False
+        stale = commit_chat_result(self.store, session, "late reply")
+        self.assertTrue(stale["interrupted"])
+        self.assertEqual([call[3] for call in self.store.calls if call[0] == "finish_run"],
+                         ["reply", "late reply"])
 
     def test_chat_send_claims_input_cancels_old_run_and_calls_runner(self):
         effects = []

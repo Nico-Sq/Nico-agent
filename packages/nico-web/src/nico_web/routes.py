@@ -19,6 +19,7 @@ from nico_application import (
     ToolGrantUseCases,
     UseCaseError,
 )
+from nico_application.export import render_session_markdown
 from nico_contracts.errors import ModelError
 from nico_contracts.events import RunEventSink
 
@@ -579,36 +580,10 @@ def export_session(kind: str, session_id: str):
     if kind not in ("chat", "interview"):
         raise HTTPException(404)
     session = require_session(session_id, kind)
-    lines = ["# 聊天记录" if kind == "chat" else "# 模拟面试记录", ""]
-    if session["title"]:
-        lines.extend([f"会话名称：{session['title']}", ""])
-    if kind == "chat":
-        if session["chat_memory"]:
-            lines.extend(["## 固定备注", "", session["chat_memory"], ""])
-        for message in active_store().messages(session_id, kind):
-            lines.extend([f"## {'用户' if message['role'] == 'user' else '聊天助手'}", "",
-                          message["content"], ""])
-    else:
-        report = active_store().interview_report(session_id)
-        lines.extend([f"岗位目标：{session['goal']}", f"状态：{session['status']}", ""])
-        if report["practice_source"]:
-            source = report["practice_source"]
-            lines.extend(["## 复练来源", "", f"原题：{source['question']}", "",
-                          f"原回答：{source['answer'] or '无'}", "",
-                          f"原反馈：{source['feedback'] or '无'}", ""])
-        for item in report["items"]:
-            lines.extend([f"## 第 {item['number']} 题", "", item["question"], "",
-                          "### 回答", "", "已跳过" if item["skipped"] else item["answer"] or "未回答", "",
-                          "### 反馈", "", item["feedback"] or "尚无反馈", ""])
-            if item["evidence"]:
-                lines.extend(["回答依据：" + "；".join(item["evidence"]), ""])
-        if report["summary"]:
-            lines.extend(["## 全场总结", "", report["summary"], ""])
-        lines.extend(["## 完整对话", ""])
-        for message in active_store().messages(session_id, kind):
-            lines.extend([f"### {'用户' if message['role'] == 'user' else '面试官'}", "",
-                          "已跳过本题" if message["content"] == "[SKIPPED_QUESTION]" else message["content"], ""])
-    return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
+    messages = active_store().messages(session_id, kind)
+    report = active_store().interview_report(session_id) if kind == "interview" else None
+    content = render_session_markdown(session, messages, report)
+    return Response(content, media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{kind}-{session_id}.md"'})
 
 

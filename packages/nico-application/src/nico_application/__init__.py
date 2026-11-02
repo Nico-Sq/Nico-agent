@@ -6,6 +6,7 @@ from .use_cases import (
     MaterialUseCases,
     MemoryUseCases,
     UseCaseError,
+    commit_chat_result,
     commit_interview_result,
 )
 from .tooling import (
@@ -22,7 +23,7 @@ from .channels import ChannelLedgerPort, ChannelRouter
 
 __all__ = [
     "ChatUseCases", "InterviewUseCases", "MaterialUseCases", "MemoryUseCases",
-    "UseCaseError", "commit_interview_result",
+    "UseCaseError", "commit_chat_result", "commit_interview_result",
     "ToolAdapterPort", "ToolCatalog", "ToolCatalogPort", "ToolCatalogSnapshot",
     "ToolGrantError", "ToolGrantPort", "ToolGrantUseCases",
     "ToolDiscoveryUseCases",

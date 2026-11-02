@@ -27,6 +27,7 @@ from nico_application import (
     ToolCatalog,
     ToolCatalogPort,
     ToolCatalogSnapshot,
+    commit_chat_result,
 )
 from nico_domain import tool_is_read_only
 
@@ -287,7 +288,4 @@ class AgentRuntime:
                     self.store, current, output,
                 )
             return result_handler(session, raw)
-        committed = self.store.finish_run(session["id"], session["version"], raw, "active", 0)
-        if not committed:
-            return {"interrupted": True, "session": self.store.get(session["id"], kind)}
-        return {"message": raw, "session": self.store.get(session["id"], kind)}
+        return commit_chat_result(self.store, session, raw)
