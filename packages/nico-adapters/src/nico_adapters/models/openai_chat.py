@@ -24,7 +24,37 @@ def parse(data: dict) -> ModelReply:
     message = choice["message"]
     if not isinstance(message, dict):
         raise TypeError("模型消息不是对象")
-    return {**message, "usage": data.get("usage"), "finish_reason": choice.get("finish_reason")}
+    content = message.get("content")
+    if content is not None and not isinstance(content, str):
+        raise ValueError("模型文本格式错误")
+    reply: ModelReply = {"content": content, "usage": data.get("usage"),
+                         "finish_reason": choice.get("finish_reason")}
+    if "tool_calls" in message and choice.get("finish_reason") not in ("length", "content_filter"):
+        calls = message["tool_calls"]
+        if not isinstance(calls, list):
+            raise ValueError("模型工具调用格式错误")
+        reply["tool_calls"] = [parse_tool_call(call) for call in calls]
+    return reply
+
+
+def parse_tool_call(call: dict) -> dict:
+    if not isinstance(call, dict) or not isinstance(call.get("id"), str) or not call["id"]:
+        raise ValueError("模型工具调用格式错误")
+    function = call.get("function")
+    if not isinstance(function, dict) or not isinstance(function.get("name"), str) or not function["name"]:
+        raise ValueError("模型工具调用格式错误")
+    arguments = function.get("arguments", "")
+    if not isinstance(arguments, str):
+        raise ValueError("模型工具调用参数格式错误")
+    try:
+        parsed = json.loads(arguments or "{}")
+    except ValueError as exc:
+        raise ValueError("模型工具调用参数格式错误") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("模型工具调用参数格式错误")
+    return {"id": call["id"], "type": "function", "function": {
+        "name": function["name"], "arguments": arguments or "{}",
+    }}
 
 
 async def parse_stream(chunks: AsyncIterator[str], on_delta: Callable[[str], None]) -> ModelReply:
@@ -100,7 +130,7 @@ async def parse_stream(chunks: AsyncIterator[str], on_delta: Callable[[str], Non
     if not finished or finish_reason is None:
         raise ModelError("model_invalid_response", "模型服务的流式响应未正常结束")
     message = {"role": "assistant", "content": "".join(text) or None}
-    if tools:
+    if tools and finish_reason not in ("length", "content_filter"):
         message["tool_calls"] = [tools[index] for index in sorted(tools)]
     try:
         return parse({"choices": [{"message": message, "finish_reason": finish_reason}],

@@ -13,7 +13,7 @@ from nico_contracts.events import RunEventSink, Usage, run_event
 from nico_contracts.messages import AgentMessage
 from nico_contracts.tools import ToolDefinition
 
-from .ports import ModelPort
+from .ports import ModelPort, StreamingModelPort
 from .run import (
     MAX_MODEL_INPUT_CHARS,
     MAX_MODEL_OUTPUT_CHARS,
@@ -205,10 +205,9 @@ class AgentCore:
             if not request.is_current():
                 raise RunSuperseded()
             request.trace.usage.request_count += 1
-            stream = getattr(request.model, "stream", None)
-            streaming = request.on_event is not None and callable(stream)
+            streaming = request.on_event is not None and isinstance(request.model, StreamingModelPort)
             if streaming:
-                reply = await stream(
+                reply = await request.model.stream(
                     request.messages, request.tools,
                     lambda text: request.on_event({"type": "text_delta", "text": text}),
                 )
@@ -225,11 +224,23 @@ class AgentCore:
             calls = reply.get("tool_calls") or []
             if (not isinstance(calls, list) or any(
                 not isinstance(call, dict) or not isinstance(call.get("id"), str)
+                or not call["id"]
                 or not isinstance(call.get("function"), dict)
                 or not isinstance(call["function"].get("name"), str)
+                or not call["function"]["name"]
                 for call in calls
             )):
                 raise ValueError("模型工具调用格式错误")
+            for call in calls:
+                arguments = call["function"].get("arguments", "{}")
+                if not isinstance(arguments, str):
+                    raise ValueError("模型工具调用参数格式错误")
+                try:
+                    parsed = json.loads(arguments or "{}")
+                except ValueError as exc:
+                    raise ValueError("模型工具调用参数格式错误") from exc
+                if not isinstance(parsed, dict):
+                    raise ValueError("模型工具调用参数格式错误")
             if not calls:
                 if finish_reason == "tool_calls":
                     raise ModelError("model_invalid_response", "模型服务返回了无效的工具调用结果")

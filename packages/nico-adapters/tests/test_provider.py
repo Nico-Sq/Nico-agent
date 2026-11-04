@@ -98,6 +98,53 @@ class ModelAdapterTests(unittest.TestCase):
             asyncio.run(openai_chat.parse_stream(source(), lambda _: None))
         self.assertEqual(caught.exception.code, "model_invalid_response")
 
+    def test_openai_reply_excludes_vendor_message_fields(self):
+        reply = openai_chat.parse({"choices": [{"message": {
+            "role": "assistant", "content": "ready", "refusal": None,
+            "annotations": [{"type": "private"}],
+        }, "finish_reason": "stop"}]})
+        self.assertEqual(reply, {"content": "ready", "finish_reason": "stop", "usage": None})
+
+    def test_openai_stream_rejects_incomplete_tool_arguments(self):
+        async def source():
+            yield json.dumps({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "call-1", "function": {
+                    "name": "lookup", "arguments": '{"query":',
+                },
+            }]}, "finish_reason": None}]})
+            yield json.dumps({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
+            yield "[DONE]"
+
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(openai_chat.parse_stream(source(), lambda _: None))
+        self.assertEqual(caught.exception.code, "model_invalid_response")
+
+    def test_openai_truncated_stream_discards_partial_tool_call(self):
+        async def source():
+            yield json.dumps({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "call-1", "function": {
+                    "name": "lookup", "arguments": '{"query":',
+                },
+            }]}, "finish_reason": None}]})
+            yield json.dumps({"choices": [{"delta": {}, "finish_reason": "length"}]})
+            yield "[DONE]"
+
+        reply = asyncio.run(openai_chat.parse_stream(source(), lambda _: None))
+        self.assertEqual(reply["finish_reason"], "length")
+        self.assertNotIn("tool_calls", reply)
+
+    def test_anthropic_normalizes_tool_calls_and_rejects_bad_input(self):
+        from nico_adapters.models import anthropic
+
+        reply = anthropic.parse({"content": [{
+            "type": "tool_use", "id": "call-1", "name": "lookup", "input": {"id": "one"},
+        }], "stop_reason": "tool_use"})
+        self.assertEqual(reply["tool_calls"][0]["function"]["arguments"], '{"id": "one"}')
+        with self.assertRaises(ValueError):
+            anthropic.parse({"content": [{
+                "type": "tool_use", "id": "call-1", "name": "lookup", "input": [1],
+            }], "stop_reason": "tool_use"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,8 +66,14 @@ def parse_response(data: dict) -> ModelReply:
         if not isinstance(block, dict) or not isinstance(block.get("type"), str):
             raise ValueError("invalid content")
         if block["type"] == "text":
+            if not isinstance(block.get("text"), str):
+                raise ValueError("invalid text")
             text.append(block["text"])
         elif block["type"] == "tool_use":
+            if (not isinstance(block.get("id"), str) or not block["id"]
+                    or not isinstance(block.get("name"), str) or not block["name"]
+                    or not isinstance(block.get("input"), dict)):
+                raise ValueError("invalid tool use")
             calls.append({"id": block["id"], "type": "function", "function": {
                 "name": block["name"], "arguments": json.dumps(block["input"], ensure_ascii=False),
             }})

@@ -268,6 +268,45 @@ class AgentCoreTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "model_output_truncated")
         self.assertEqual(executed, [])
 
+    def test_invalid_tool_arguments_never_reach_executor(self):
+        for arguments in ('{"query":', '[1, 2]', 'null'):
+            with self.subTest(arguments=arguments):
+                reply = FakeModel({"content": None, "tool_calls": [{
+                    "id": "call-1", "function": {"name": "lookup", "arguments": arguments},
+                }], "finish_reason": "tool_calls"})
+                executed = []
+
+                async def execute(call):
+                    executed.append(call)
+                    return {"role": "tool"}
+
+                with self.assertRaises(ValueError):
+                    asyncio.run(AgentCore().run(self.request(reply, execute_tool=execute)))
+                self.assertEqual(executed, [])
+
+    def test_unrecognized_finish_reason_never_executes_tools(self):
+        reply = FakeModel({"content": None, "tool_calls": [{
+            "id": "call-1", "function": {"name": "lookup", "arguments": "{}"},
+        }], "finish_reason": "content_filter"})
+        executed = []
+
+        async def execute(call):
+            executed.append(call)
+            return {"role": "tool"}
+
+        with self.assertRaises(ModelError) as caught:
+            asyncio.run(AgentCore().run(self.request(reply, execute_tool=execute)))
+        self.assertEqual(caught.exception.code, "model_incomplete")
+        self.assertEqual(executed, [])
+
+    def test_complete_only_model_emits_one_delta_when_observed(self):
+        model = FakeModel({"content": "ready", "finish_reason": "stop"})
+        events = []
+        request = self.request(model)
+        request.on_event = events.append
+        self.assertEqual(asyncio.run(AgentCore().run(request)), "ready")
+        self.assertEqual(events, [{"type": "text_delta", "text": "ready"}])
+
     def test_error_classification_keeps_stable_codes(self):
         self.assertEqual(classify_run_error(ModelError("model_busy", "busy")), "model_busy")
         self.assertEqual(classify_run_error(ValueError("bad")), "model_invalid_output")

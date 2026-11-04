@@ -276,10 +276,10 @@ flowchart TB
 
 **文件：**`nico_agent_core/ports.py`、`core.py`、`nico_adapters/models/provider.py`、协议适配器及相关测试。**依赖：**T01。
 
-- [ ] 先写测试：仅支持 complete 的模型仍能运行；支持 stream 的模型按顺序发增量；截断的工具调用绝不执行；无效结束原因返回现有稳定错误。
-- [ ] 用显式 `StreamingModelPort` 或能力声明替换 Core 的动态 `getattr(stream)` 探测；在适配器入口将厂商响应转换成中性结果，禁止厂商字段进入 Core。
+- [x] 先写测试：仅支持 complete 的模型仍能运行；支持 stream 的模型按顺序发增量；截断的工具调用绝不执行；无效结束原因返回现有稳定错误。
+- [x] 用显式 `StreamingModelPort` 或能力声明替换 Core 的动态 `getattr(stream)` 探测；在适配器入口将厂商响应转换成中性结果，禁止厂商字段进入 Core。
 - [ ] 只在外部数据入口解析工具调用 ID、名称、参数结构；内部执行使用已经验证的结构，不在每层反复猜字典形状。
-- [ ] 保持当前 OpenAI Chat、Anthropic 和 demo 的差异与 SSE 对外格式；按协议适配器分别做定向测试。
+- [x] 保持当前 OpenAI Chat、Anthropic 和 demo 的差异与 SSE 对外格式；按协议适配器分别做定向测试。
 
 **验收：**完整/流式契约由类型和测试表达，工具调用截断不执行，原三类模型路径维持既有外部行为。
 
@@ -482,3 +482,10 @@ git status --short --branch
 - **红绿证据：**两个 Engine 使用相同 key 时，隔离测试先得到取消数 0 而失败，改为实例登记后通过。同 Store 两个 Runtime 的实例取消入口测试先因缺少方法失败，补齐后通过。重复 attempt 替换登记的测试在暂时移除守卫后失败，恢复守卫后通过。旧版本、新版本、跨线程、命名空间和结束清理测试也覆盖实例表。
 - **验证：**隔离环境中 Core 定向 22 项、根 `test_core.py` 57 项、Web API `test_api.py` 33 项、扩展 `test_extensions.py` 21 项通过；完整根回归 164 项通过。依赖图检查无环，`git diff --check` 通过；源码检索不再出现模块级运行表或对 Core 类方法的调用。
 - **参考取舍与规则：**Akashic `agent/looping/session_lane.py` 的按会话隔离思路予以调整后采用：Nico 保留 Store 版本认领，仅把进程内取消归属交给 Engine，不引入完整 session lane。Pi `packages/agent/src/agent-loop.ts` 的每次运行局部状态予以采用；nanobot `agent/runner.py` 的 runner/宿主分界保持。类级兼容取消会广播同一 ID 到本进程各 Engine；Web 已改用当前 Store 的实例入口，CLI 仍为单 Store。本项没有跨进程取消能力或 schema 变更；回退可撤回本项代码提交。
+
+### T03（2026-11-04）：模型协议边界，进行中
+
+- **做法与原因：**新增显式 `StreamingModelPort`，Core 按协议选择完整或流式调用；模型工具调用在执行前检查 ID、名称和 JSON 对象参数。OpenAI Chat 适配器仅输出中性字段，流式解析在 `length` 截断时丢弃未完成工具调用；Anthropic 工具输入检查为对象。demo 与现有 SSE 事件格式保持。
+- **红绿证据：**无效工具参数曾到达执行器并继续请求模型；厂商消息字段曾穿透 OpenAI 解析；不完整流式工具参数曾返回错误而不能保留 `length` 原因；Anthropic 非对象工具输入曾通过。这些测试先失败，边界修正后通过。complete-only 模型、流增量顺序与无效结束原因也有定向测试。
+- **验证：**隔离环境 Core 25、adapters 15、旧 Provider 16、完整根回归 164 项通过；依赖图无环，`git diff --check` 通过。未连接真实模型端点。
+- **剩余：**内部执行仍沿用旧字典调用并在 application 再解析参数。下一项 T04 将使用一次验证后的结构统一执行、schema 校验和授权快照，因此本项第三个勾选保持开放。参考 nanobot `providers/base.py` 的结束原因门控予以采用；Pi `packages/agent/src/types.ts` 的中性回复边界、Akashic `agent/provider.py` 的流片段组装只取接口思路，不复制协议实现。
