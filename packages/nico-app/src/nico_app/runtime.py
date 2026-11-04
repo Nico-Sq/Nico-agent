@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from threading import Lock
 from weakref import WeakKeyDictionary
 
@@ -14,11 +15,12 @@ from nico_agent_core import (
     MAX_RUN_SECONDS,
     MAX_TOOL_CALLS,
     AgentCore,
-    AgentRunRequest,
     AgentRunTrace,
     FrozenToolSnapshot,
     ModelPort,
+    PreparedRun,
     RunKey,
+    RunPolicy,
     RunSuperseded,
     ToolBinding,
     classify_run_error,
@@ -209,6 +211,20 @@ class AgentRuntime:
         record(self.store, session, name, result)
         return result
 
+    async def _frozen_tool_snapshot(self, session: dict,
+                                    tools: list[ToolDefinition]) -> FrozenToolSnapshot:
+        catalog = await self._prepare_tools(session, tools)
+        return FrozenToolSnapshot(tuple(
+            ToolBinding(
+                definition,
+                lambda args, name=definition["function"]["name"]:
+                    self._execute_validated_tool(session, name, args, catalog),
+                parallel=catalog.is_read_only(definition["function"]["name"]),
+            ) for definition in tools
+        ), denied_write_names=catalog.external_names() - {
+            definition["function"]["name"] for definition in tools
+        }, on_denied_write=lambda name, result: record(self.store, session, name, result))
+
     async def run(self, session: dict,
                   result_handler: Callable[[dict, str], dict] | None = None,
                   on_event: RunEventSink | None = None) -> dict:
@@ -238,59 +254,33 @@ class AgentRuntime:
                 ) from exc
             trace.context_chars = sum(len(item["content"]) for item in context)
             tools = self._tools(kind)
-            snapshot = None
-
-            async def prepare_tools() -> None:
-                nonlocal snapshot
-                catalog = await self._prepare_tools(session, tools)
-                snapshot = FrozenToolSnapshot(tuple(
-                    ToolBinding(
-                        definition,
-                        lambda args, name=definition["function"]["name"]:
-                            self._execute_validated_tool(session, name, args, catalog),
-                        parallel=catalog.is_read_only(definition["function"]["name"]),
-                    ) for definition in tools
-                ), denied_write_names=catalog.external_names() - {
-                    definition["function"]["name"] for definition in tools
-                })
-                tools[:] = snapshot.definitions
-
-            async def execute_tool(call: dict) -> dict:
-                name = call["function"]["name"]
-                result = await snapshot.execute(name, request.parsed_arguments[call["id"]])
-                if result.get("error") == "tool_write_disabled":
-                    record(self.store, session, name, result)
-                return tool_message(call, result)
-
-            request = AgentRunRequest(
-                model=self.provider,
-                messages=context,
-                tools=tools,
+            try:
+                async with asyncio.timeout(self._remaining_run_seconds(trace)):
+                    snapshot = await self._frozen_tool_snapshot(session, tools)
+            except TimeoutError as exc:
+                raise ModelError("run_timeout", "本次模型运行超时", 504) from exc
+            prepared = PreparedRun(
+                key=run_key, model=self.provider, messages=tuple(context), tools=snapshot,
                 is_current=lambda: self.store.run_current(session["id"], session["version"]),
-                execute_tool=execute_tool,
-                can_execute_in_parallel=lambda call: snapshot.can_execute_in_parallel(
-                    call["function"]["name"]),
-                prepare_tools=prepare_tools,
-                trace=trace,
-                on_event=on_event,
-                key=run_key,
+                policy=RunPolicy(timeout_seconds=self._remaining_run_seconds(trace)),
+                on_event=on_event, trace=trace,
             )
             retried = False
             try:
-                content = await self.core.run(request)
+                content = (await self.core.execute(prepared)).content
             except ModelError as exc:
                 if (kind != "interview" or exc.code != "model_invalid_response"
-                        or any(name not in READ_ONLY_TOOLS for name in trace.tool_names)):
+                        or any(not snapshot.can_execute_in_parallel(name) for name in trace.tool_names)):
                     raise
                 retried = True
-                content = await self._retry_interview_response(request, trace, exc)
+                content = await self._retry_interview_response(prepared, trace, exc)
             try:
                 result = self._finalize_run_result(session, content, result_handler)
             except ValueError as exc:
                 if (kind != "interview" or retried
-                        or any(name not in READ_ONLY_TOOLS for name in trace.tool_names)):
+                        or any(not snapshot.can_execute_in_parallel(name) for name in trace.tool_names)):
                     raise
-                content = await self._retry_interview_response(request, trace, exc)
+                content = await self._retry_interview_response(prepared, trace, exc)
                 result = self._finalize_run_result(session, content, result_handler)
             trace.outcome = "interrupted" if result.get("interrupted") else "completed"
             return result
@@ -324,26 +314,28 @@ class AgentRuntime:
                     session["id"], session["version"],
                 )
 
-    async def _retry_interview_response(self, request: AgentRunRequest,
-                                        trace: AgentRunTrace,
-                                        error: Exception) -> str:
+    @staticmethod
+    def _remaining_run_seconds(trace: AgentRunTrace) -> float:
         remaining = MAX_RUN_SECONDS - (time.perf_counter() - trace.started_at)
         if remaining <= 0:
-            raise ModelError("run_timeout", "本次模型运行超时", 504) from error
-        request.messages.append(interview_retry_message(error))
-        if request.key is not None:
-            request.key = RunKey(request.key.namespace, request.key.session_id,
-                                 request.key.version, request.key.attempt + 1)
-            trace.key = request.key
+            raise ModelError("run_timeout", "本次模型运行超时", 504)
+        return remaining
+
+    async def _retry_interview_response(self, prepared: PreparedRun,
+                                        trace: AgentRunTrace,
+                                        error: Exception) -> str:
+        remaining = self._remaining_run_seconds(trace)
+        retry_key = RunKey(prepared.key.namespace, prepared.key.session_id,
+                           prepared.key.version, prepared.key.attempt + 1)
+        trace.key = retry_key
         trace.error_code = None
         trace.outcome = "running"
         logger.warning("Retrying interview model response once: code=%s",
                        classify_run_error(error))
-        try:
-            async with asyncio.timeout(remaining):
-                return await self.core.run(request)
-        except TimeoutError as exc:
-            raise ModelError("run_timeout", "本次模型运行超时", 504) from exc
+        retry = replace(prepared, key=retry_key,
+                        messages=(*prepared.messages, interview_retry_message(error)),
+                        policy=replace(prepared.policy, timeout_seconds=remaining))
+        return (await self.core.execute(retry)).content
 
     def _finalize_run_result(self, session: dict, raw: str,
                              result_handler: Callable[[dict, str], dict] | None) -> dict:

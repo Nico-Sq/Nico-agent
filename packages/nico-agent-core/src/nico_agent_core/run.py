@@ -59,6 +59,7 @@ class PreparedRun:
     policy: RunPolicy = field(default_factory=RunPolicy)
     on_event: RunEventSink | None = None
     observer: RunObserver | None = None
+    trace: AgentRunTrace | None = None
 
 
 @dataclass(frozen=True)

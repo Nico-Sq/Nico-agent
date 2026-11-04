@@ -22,6 +22,54 @@ def run_demo(coroutine):
 
 
 class CoreTests(unittest.TestCase):
+    def test_chat_runtime_uses_prepared_run_contract(self):
+        runtime = AgentRuntime(self.store, Provider())
+        chat = self.store.create("chat")
+        running = self.store.claim_run(chat["id"], "chat", "active", "你好")
+        observed = []
+        original = runtime.core.execute
+
+        async def capture(prepared):
+            observed.append(prepared)
+            return await original(prepared)
+
+        runtime.core.execute = capture
+        result = run_demo(runtime.run(running))
+        self.assertIn("演示模式已收到", result["message"])
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0].key.namespace, "chat")
+
+    def test_interview_retry_uses_prepared_run_attempt_one(self):
+        class RepairingProvider:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"content": "invalid JSON", "finish_reason": "stop"}
+                return {"content": json.dumps({
+                    "feedback": "", "question": "请介绍你自己。", "finished": False,
+                    "evidence": [], "summary": "",
+                }, ensure_ascii=False), "finish_reason": "stop"}
+
+        provider = RepairingProvider()
+        runtime = AgentRuntime(self.store, provider)
+        interview = self.store.create("interview", "后端开发")
+        running = self.store.claim_run(interview["id"], "interview", "new")
+        observed = []
+        original = runtime.core.execute
+
+        async def capture(prepared):
+            observed.append(prepared)
+            return await original(prepared)
+
+        runtime.core.execute = capture
+        result = run_demo(runtime.run(running))
+        self.assertEqual(result["session"]["status"], "awaiting_answer")
+        self.assertEqual([item.key.attempt for item in observed], [0, 1])
+        self.assertIs(observed[0].tools, observed[1].tools)
+
     def setUp(self):
         temp_root = Path(__file__).parent / ".tmp"
         temp_root.mkdir(exist_ok=True)

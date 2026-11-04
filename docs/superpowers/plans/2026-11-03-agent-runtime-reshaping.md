@@ -311,10 +311,10 @@ flowchart TB
 
 **文件：**`nico_app/runtime.py`、`nico_application/use_cases.py`、`nico_application/context.py` 的必要桥接，Web/CLI 不改公开路径；测试聊天单元、API、CLI。**依赖：**T02—T05。
 
-- [ ] 先写行为测试：已确认经历与明确授权材料可读取；未授权材料不能读；新用户消息使旧回复失效；失败后 `/retry` 复用原用户消息；工具事件对 Web 可见。
-- [ ] 聊天宿主准备提示、最近消息、固定备注和授权资源，生成 `PreparedRun`；调用引擎取得 `RunOutcome`；用现有 Store 版本提交结果。
-- [ ] 把只用于聊天的结果处理留在 application/host；从 `nico_app/runtime.py` 删除因此不再需要的通用工具循环/事件分支。
-- [ ] 对 Web JSON、Web SSE、CLI 各走一次现有端到端测试。
+- [x] 先写行为测试：已确认经历与明确授权材料可读取；未授权材料不能读；新用户消息使旧回复失效；失败后 `/retry` 复用原用户消息；工具事件对 Web 可见。
+- [x] 聊天宿主准备提示、最近消息、固定备注和授权资源，生成 `PreparedRun`；调用引擎取得 `RunOutcome`；用现有 Store 版本提交结果。
+- [x] 把只用于聊天的结果处理留在 application/host；从 `nico_app/runtime.py` 删除因此不再需要的通用工具循环/事件分支。
+- [x] 对 Web JSON、Web SSE、CLI 各走一次现有端到端测试。
 
 **验收：**聊天通过新契约运行，用户可见行为与 T00 基线一致；Core 源码无聊天专用字段。
 
@@ -322,10 +322,10 @@ flowchart TB
 
 **文件：**`nico_app/runtime.py`、`nico_application/interview_use_cases.py`、`nico_application/context.py`、`nico_domain/interview.py` 的必要调整；测试面试 API/CLI/领域规则。**依赖：**T06。
 
-- [ ] 先写行为测试：首题、普通回答、最后一题、跳题、暂停/恢复、回答更正、证据原文错误、报告与复练均保持既有结果。
-- [ ] 面试宿主准备岗位目标、本场授权材料、面试进度和提示词版本；调用同一引擎；业务层解析、校验并提交 JSON 结果。
-- [ ] 只在面试输出校验失败且没有不确定副作用时执行现有单次重试；重试使用 attempt 1、同一授权快照和业务运行剩余时限，失败的用户回答保留供恢复。
-- [ ] 去掉 Core 中任何题号、feedback、evidence 或报告概念；检查旧 `AgentRuntime` 的直调兼容路径是否仍被测试/公开入口使用，有使用者则提供明确转发。
+- [x] 先写行为测试：首题、普通回答、最后一题、跳题、暂停/恢复、回答更正、证据原文错误、报告与复练均保持既有结果。
+- [x] 面试宿主准备岗位目标、本场授权材料、面试进度和提示词版本；调用同一引擎；业务层解析、校验并提交 JSON 结果。
+- [x] 只在面试输出校验失败且没有不确定副作用时执行现有单次重试；重试使用 attempt 1、同一授权快照和业务运行剩余时限，失败的用户回答保留供恢复。
+- [x] 去掉 Core 中任何题号、feedback、evidence 或报告概念；检查旧 `AgentRuntime` 的直调兼容路径是否仍被测试/公开入口使用，有使用者则提供明确转发。
 
 **验收：**面试全链路使用同一通用引擎，报告仅由已提交业务结果产生，聊天数据不进入面试上下文。
 
@@ -503,3 +503,10 @@ git status --short --branch
 - **红绿证据：**观察者序号/终态测试先无事件失败；Web 有界队列测试先因类型缺失失败；过大单个增量先能进入观察者和队列，增加边界后拒绝或截断。面试错误 SSE 测试验证最后为 `error` 且全流没有 `done`。
 - **验证：**隔离环境 Core 32、Web 包 4、Web API 34、完整根回归 165 项通过；依赖图无环，`git diff --check` 通过。既有运行日志仍只存状态、用量和工具名称；根测试覆盖不含消息正文。未连接真实模型端点。
 - **参考取舍与风险：**Pi `packages/agent/src/agent-loop.ts` 的分层事件发射予以简化采用；nanobot `agent/runner.py` 的进度回调和 Akashic `agent/looping/core.py` 的观察路径不直接复制。SSE 在消费者长期落后时可能丢失早期增量，页面在 `done` 后按既有流程重新读取已提交结果；终态不会因此丢失。引擎 `completed` 表示该次模型循环成功，业务 JSON 校验仍由宿主负责。
+
+### T06—T07（2026-11-04）：聊天和面试宿主接入
+
+- **做法与原因：**`AgentRuntime.run` 现在为两个业务宿主统一组装 `PreparedRun`：原 application 上下文仍负责聊天最近消息/备注/材料和面试目标/进度/提示版本；授权工具目录在本轮冻结，Core 返回 `RunOutcome`，宿主使用既有 Store 版本提交。移除 Runtime 运行主路径的旧请求组装与工具循环闭包；保留 `_execute_tool` 等私有直调兼容方法，现有测试仍直接使用。`commit_chat_result` 与 `commit_interview_result` 继续由 application 决定业务状态和报告。
+- **红绿证据：**聊天和面试入口测试分别先观察到零次 `AgentCore.execute` 调用而失败，迁移后通过。面试重试测试确认 attempt 0、1 共用同一快照。既有 Core/API/CLI 测试覆盖聊天授权、旧回复失效、失败重试以及面试首题、回答、更正、跳题、暂停恢复、报告、复练和证据原文拒绝。
+- **验证：**隔离环境根 Core 59、Web API 34、MCP 12、CLI 5、application 27、domain 11 项通过；完整根回归 167 项通过，依赖图无环，`git diff --check` 通过。源码检索 Core 无题号、feedback、evidence、报告、Store 或固定 chat/interview 分支。
+- **参考取舍与风险：**Pi `packages/agent/src/agent-loop.ts` 的宿主消息复制、nanobot `agent/runner.py` 的运行规格边界、Akashic `bootstrap/tools.py` 的组合根定位予以调整后采用；Nico 的业务提示和工具描述继续留在 application 资源。首次工具发现受业务总时限约束；面试重试仅在已用工具均为快照中的只读工具时进行，重试沿用相同快照且时限取剩余值。真实模型输出的业务质量仍需人工评价。

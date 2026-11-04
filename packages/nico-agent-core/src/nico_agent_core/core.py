@@ -117,7 +117,7 @@ class AgentCore:
             can_execute_in_parallel=lambda call: prepared.tools.can_execute_in_parallel(
                 call["function"]["name"]),
             prepare_tools=prepare_tools,
-            trace=AgentRunTrace(version=prepared.key.version, key=prepared.key),
+            trace=prepared.trace or AgentRunTrace(version=prepared.key.version, key=prepared.key),
             on_event=prepared.on_event,
             observer=prepared.observer,
             policy=prepared.policy,

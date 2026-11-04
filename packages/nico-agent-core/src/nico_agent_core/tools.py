@@ -17,9 +17,11 @@ class ToolBinding:
 
 class FrozenToolSnapshot:
     def __init__(self, bindings: tuple[ToolBinding, ...],
-                 denied_write_names: frozenset[str] = frozenset()):
+                 denied_write_names: frozenset[str] = frozenset(),
+                 on_denied_write: Callable[[str, dict], None] | None = None):
         self._bindings = {}
         self._denied_write_names = denied_write_names
+        self._on_denied_write = on_denied_write
         for binding in bindings:
             definition = json.loads(json.dumps(binding.definition, ensure_ascii=False))
             function = definition.get("function")
@@ -40,8 +42,12 @@ class FrozenToolSnapshot:
     async def execute(self, name: str, args: dict) -> dict:
         binding = self._bindings.get(name)
         if binding is None:
-            return {"error": ("tool_write_disabled" if name in self._denied_write_names
-                              else "tool_not_allowed")}
+            if name in self._denied_write_names:
+                result = {"error": "tool_write_disabled"}
+                if self._on_denied_write is not None:
+                    self._on_denied_write(name, result)
+                return result
+            return {"error": "tool_not_allowed"}
         definition, handler, _ = binding
         try:
             jsonschema.validate(args, json.loads(definition)["function"]["parameters"])
