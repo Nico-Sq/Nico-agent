@@ -11,6 +11,7 @@ from nico_contracts.events import MAX_RUN_TOKENS, RunEventSink
 from nico_contracts.messages import AgentMessage
 
 from .ports import ModelPort, ToolSnapshot
+from .events import RunObserver
 
 if TYPE_CHECKING:
     from .core import AgentRunTrace
@@ -57,6 +58,7 @@ class PreparedRun:
     is_current: Callable[[], bool]
     policy: RunPolicy = field(default_factory=RunPolicy)
     on_event: RunEventSink | None = None
+    observer: RunObserver | None = None
 
 
 @dataclass(frozen=True)

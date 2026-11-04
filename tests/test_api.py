@@ -97,6 +97,25 @@ class InterviewApiTests(unittest.TestCase):
             "awaiting_answer",
         )
 
+    def test_interview_sse_does_not_emit_done_when_output_validation_fails(self):
+        class InvalidProvider:
+            async def complete(self, messages, tools):
+                return {"content": "not interview JSON", "finish_reason": "stop"}
+
+        main.runtime = AgentRuntime(main.store, InvalidProvider())
+        interview = self.client.post("/api/interview/sessions", json={
+            "goal": "后端开发", "max_questions": 1,
+        }).json()
+        response = self.client.post(
+            f"/api/interview/sessions/{interview['id']}/start",
+            headers={"Accept": "text/event-stream"},
+        )
+        events = [json.loads(line[6:]) for line in response.text.splitlines()
+                  if line.startswith("data: ")]
+        self.assertEqual(events[0]["type"], "started")
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertNotIn("done", [event["type"] for event in events])
+
     def test_interview_sse_flow_preserves_answer_and_report_evidence(self):
         answer = "我负责接口实现，但没有配置事务，也没有参与系统架构设计。"
 

@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -14,6 +15,7 @@ from nico_contracts.messages import AgentMessage
 from nico_contracts.tools import ToolDefinition
 
 from .ports import ModelPort, StreamingModelPort
+from .events import EngineEvent, RunObserver
 from .run import (
     MAX_MODEL_INPUT_CHARS,
     MAX_MODEL_OUTPUT_CHARS,
@@ -41,6 +43,7 @@ class AgentRunRequest:
     prepare_tools: Callable[[], Awaitable[None]]
     trace: "AgentRunTrace" = field(default_factory=lambda: AgentRunTrace())
     on_event: RunEventSink | None = None
+    observer: RunObserver | None = None
     policy: RunPolicy = field(default_factory=RunPolicy)
     key: RunKey | None = None
     parsed_arguments: dict[str, dict] = field(default_factory=dict)
@@ -60,6 +63,8 @@ class AgentRunTrace:
     outcome: str = "failed"
     error_code: str | None = None
     started_at: float = field(default_factory=time.perf_counter)
+    sequence: int = 0
+    streamed_chars: int = 0
 
     def event(self) -> dict:
         return run_event(
@@ -114,6 +119,7 @@ class AgentCore:
             prepare_tools=prepare_tools,
             trace=AgentRunTrace(version=prepared.key.version, key=prepared.key),
             on_event=prepared.on_event,
+            observer=prepared.observer,
             policy=prepared.policy,
             key=prepared.key,
             parsed_arguments=parsed_arguments,
@@ -161,6 +167,8 @@ class AgentCore:
 
     async def run(self, request: AgentRunRequest) -> str:
         task = asyncio.current_task()
+        request.trace.sequence = 0
+        request.trace.streamed_chars = 0
         if request.key is not None:
             self.track_session_run(request.key, task)
         try:
@@ -187,6 +195,7 @@ class AgentCore:
                 raise error from exc
             if len(content) > request.policy.max_output_chars:
                 raise ValueError("模型输出超过长度上限")
+            request.trace.outcome = "completed"
             return content
         except RunSuperseded:
             request.trace.outcome = "interrupted"
@@ -200,19 +209,43 @@ class AgentCore:
             request.trace.error_code = classify_run_error(exc)
             raise
         finally:
+            self._emit(request, request.trace.outcome, error_code=request.trace.error_code)
             if request.key is not None:
                 self.finish_session_run(request.key, task)
+
+    def _emit(self, request: AgentRunRequest, event_type: str, *, text: str = "",
+              name: str = "", error_code: str | None = None) -> None:
+        if event_type == "text_delta":
+            request.trace.streamed_chars += len(text)
+            if request.trace.streamed_chars > request.policy.max_output_chars:
+                raise ValueError("模型输出超过长度上限")
+        request.trace.sequence += 1
+        event = EngineEvent(request.key, request.trace.sequence, event_type,
+                            text=text, name=name, error_code=error_code)
+        if request.observer is not None:
+            try:
+                request.observer(event)
+            except Exception:
+                logging.getLogger(__name__).warning("Agent run observer failed")
+        if request.on_event is not None and event_type in ("text_delta", "tool_start"):
+            update = ({"type": "text_delta", "text": text} if event_type == "text_delta"
+                      else {"type": "tool_start", "name": name})
+            try:
+                request.on_event(update)
+            except Exception:
+                logging.getLogger(__name__).warning("Agent run update subscriber failed")
 
     async def _model_loop(self, request: AgentRunRequest) -> str:
         for _ in range(request.policy.max_turns):
             if not request.is_current():
                 raise RunSuperseded()
             request.trace.usage.request_count += 1
-            streaming = request.on_event is not None and isinstance(request.model, StreamingModelPort)
+            streaming = (request.on_event is not None or request.observer is not None) and isinstance(
+                request.model, StreamingModelPort)
             if streaming:
                 reply = await request.model.stream(
                     request.messages, request.tools,
-                    lambda text: request.on_event({"type": "text_delta", "text": text}),
+                    lambda text: self._emit(request, "text_delta", text=text),
                 )
             else:
                 reply = await request.model.complete(request.messages, request.tools)
@@ -253,17 +286,16 @@ class AgentCore:
                 content = reply.get("content")
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("模型未返回有效内容")
-                if request.on_event is not None and not streaming:
-                    request.on_event({"type": "text_delta", "text": content})
+                if not streaming:
+                    self._emit(request, "text_delta", text=content)
                 return content.strip()
             if request.trace.usage.total_tokens >= request.policy.max_reported_tokens:
                 raise ModelError("run_token_limit", "本次模型运行已达到用量上限")
             if len(request.trace.tool_names) + len(calls) > request.policy.max_tool_calls:
                 raise ValueError("本次运行的工具调用超过上限")
             request.trace.tool_names.extend(call["function"]["name"] for call in calls)
-            if request.on_event is not None:
-                for call in calls:
-                    request.on_event({"type": "tool_start", "name": call["function"]["name"]})
+            for call in calls:
+                self._emit(request, "tool_start", name=call["function"]["name"])
             request.messages.append({"role": "assistant", "content": reply.get("content"),
                                      "tool_calls": calls})
             request.messages.extend(await self.execute_tools(

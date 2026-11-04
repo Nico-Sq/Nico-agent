@@ -13,6 +13,7 @@ from .core import (
 )
 from .ports import ModelPort, StreamingModelPort, ToolSnapshot
 from .run import PreparedRun, RunKey, RunOutcome, RunPolicy
+from .events import EngineEvent, RunObserver
 from .tools import FrozenToolSnapshot, ToolBinding
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "MAX_RUN_SECONDS", "MAX_TOOL_CALLS",
     "RunKey", "RunPolicy", "PreparedRun", "RunOutcome", "StreamingModelPort", "ToolSnapshot",
     "FrozenToolSnapshot", "ToolBinding",
+    "EngineEvent", "RunObserver",
 ]

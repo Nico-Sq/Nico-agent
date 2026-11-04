@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable
 
 from fastapi import Request
@@ -71,42 +72,77 @@ def wants_sse(request: Request) -> bool:
     return "text/event-stream" in request.headers.get("accept", "").lower()
 
 
+class BoundedRunEvents:
+    """Bound pending SSE updates while preserving a terminal and close marker."""
+
+    def __init__(self, max_events: int = 64):
+        if max_events < 2:
+            raise ValueError("SSE queue needs room for terminal and close events")
+        self._events = deque()
+        self._ready = asyncio.Event()
+        self._limit = max_events
+
+    @property
+    def size(self) -> int:
+        return len(self._events)
+
+    def put(self, event: dict | None) -> None:
+        if event is not None and event.get("type") == "text_delta":
+            event = {"type": "text_delta", "text": event["text"][:12_000]}
+        if (event is not None and event.get("type") == "text_delta"
+                and self._events and isinstance(self._events[-1], dict)
+                and self._events[-1].get("type") == "text_delta"
+                and len(self._events[-1]["text"]) + len(event["text"]) <= 12_000):
+            self._events[-1] = {"type": "text_delta",
+                                "text": self._events[-1]["text"] + event["text"]}
+        else:
+            if len(self._events) >= self._limit:
+                self._events.popleft()
+            self._events.append(event)
+        self._ready.set()
+
+    async def get(self) -> dict | None:
+        while not self._events:
+            self._ready.clear()
+            await self._ready.wait()
+        return self._events.popleft()
+
+
 def stream_response(operation: Callable[[RunEventSink], Awaitable[dict]]) -> StreamingResponse:
     async def events():
-        queue = asyncio.Queue()
-        finished = object()
+        queue = BoundedRunEvents()
 
         async def run():
             try:
-                await operation(queue.put_nowait)
-                queue.put_nowait({"type": "done"})
+                await operation(queue.put)
+                queue.put({"type": "done"})
             except UseCaseError as exc:
                 status = {"not_found": 404, "conflict": 409, "invalid": 422}[exc.kind]
-                queue.put_nowait({"type": "error", "detail": str(exc), "code": "request_rejected",
+                queue.put({"type": "error", "detail": str(exc), "code": "request_rejected",
                                   "status": status})
             except ModelError as exc:
                 logger.warning("Model run failed: code=%s", exc.code)
-                queue.put_nowait({"type": "error", "detail": str(exc), "code": exc.code,
+                queue.put({"type": "error", "detail": str(exc), "code": exc.code,
                                   "status": exc.status_code})
             except ValueError:
                 logger.warning("Model run failed: code=model_invalid_output")
-                queue.put_nowait({"type": "error", "detail": "模型输出或上下文不符合要求",
+                queue.put({"type": "error", "detail": "模型输出或上下文不符合要求",
                                   "code": "model_invalid_output", "status": 502})
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.error("Model run failed: code=model_run_failed")
-                queue.put_nowait({"type": "error", "detail": "模型运行失败，请稍后重试",
+                queue.put({"type": "error", "detail": "模型运行失败，请稍后重试",
                                   "code": "model_run_failed", "status": 502})
             finally:
-                queue.put_nowait(finished)
+                queue.put(None)
 
         task = asyncio.create_task(run())
         try:
             yield "data: {\"type\":\"started\"}\n\n"
             while True:
                 event = await queue.get()
-                if event is finished:
+                if event is None:
                     break
                 yield f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
         finally:

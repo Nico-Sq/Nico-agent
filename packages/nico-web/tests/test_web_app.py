@@ -8,9 +8,33 @@ from fastapi.testclient import TestClient
 from nico_web import create_app
 from nico_web.app import _MaterialUploadBodyLimitMiddleware
 from nico_web.backend import WebBackend
+from nico_web.workflow_support import BoundedRunEvents
 
 
 class WebAppTests(unittest.TestCase):
+    def test_slow_sse_consumer_keeps_bounded_queue_and_terminal(self):
+        async def scenario():
+            events = BoundedRunEvents(max_events=3)
+            for index in range(30):
+                events.put({"type": "text_delta", "text": str(index)})
+                events.put({"type": "tool_start", "name": "lookup"})
+            events.put({"type": "done"})
+            events.put(None)
+            self.assertLessEqual(events.size, 3)
+            return [await events.get() for _ in range(events.size)]
+
+        pending = asyncio.run(scenario())
+        self.assertIn({"type": "done"}, pending)
+        self.assertIsNone(pending[-1])
+
+    def test_single_sse_delta_is_bounded(self):
+        async def scenario():
+            events = BoundedRunEvents(max_events=2)
+            events.put({"type": "text_delta", "text": "x" * 20_000})
+            return await events.get()
+
+        self.assertLessEqual(len(asyncio.run(scenario())["text"]), 12_000)
+
     def test_factory_serves_package_resources_and_api(self):
         provider = SimpleNamespace(mode="demo", model="demo", configuration_error=lambda: None)
         extracted = []

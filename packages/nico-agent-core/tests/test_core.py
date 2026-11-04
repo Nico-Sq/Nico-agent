@@ -327,6 +327,73 @@ class AgentCoreTests(unittest.TestCase):
 
 
 class PreparedRunContractTests(unittest.TestCase):
+    def test_observer_sequences_updates_and_one_terminal_per_attempt(self):
+        observed, web = [], []
+        request = AgentCoreTests().request(FakeModel({"content": "ready", "finish_reason": "stop"}))
+        request.key = nico_agent_core.RunKey("example", "one", 1)
+        request.observer = observed.append
+        request.on_event = web.append
+        self.assertEqual(asyncio.run(AgentCore().run(request)), "ready")
+        self.assertEqual([event.sequence for event in observed], [1, 2])
+        self.assertEqual([event.type for event in observed], ["text_delta", "completed"])
+        self.assertEqual(web, [{"type": "text_delta", "text": "ready"}])
+        self.assertEqual(observed[-1].key, request.key)
+
+    def test_observer_failure_cannot_change_tool_execution(self):
+        call = {"id": "one", "function": {"name": "lookup", "arguments": "{}"}}
+        model = FakeModel({"content": None, "tool_calls": [call],
+                           "finish_reason": "tool_calls"},
+                          {"content": "done", "finish_reason": "stop"})
+        executed = []
+
+        async def execute(call):
+            executed.append(call["id"])
+            return {"role": "tool", "tool_call_id": call["id"], "content": "{}"}
+
+        request = AgentCoreTests().request(model, execute_tool=execute)
+        request.observer = lambda _: 1 / 0
+        self.assertEqual(asyncio.run(AgentCore().run(request)), "done")
+        self.assertEqual(executed, ["one"])
+
+    def test_failed_and_cancelled_attempts_emit_one_terminal(self):
+        failed = []
+        request = AgentCoreTests().request(FakeModel({"content": "", "finish_reason": "stop"}))
+        request.observer = failed.append
+        with self.assertRaises(ValueError):
+            asyncio.run(AgentCore().run(request))
+        self.assertEqual([event.type for event in failed], ["failed"])
+
+        async def scenario():
+            observed = []
+            model = WaitingModel()
+            request = AgentCoreTests().request(model)
+            request.observer = observed.append
+            task = asyncio.create_task(AgentCore().run(request))
+            await model.started.wait()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return observed
+
+        cancelled = asyncio.run(scenario())
+        self.assertEqual([event.type for event in cancelled], ["cancelled"])
+
+    def test_stream_delta_over_output_budget_fails_before_delivery(self):
+        class LargeStream:
+            async def complete(self, messages, tools):
+                raise AssertionError("stream expected")
+
+            async def stream(self, messages, tools, on_delta):
+                on_delta("x" * 6)
+                return {"content": "x" * 6, "finish_reason": "stop"}
+
+        observed = []
+        request = AgentCoreTests().request(LargeStream())
+        request.policy = nico_agent_core.RunPolicy(max_output_chars=5)
+        request.observer = observed.append
+        with self.assertRaises(ValueError):
+            asyncio.run(AgentCore().run(request))
+        self.assertEqual([event.type for event in observed], ["failed"])
+
     def test_frozen_tool_snapshot_rejects_unknown_and_invalid_calls(self):
         calls = [
             {"id": "unknown", "function": {"name": "other", "arguments": "{}"}},
