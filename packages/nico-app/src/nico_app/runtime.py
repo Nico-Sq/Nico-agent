@@ -4,6 +4,8 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from threading import Lock
+from weakref import WeakKeyDictionary
 
 import jsonschema
 from nico_agent_core import (
@@ -15,6 +17,7 @@ from nico_agent_core import (
     AgentRunRequest,
     AgentRunTrace,
     ModelPort,
+    RunKey,
     RunSuperseded,
     classify_run_error,
 )
@@ -47,6 +50,9 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
+    _cores_by_store: WeakKeyDictionary[Store, AgentCore] = WeakKeyDictionary()
+    _cores_lock = Lock()
+
     def __init__(self, store: Store, provider: ModelPort, mcp: MCPServers | None = None,
                  plugins: LocalPlugins | None = None,
                  tool_adapters: list[ToolAdapterPort] | None = None,
@@ -58,12 +64,23 @@ class AgentRuntime:
         self.tool_adapters = (list(tool_adapters) if tool_adapters is not None else
                               [adapter for adapter in (mcp, plugins) if adapter is not None])
         self.tool_catalog = tool_catalog or ToolCatalog()
-        self.core = AgentCore()
+        with self._cores_lock:
+            core = self._cores_by_store.get(store)
+            if core is None:
+                core = AgentCore()
+                self._cores_by_store[store] = core
+            self.core = core
 
     @classmethod
     def cancel_session_runs(cls, session_id: str, before_version: int | None = None) -> int:
-        """Cancel tasks still working on a session after its version changed."""
-        return AgentCore.cancel_session_runs(session_id, before_version)
+        """Compatibility cancellation across local runtimes; Web uses the owned method."""
+        with cls._cores_lock:
+            cores = tuple(cls._cores_by_store.values())
+        return sum(core.cancel_session_runs(session_id, before_version) for core in cores)
+
+    def cancel_owned_session_runs(self, session_id: str,
+                                  before_version: int | None = None) -> int:
+        return self.core.cancel_session_runs(session_id, before_version)
 
     def build_context(self, session: dict) -> list[AgentMessage]:
         """Delegate prompt assembly to the context module."""
@@ -171,10 +188,10 @@ class AgentRuntime:
             if current and current["status"] == "running" and current["version"] == session["version"]:
                 return {"in_progress": True, "session": current}
             return {"interrupted": True, "session": current}
-        task = asyncio.current_task()
-        AgentCore.track_session_run(session["id"], session["version"], task)
+        run_key = RunKey(kind, session["id"], session["version"])
         trace = AgentRunTrace(
             version=session["version"],
+            key=run_key,
             provider=getattr(self.provider, "mode", "custom"),
             model=getattr(self.provider, "model", ""),
         )
@@ -207,6 +224,7 @@ class AgentRuntime:
                 prepare_tools=prepare_tools,
                 trace=trace,
                 on_event=on_event,
+                key=run_key,
             )
             retried = False
             try:
@@ -249,7 +267,6 @@ class AgentRuntime:
             self.store.fail_run(session["id"], session["version"], kind, trace.error_code)
             raise
         finally:
-            AgentCore.finish_session_run(session["id"], session["version"], task)
             try:
                 self.store.event(session["id"], "model_run", trace.event())
             except Exception:
@@ -265,6 +282,10 @@ class AgentRuntime:
         if remaining <= 0:
             raise ModelError("run_timeout", "本次模型运行超时", 504) from error
         request.messages.append(interview_retry_message(error))
+        if request.key is not None:
+            request.key = RunKey(request.key.namespace, request.key.session_id,
+                                 request.key.version, request.key.attempt + 1)
+            trace.key = request.key
         trace.error_code = None
         trace.outcome = "running"
         logger.warning("Retrying interview model response once: code=%s",

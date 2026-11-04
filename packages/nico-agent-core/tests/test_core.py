@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import nico_agent_core
 from nico_agent_core import AgentCore, AgentRunRequest, RunSuperseded, classify_run_error
-import nico_agent_core.core as agent_core_module
 from nico_contracts.errors import ModelError
 
 
@@ -18,6 +17,25 @@ class FakeModel:
     async def complete(self, messages, tools):
         self.calls += 1
         return self.replies.pop(0)
+
+
+class EmptyTools:
+    definitions = ()
+
+    async def execute(self, name, args):
+        raise AssertionError("no tool was offered")
+
+    def can_execute_in_parallel(self, name):
+        return True
+
+
+class WaitingModel:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def complete(self, messages, tools):
+        self.started.set()
+        await asyncio.Event().wait()
 
 
 class AgentCoreTests(unittest.TestCase):
@@ -59,10 +77,13 @@ class AgentCoreTests(unittest.TestCase):
         finish_started = Event()
         finish_completed = Event()
         errors = []
+        engine = AgentCore()
+        first_key = nico_agent_core.RunKey("chat", "session", 1)
+        second_key = nico_agent_core.RunKey("chat", "session", 2)
 
         class GatedRuns(dict):
-            def values(self):
-                iterator = iter(super().values())
+            def items(self):
+                iterator = iter(super().items())
                 first = next(iterator)
                 values_started.set()
                 if not continue_values.wait(1):
@@ -85,7 +106,7 @@ class AgentCoreTests(unittest.TestCase):
                 return ClosedLoop()
 
         first_task, second_task = FinishedTask(), FinishedTask()
-        active_runs = GatedRuns({1: first_task, 2: second_task})
+        active_runs = GatedRuns({first_key: first_task, second_key: second_task})
 
         def capture_error(action):
             try:
@@ -95,15 +116,15 @@ class AgentCoreTests(unittest.TestCase):
 
         def finish():
             finish_started.set()
-            AgentCore.finish_session_run("session", 2, second_task)
+            engine.finish_session_run(second_key, second_task)
             finish_completed.set()
 
         cancel_thread = Thread(target=lambda: capture_error(
-            lambda: AgentCore.cancel_session_runs("session"),
+            lambda: engine.cancel_session_runs("session"),
         ))
         finish_thread = Thread(target=finish)
         finish_thread_started = False
-        with patch.object(agent_core_module, "_ACTIVE_RUNS", {"session": active_runs}):
+        with patch.object(engine, "_active_runs", active_runs):
             cancel_thread.start()
             try:
                 self.assertTrue(values_started.wait(1), repr(errors))
@@ -124,6 +145,7 @@ class AgentCoreTests(unittest.TestCase):
 
     def test_session_cancel_can_preserve_the_newer_run_version(self):
         async def scenario():
+            engine = AgentCore()
             release = asyncio.Event()
 
             async def wait_for_release():
@@ -131,11 +153,13 @@ class AgentCoreTests(unittest.TestCase):
 
             older = asyncio.create_task(wait_for_release())
             newer = asyncio.create_task(wait_for_release())
-            AgentCore.track_session_run("version-boundary", 1, older)
-            AgentCore.track_session_run("version-boundary", 2, newer)
+            older_key = nico_agent_core.RunKey("chat", "version-boundary", 1)
+            newer_key = nico_agent_core.RunKey("chat", "version-boundary", 2)
+            engine.track_session_run(older_key, older)
+            engine.track_session_run(newer_key, newer)
             try:
                 self.assertEqual(
-                    AgentCore.cancel_session_runs("version-boundary", before_version=2), 1,
+                    engine.cancel_session_runs("version-boundary", before_version=2), 1,
                 )
                 await asyncio.sleep(0)
                 self.assertTrue(older.cancelled())
@@ -150,8 +174,8 @@ class AgentCoreTests(unittest.TestCase):
                     await newer
                 except asyncio.CancelledError:
                     pass
-                AgentCore.finish_session_run("version-boundary", 1, older)
-                AgentCore.finish_session_run("version-boundary", 2, newer)
+                engine.finish_session_run(older_key, older)
+                engine.finish_session_run(newer_key, newer)
 
         asyncio.run(scenario())
 
@@ -271,15 +295,6 @@ class PreparedRunContractTests(unittest.TestCase):
                 nico_agent_core.RunPolicy(**changes)
 
     def test_namespaces_and_attempts_keep_distinct_run_identity(self):
-        class EmptyTools:
-            definitions = ()
-
-            async def execute(self, name, args):
-                raise AssertionError("no tool was offered")
-
-            def can_execute_in_parallel(self, name):
-                return True
-
         keys = (
             nico_agent_core.RunKey("chat", "same", 1, 0),
             nico_agent_core.RunKey("interview", "same", 1, 0),
@@ -303,15 +318,6 @@ class PreparedRunContractTests(unittest.TestCase):
         self.assertTrue(all(hasattr(nico_agent_core, name) for name in (
             "RunKey", "RunPolicy", "PreparedRun", "RunOutcome", "ToolSnapshot",
         )))
-
-        class EmptyTools:
-            definitions = ()
-
-            async def execute(self, name, args):
-                raise AssertionError("no tool was offered")
-
-            def can_execute_in_parallel(self, name):
-                return True
 
         prepared = nico_agent_core.PreparedRun(
             key=nico_agent_core.RunKey("example", "session", 1),
@@ -413,6 +419,99 @@ class PreparedRunContractTests(unittest.TestCase):
             asyncio.run(AgentCore().execute(default_limited))
         self.assertEqual(caught.exception.code, "run_token_limit")
         self.assertEqual(default_tools.calls, 0)
+
+
+class EngineCancellationTests(unittest.TestCase):
+    def test_duplicate_attempt_cannot_replace_active_registration(self):
+        async def scenario():
+            engine = AgentCore()
+            key = nico_agent_core.RunKey("example", "duplicate", 1)
+            waiting = WaitingModel()
+            first = asyncio.create_task(engine.execute(nico_agent_core.PreparedRun(
+                key=key, model=waiting,
+                messages=({"role": "user", "content": "wait"},),
+                tools=EmptyTools(), is_current=lambda: True,
+            )))
+            try:
+                await waiting.started.wait()
+                second_model = FakeModel({"content": "late"})
+                with self.assertRaises(ModelError) as caught:
+                    await engine.execute(nico_agent_core.PreparedRun(
+                        key=key, model=second_model,
+                        messages=({"role": "user", "content": "again"},),
+                        tools=EmptyTools(), is_current=lambda: True,
+                    ))
+                self.assertEqual(caught.exception.code, "run_already_active")
+                self.assertEqual(second_model.calls, 0)
+                self.assertEqual(engine.cancel_session_runs("duplicate"), 1)
+            finally:
+                first.cancel()
+                await asyncio.gather(first, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_namespaced_cancel_keeps_other_host_running(self):
+        async def scenario():
+            engine = AgentCore()
+            chat, interview = WaitingModel(), WaitingModel()
+            tasks = [asyncio.create_task(engine.execute(nico_agent_core.PreparedRun(
+                key=nico_agent_core.RunKey(namespace, "shared", 1),
+                model=model, messages=({"role": "user", "content": "wait"},),
+                tools=EmptyTools(), is_current=lambda: True,
+            ))) for namespace, model in (("chat", chat), ("interview", interview))]
+            try:
+                await asyncio.gather(chat.started.wait(), interview.started.wait())
+                self.assertEqual(engine.cancel_session_runs("shared", namespace="chat"), 1)
+                await asyncio.sleep(0)
+                self.assertTrue(tasks[0].cancelled())
+                self.assertFalse(tasks[1].cancelled())
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_cross_thread_cancel_releases_only_its_engine_registration(self):
+        async def scenario():
+            engine = AgentCore()
+            model = WaitingModel()
+            run = nico_agent_core.PreparedRun(
+                key=nico_agent_core.RunKey("example", "threaded", 1),
+                model=model, messages=({"role": "user", "content": "wait"},),
+                tools=EmptyTools(), is_current=lambda: True,
+            )
+            task = asyncio.create_task(engine.execute(run))
+            await model.started.wait()
+            self.assertEqual(await asyncio.to_thread(engine.cancel_session_runs, "threaded"), 1)
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertEqual(engine.cancel_session_runs("threaded"), 0)
+
+        asyncio.run(scenario())
+
+    def test_identical_run_keys_in_separate_engines_do_not_cancel_each_other(self):
+        async def scenario():
+            key = nico_agent_core.RunKey("chat", "same", 1)
+            engines = [AgentCore(), AgentCore()]
+            models = [WaitingModel(), WaitingModel()]
+            tasks = [asyncio.create_task(engine.execute(nico_agent_core.PreparedRun(
+                key=key, model=model, messages=({"role": "user", "content": "wait"},),
+                tools=EmptyTools(), is_current=lambda: True,
+            ))) for engine, model in zip(engines, models)]
+            try:
+                await asyncio.gather(*(model.started.wait() for model in models))
+                cancelled = engines[0].cancel_session_runs("same")
+                await asyncio.sleep(0)
+                self.assertEqual(cancelled, 1)
+                self.assertTrue(tasks[0].cancelled())
+                self.assertFalse(tasks[1].cancelled())
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":

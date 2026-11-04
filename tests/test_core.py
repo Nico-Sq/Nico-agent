@@ -822,6 +822,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(json.loads(events[0]["detail"])["status"], "cancelled")
         self.assertEqual(AgentRuntime.cancel_session_runs(chat["id"]), 0)
 
+    def test_runtime_instances_for_one_store_share_owned_cancellation(self):
+        class WaitingProvider:
+            def __init__(self):
+                self.started = asyncio.Event()
+
+            async def complete(self, messages, tools):
+                self.started.set()
+                await asyncio.Event().wait()
+
+        async def scenario():
+            provider = WaitingProvider()
+            first = AgentRuntime(self.store, provider)
+            second = AgentRuntime(self.store, provider)
+            self.assertTrue(callable(getattr(second, "cancel_owned_session_runs", None)))
+            chat = self.store.create("chat")
+            running = self.store.claim_run(chat["id"], "chat", "active", "问题")
+            task = asyncio.create_task(first.run(running))
+            await provider.started.wait()
+            self.assertEqual(second.cancel_owned_session_runs(chat["id"]), 1)
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertEqual(second.cancel_owned_session_runs(chat["id"]), 0)
+
+        asyncio.run(scenario())
+
     def test_cancel_during_tool_batch_skips_pending_call(self):
         class ToolProvider:
             def __init__(self):

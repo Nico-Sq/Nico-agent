@@ -265,10 +265,10 @@ flowchart TB
 
 **文件：**`nico_agent_core/core.py`，必要时同包 `cancellation.py`；`nico_app/runtime.py` 仅调整桥接；测试 `packages/nico-agent-core/tests/test_core.py`、`tests/test_core.py`。**依赖：**T01。
 
-- [ ] 先写测试：两个 Engine 实例的相同 RunKey 不互相取消；取消旧版本不取消新版本；跨线程调用取消只作用于所属事件循环；运行结束后登记释放。
-- [ ] 将模块级 `_ACTIVE_RUNS` 迁为引擎实例持有的登记表，并用明确的 `RunKey` 索引；组合根为同一宿主复用同一个 Engine 实例。兼容的按 session ID 取消入口查找该实例内匹配的 key。
-- [ ] 保留 `AgentRuntime.cancel_session_runs` 的可见行为，通过实例或兼容代理调用；不得留下同时维护两份运行表的过渡状态。
-- [ ] 验证聊天补充消息、面试更正/暂停、删除会话时旧运行结果仍不能提交。
+- [x] 先写测试：两个 Engine 实例的相同 RunKey 不互相取消；取消旧版本不取消新版本；跨线程调用取消只作用于所属事件循环；运行结束后登记释放。
+- [x] 将模块级 `_ACTIVE_RUNS` 迁为引擎实例持有的登记表，并用明确的 `RunKey` 索引；组合根为同一宿主复用同一个 Engine 实例。兼容的按 session ID 取消入口查找该实例内匹配的 key。
+- [x] 保留 `AgentRuntime.cancel_session_runs` 的可见行为，通过实例或兼容代理调用；不得留下同时维护两份运行表的过渡状态。
+- [x] 验证聊天补充消息、面试更正/暂停、删除会话时旧运行结果仍不能提交。
 
 **验收：**隔离/取消测试通过，运行登记可清空；单进程语义明确。跨进程取消仍是条件任务。
 
@@ -475,3 +475,10 @@ git status --short --branch
 - **验证：**隔离 Python 环境中 `python -m unittest discover -s packages/nico-agent-core/tests -q` 18 项通过；`python -m unittest discover -s tests -q` 163 项通过；contracts 4、domain 11、application 26、adapters 11、storage 24、CLI 5、Web 2 项通过。`python scripts/check_dependency_graph.py --require-all` 和 `git diff --check` 通过；源码检索未发现 Core 导入求职、SQLite、Web/CLI 或具体适配器。
 - **参考取舍：**Pi `packages/agent/src/agent-loop.ts` 复制宿主消息后运行，予以采用；nanobot `agent/runner.py` 的运行规格与 `agent/tools/registry.py` 的统一工具入口只采用中性契约，不复制其宽泛配置；Akashic `agent/looping/session_lane.py` 的会话隔离留给 T02，`bootstrap/tools.py` 的组合根边界保持在 Nico app。三者提示调用链与本计划第 3 节一致，求职提示仍留在 application。
 - **规则与风险：**T01 的 `ToolSnapshot` 仅是端口，完整不可变授权快照与参数校验由 T04 验收；实例级取消由 T02、事件终态由 T05 验收。本项没有改变存储 schema。回退时可撤回本项代码和测试提交，保留 T00 基线记录。
+
+### T02（2026-11-03）：实例级登记和取消
+
+- **做法与原因：**移除 Core 模块级 `_ACTIVE_RUNS`，每个 `AgentCore` 以完整 `RunKey` 登记当前任务，由 `run` 统一登记及释放。相同 Store 的 `AgentRuntime` 共用一个 Engine；Web 取消通过当前账户绑定的 Runtime 定位该 Engine。保留类级 `AgentRuntime.cancel_session_runs` 兼容入口，用于现有 CLI 和旧直调路径；它只代理各 Engine，不另存运行表。面试重试将 attempt 增至 1。
+- **红绿证据：**两个 Engine 使用相同 key 时，隔离测试先得到取消数 0 而失败，改为实例登记后通过。同 Store 两个 Runtime 的实例取消入口测试先因缺少方法失败，补齐后通过。重复 attempt 替换登记的测试在暂时移除守卫后失败，恢复守卫后通过。旧版本、新版本、跨线程、命名空间和结束清理测试也覆盖实例表。
+- **验证：**隔离环境中 Core 定向 22 项、根 `test_core.py` 57 项、Web API `test_api.py` 33 项、扩展 `test_extensions.py` 21 项通过；完整根回归 164 项通过。依赖图检查无环，`git diff --check` 通过；源码检索不再出现模块级运行表或对 Core 类方法的调用。
+- **参考取舍与规则：**Akashic `agent/looping/session_lane.py` 的按会话隔离思路予以调整后采用：Nico 保留 Store 版本认领，仅把进程内取消归属交给 Engine，不引入完整 session lane。Pi `packages/agent/src/agent-loop.ts` 的每次运行局部状态予以采用；nanobot `agent/runner.py` 的 runner/宿主分界保持。类级兼容取消会广播同一 ID 到本进程各 Engine；Web 已改用当前 Store 的实例入口，CLI 仍为单 Store。本项没有跨进程取消能力或 schema 变更；回退可撤回本项代码提交。

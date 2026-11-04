@@ -15,7 +15,7 @@ from nico_storage import AuthStore, Store
 from nico_storage.auth import LoginRateLimited
 from nico_storage.backup import backup_all
 from nico_web import create_app
-from nico_web.backend import WebBackend, set_default_backend
+from nico_web.backend import WebBackend, active_runtime, set_default_backend
 
 from .config import data_dir as configured_data_dir
 from .runtime import AgentRuntime
@@ -57,7 +57,9 @@ backend = WebBackend(
     local_plugins=lambda: local_plugins,
     make_store=make_account_store,
     make_runtime=make_runtime,
-    cancel_session_runs=AgentRuntime.cancel_session_runs,
+    cancel_session_runs=lambda session_id, before_version=None: active_runtime().cancel_owned_session_runs(
+        session_id, before_version,
+    ),
     max_file_bytes=MAX_FILE_BYTES,
     extract_text=extract_text,
     login_rate_limited_error=LoginRateLimited,

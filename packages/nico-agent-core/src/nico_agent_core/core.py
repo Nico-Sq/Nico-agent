@@ -26,11 +26,6 @@ from .run import (
     RunPolicy,
 )
 
-_ACTIVE_RUNS: dict[str, dict[int, asyncio.Task]] = {}
-# Sync HTTP handlers cancel runs from worker threads while the loop updates this registry.
-_ACTIVE_RUNS_LOCK = Lock()
-
-
 class RunSuperseded(Exception):
     """The session version changed while this run was in flight."""
 
@@ -47,6 +42,7 @@ class AgentRunRequest:
     trace: "AgentRunTrace" = field(default_factory=lambda: AgentRunTrace())
     on_event: RunEventSink | None = None
     policy: RunPolicy = field(default_factory=RunPolicy)
+    key: RunKey | None = None
 
 
 @dataclass
@@ -89,6 +85,11 @@ def _message_chars(messages: list[AgentMessage]) -> int:
 
 
 class AgentCore:
+    def __init__(self) -> None:
+        self._active_runs: dict[RunKey, asyncio.Task] = {}
+        # Sync handlers may cancel work owned by another event-loop thread.
+        self._active_runs_lock = Lock()
+
     async def execute(self, prepared: PreparedRun) -> RunOutcome:
         async def execute_tool(call: dict) -> dict:
             name = call["function"]["name"]
@@ -112,35 +113,33 @@ class AgentCore:
             trace=AgentRunTrace(version=prepared.key.version, key=prepared.key),
             on_event=prepared.on_event,
             policy=prepared.policy,
+            key=prepared.key,
         )
         return RunOutcome(await self.run(request), request.trace)
 
-    @classmethod
-    def track_session_run(cls, session_id: str, version: int, task: asyncio.Task | None) -> None:
+    def track_session_run(self, key: RunKey, task: asyncio.Task | None) -> None:
         if task is not None:
-            with _ACTIVE_RUNS_LOCK:
-                _ACTIVE_RUNS.setdefault(session_id, {})[version] = task
+            with self._active_runs_lock:
+                previous = self._active_runs.get(key)
+                if previous is not None and previous is not task and not previous.done():
+                    raise ModelError("run_already_active", "该会话版本已有模型运行", 409)
+                self._active_runs[key] = task
 
-    @classmethod
-    def finish_session_run(cls, session_id: str, version: int, task: asyncio.Task | None) -> None:
-        with _ACTIVE_RUNS_LOCK:
-            runs = _ACTIVE_RUNS.get(session_id)
-            if runs and runs.get(version) is task:
-                runs.pop(version, None)
-                if not runs:
-                    _ACTIVE_RUNS.pop(session_id, None)
+    def finish_session_run(self, key: RunKey, task: asyncio.Task | None) -> None:
+        with self._active_runs_lock:
+            if self._active_runs.get(key) is task:
+                self._active_runs.pop(key, None)
 
-    @classmethod
-    def cancel_session_runs(cls, session_id: str, before_version: int | None = None) -> int:
+    def cancel_session_runs(self, session_id: str, before_version: int | None = None,
+                            namespace: str | None = None) -> int:
         """Cancel older runs, optionally keeping runs at or after a state version."""
-        with _ACTIVE_RUNS_LOCK:
-            runs = _ACTIVE_RUNS.get(session_id, {})
+        with self._active_runs_lock:
             tasks = [
-                task for version, task in runs.items()
-                if not task.done() and (before_version is None or version < before_version)
+                task for key, task in self._active_runs.items()
+                if key.session_id == session_id
+                and (namespace is None or key.namespace == namespace)
+                and not task.done() and (before_version is None or key.version < before_version)
             ]
-            if runs and not any(not task.done() for task in runs.values()):
-                _ACTIVE_RUNS.pop(session_id, None)
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -158,6 +157,9 @@ class AgentCore:
         return cancelled
 
     async def run(self, request: AgentRunRequest) -> str:
+        task = asyncio.current_task()
+        if request.key is not None:
+            self.track_session_run(request.key, task)
         try:
             if any(not isinstance(message, dict)
                    or message.get("role") not in ("system", "user", "assistant", "tool")
@@ -194,6 +196,9 @@ class AgentCore:
             request.trace.outcome = "failed"
             request.trace.error_code = classify_run_error(exc)
             raise
+        finally:
+            if request.key is not None:
+                self.finish_session_run(request.key, task)
 
     async def _model_loop(self, request: AgentRunRequest) -> str:
         for _ in range(request.policy.max_turns):
