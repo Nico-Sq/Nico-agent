@@ -381,13 +381,13 @@ flowchart TB
 **文件：**受影响包的 README/pyproject、根 `README.md`、`docs/项目定义.md`、`scripts/check_dependency_graph.py` 和 wheel 校验脚本的必要更新；保留 `EXECUTION_PLAN.md` 历史记录。**依赖：**T08—T10，T11 按条件。
 
 - [x] 再次检查所有公开 `career_agent.*` 导入、HTTP/CLI/SSE、账户隔离、数据库升级、备份恢复及现有案例；禁止静默换默认数据路径。
-- [ ] 运行受影响包测试、跨包测试、依赖图、全部 wheel 构建和源码目录外的安装 smoke test；CI 在 Python 3.11 与 3.13 的结果须有记录。
+- [x] 运行受影响包测试、跨包测试、依赖图、全部 wheel 构建和源码目录外的安装 smoke test；CI 在 Python 3.11 与 3.13 的结果须有记录。
 - [x] 将当前 CI 中遗漏的 Core、adapters、storage、CLI、Web 包级测试纳入 `.github/workflows/tests.yml`，确认安装顺序与本地构建一致。
 - [x] 对代码复杂度与重复做针对性检查；若 `crapper`、`dryer`、`mutator` 可用且能覆盖改动范围，记录其命令和结果。工具不可用时说明，不用臆造通过结果；优先保留有意义的行为测试。
 - [x] 更新架构图、包职责、插件与 bus 运行语义、第三宿主示例、性能基线和未完成条件任务。
 - [x] 对照第 1.1 节 G1—G7 填写验收矩阵。任一核心目标缺证据时写「未完成」及具体阻塞，不以测试数量替代结果。
 
-**当前门禁：本地验证通过，远端 CI 待运行。**工作流需推送后才能在 GitHub Actions 得到 Python 3.11/3.13 的实际结果；仓库规则禁止未经明确授权推送，因此第二项暂不勾选，T12 发布门禁尚未全部完成。
+**当前门禁：本地与远端 CI 均通过。**用户明确授权推送后，提交 `f44705c` 的 GitHub Actions [`tests` 运行 41823600771](https://github.com/Nico-Sq/Nico-agent/actions/runs/41823600771) 已完成；`unittest (3.11)` 和 `unittest (3.13)` 均为 success，包级、根测试、依赖图、九个 wheel 构建与源码外安装步骤全部成功。
 
 **验收：**安装后的 wheel 与源码运行行为一致，已有数据可安全打开，产品业务完整，底座可被独立宿主调用且性能/可靠性结论有证据。
 
@@ -452,14 +452,14 @@ git status --short --branch
 
 | 目标 | 状态 | 测试/基准/安装证据 | 未解决风险 |
 |---|---|---|---|
-| G1 独立底座依赖 | 本地通过 | `check_dependency_graph.py --require-all` 无环；T08 仅装 contracts/Core 的源码外测试 4 项通过 | 远端 CI 待运行 |
+| G1 独立底座依赖 | 通过 | `check_dependency_graph.py --require-all` 无环；T08 仅装 contracts/Core 的源码外测试 4 项通过；两版 CI 成功 | 未发现计划范围内风险 |
 | G2 三个宿主共用契约 | 本地通过 | 聊天、面试共用 `PreparedRun`；T08 日志宿主 4 项独立测试通过 | 日志宿主仅为接口证明，非产品 |
 | G3 工具快照与授权一致 | 本地通过 | T04 冻结快照及参数校验；`test_tool_grant_race.py`、MCP/插件授权与退休竞态测试通过 | 跨进程授权同步不在本地单进程范围 |
 | G4 事件与终态一致 | 本地通过 | Core 事件顺序、重试 attempt、Web SSE 及面试校验失败无 `done` 测试通过 | 真实模型输出质量未测 |
 | G5 并发/取消/版本安全 | 本地通过 | 进程内在途取消、同会话旧版本丢弃、Store 原子提交及账户并发测试通过 | 跨进程取消未实现；仅支持单进程本地服务 |
 | G6 模型、MCP、插件失败安全 | 本地通过 | 模型错误映射与密钥不列出、MCP 断连不重试、插件退休/异常、事件不存正文测试通过 | 不可信插件的进程隔离需另行设计 |
 | G7 性能结论可重现 | 本地通过 | `benchmarks/run_runtime.py` 固定数据 20 次；原始样本、p50/p95、错误数、RSS 与环境已保存 | 仅本机假 HTTP；真实模型网络和费用未测 |
-| 现有聊天/面试/报告/API/CLI/数据兼容 | 本地通过，远端待验 | 根测试 169 项；包级 131 项；九个 wheel 构建及源码外安装；兼容导入、升级、恢复、账户和默认路径覆盖 | GitHub Actions 3.11/3.13 结果待推送后确认 |
+| 现有聊天/面试/报告/API/CLI/数据兼容 | 通过 | 根测试 169 项；包级 131 项；九个 wheel 构建及源码外安装；兼容导入、升级、恢复、账户和默认路径覆盖；两版 CI 成功 | 真实模型回答质量仍需人工评估 |
 
 本文的实施顺序从 T00 开始。每完成一项就更新其勾选框和行动记录；计划若因真实测试或使用场景改变，先修改对应决策和验收标准，再改代码。最终目标是能独立交给不同业务使用的引擎，以及仍然可信、可恢复的面试产品。
 
@@ -536,10 +536,10 @@ git status --short --branch
 - **验证与回退：**adapters Provider 12 项、根回归 169 项通过；T12 再跑完整包级与 wheel 门禁。若共享客户端在真实端点出现兼容或稳定性回退，可撤回组合根注入，Provider 默认逐请求客户端路径仍保留。T11 只见 Console 和现有 SQLite 去重/重投，缺第二个消费者与积压指标，因此记录为未启动。
 - **参考取舍：**Pi `packages/agent/src/agent-loop.ts` 仅提供宿主与模型流的边界；nanobot `providers/openai_compat_provider.py` 对本地端点采用新客户端来规避旧 keepalive 问题，故 Nico 保留默认逐请求路径；Akashic `core/net/http.py` 的共享资源由组合根关闭的做法调整后用于 Web，未复制其多客户端池。
 
-### T12（2026-11-04）：本地发布门禁与远端 CI 待验
+### T12（2026-11-04）：发布门禁收口
 
 - **做法与原因：**CI 从仓库根目录的非发行 `pyproject.toml` 安装改为按依赖顺序安装九个实际包；加入 Core、adapters、storage、CLI、Web 包级测试、`--require-all` 依赖图和全部 wheel 构建/安装门禁。README 与项目定义同步新的包职责、第三宿主、插件退休、单 Console 渠道、共享 Web 传输和本地假端点基准；未改默认数据目录或 `EXECUTION_PLAN.md` 历史。
 - **兼容证据：**Python 3.13.9 与新装的 3.11.16 上，八个包级测试均为 131 项通过，根 `unittest` 各 169 项通过；`career_agent.*` 下 24 个模块均可导入。根测试包含 HTTP/SSE、CLI、账户并发隔离、旧导入、数据库升级、备份恢复和默认路径快照；两版本依赖图均无环。
 - **构建证据：**两版本均运行 `scripts/build_wheels.py --all` 构建九个 wheel，并运行 `scripts/verify_wheel_install.py --all` 在源码目录外的新虚拟环境安装。smoke test 验证 Web 首页/静态资源/配置/聊天、CLI/恢复命令、提示词资源、渠道入口和默认数据路径。原先 T08 的仅 Core/合同轮子独立宿主验证仍有效。
 - **复杂度与工具：**复查 T01—T10 的主路径、T10 新增传输生命周期和当前 CI/文档 diff；没有引入第二套模型循环或 MessageBus。`Get-Command` 与 Python 模块检查均未发现 `crapper`、`dryer`、`mutator`，未声称这些工具通过。YAML 能解析且包含 3.11/3.13 两版本；`git diff --check` 通过。
-- **未完成与回退：**远端 GitHub Actions 尚未运行，因仓库 `AGENTS.md` 要求明确授权后才能 `git push`。因此 T12 的 CI 结果门禁继续开放，不能把本机 Windows 复核冒充 Ubuntu CI；需获授权推送后观察两版本 Actions 并将结果写回本表。若远端失败，修复具体用例或撤回对应提交，不触碰业务数据库。真实模型网络、输出质量与跨进程部署仍在计划定义的范围外。
+- **远端结果与回退：**用户明确授权后推送提交 `f44705c`；GitHub Actions [`tests` 运行 41823600771](https://github.com/Nico-Sq/Nico-agent/actions/runs/41823600771) 的 Python 3.11、3.13 作业及各测试、依赖图、wheel 步骤均为 success。若后续环境回归，按失败用例修复或撤回单项提交，不触碰业务数据库。真实模型网络、输出质量与跨进程部署仍在计划定义的范围外。
