@@ -51,6 +51,9 @@ class ToolCatalogSnapshot:
                 return adapter
         return None
 
+    def external_names(self) -> frozenset[str]:
+        return frozenset(name for name, _ in self._external_tools)
+
     def is_read_only(self, name: str) -> bool:
         return name in self._read_only_names
 

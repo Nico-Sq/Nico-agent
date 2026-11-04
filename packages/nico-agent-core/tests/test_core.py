@@ -327,6 +327,105 @@ class AgentCoreTests(unittest.TestCase):
 
 
 class PreparedRunContractTests(unittest.TestCase):
+    def test_frozen_tool_snapshot_rejects_unknown_and_invalid_calls(self):
+        calls = [
+            {"id": "unknown", "function": {"name": "other", "arguments": "{}"}},
+            {"id": "invalid", "function": {"name": "lookup", "arguments": '{"id": 3}'}},
+            {"id": "valid", "function": {"name": "lookup", "arguments": '{"id": "one"}'}},
+        ]
+        seen = []
+
+        class Model:
+            def __init__(self):
+                self.count = 0
+
+            async def complete(self, messages, tools):
+                self.count += 1
+                if self.count == 1:
+                    return {"content": None, "tool_calls": calls, "finish_reason": "tool_calls"}
+                seen.extend(message["content"] for message in messages if message["role"] == "tool")
+                return {"content": "done", "finish_reason": "stop"}
+
+        executed = []
+
+        async def lookup(args):
+            executed.append(args)
+            return {"value": args["id"]}
+
+        snapshot = nico_agent_core.FrozenToolSnapshot((nico_agent_core.ToolBinding(
+            {"type": "function", "function": {"name": "lookup", "description": "read",
+             "parameters": {"type": "object", "properties": {"id": {"type": "string"}},
+                            "required": ["id"], "additionalProperties": False}}},
+            lookup, parallel=True,
+        ),))
+        outcome = asyncio.run(AgentCore().execute(nico_agent_core.PreparedRun(
+            key=nico_agent_core.RunKey("example", "one", 1), model=Model(),
+            messages=({"role": "user", "content": "go"},), tools=snapshot,
+            is_current=lambda: True,
+        )))
+        self.assertEqual(outcome.content, "done")
+        self.assertEqual(executed, [{"id": "one"}])
+        self.assertEqual([__import__("json").loads(value) for value in seen], [
+            {"error": "tool_not_allowed"}, {"error": "invalid_arguments"}, {"value": "one"},
+        ])
+
+    def test_frozen_snapshot_rejects_duplicate_names(self):
+        definition = {"type": "function", "function": {
+            "name": "lookup", "description": "read", "parameters": {"type": "object"},
+        }}
+
+        async def handler(args):
+            return args
+
+        binding = nico_agent_core.ToolBinding(definition, handler, parallel=True)
+        with self.assertRaises(ValueError):
+            nico_agent_core.FrozenToolSnapshot((binding, binding))
+        denied = nico_agent_core.FrozenToolSnapshot((), denied_write_names=frozenset({"write"}))
+        self.assertEqual(asyncio.run(denied.execute("write", {})),
+                         {"error": "tool_write_disabled"})
+        self.assertEqual(denied.definitions, ())
+
+    def test_frozen_snapshot_keeps_schema_and_parallel_order(self):
+        schema = {"type": "function", "function": {"name": "read", "description": "read",
+                  "parameters": {"type": "object", "properties": {"id": {"type": "string"}},
+                                 "required": ["id"]}}}
+        state = {"active": 0, "peak": 0, "order": []}
+
+        async def read(args):
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            await asyncio.sleep(0.01)
+            state["active"] -= 1
+            state["order"].append(args["id"])
+            return {"id": args["id"]}
+
+        async def write(args):
+            state["order"].append("write")
+            return {}
+
+        snapshot = nico_agent_core.FrozenToolSnapshot((
+            nico_agent_core.ToolBinding(schema, read, parallel=True),
+            nico_agent_core.ToolBinding({"type": "function", "function": {
+                "name": "write", "description": "write", "parameters": {"type": "object"},
+            }}, write, parallel=False),
+        ))
+        schema["function"]["parameters"]["properties"]["id"]["type"] = "integer"
+        calls = [{"id": name, "function": {"name": tool, "arguments": '{"id":"' + name + '"}'}}
+                 for name, tool in (("a", "read"), ("b", "read"), ("c", "write"),
+                                    ("d", "read"))]
+        self.assertEqual(snapshot.definitions[0]["function"]["parameters"]["properties"]["id"]["type"],
+                         "string")
+
+        async def execute(call):
+            return await snapshot.execute(call["function"]["name"],
+                                          __import__("json").loads(call["function"]["arguments"]))
+
+        asyncio.run(AgentCore().execute_tools(
+            calls, execute, lambda call: snapshot.can_execute_in_parallel(call["function"]["name"]),
+        ))
+        self.assertEqual(state["peak"], 2)
+        self.assertEqual(state["order"][-2:], ["write", "d"])
+
     def test_policy_rejects_invalid_limits_at_construction(self):
         for changes in ({"max_turns": 0}, {"max_tool_calls": True},
                         {"timeout_seconds": float("nan")}):

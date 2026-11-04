@@ -278,7 +278,7 @@ flowchart TB
 
 - [x] 先写测试：仅支持 complete 的模型仍能运行；支持 stream 的模型按顺序发增量；截断的工具调用绝不执行；无效结束原因返回现有稳定错误。
 - [x] 用显式 `StreamingModelPort` 或能力声明替换 Core 的动态 `getattr(stream)` 探测；在适配器入口将厂商响应转换成中性结果，禁止厂商字段进入 Core。
-- [ ] 只在外部数据入口解析工具调用 ID、名称、参数结构；内部执行使用已经验证的结构，不在每层反复猜字典形状。
+- [x] 只在外部数据入口解析工具调用 ID、名称、参数结构；内部执行使用已经验证的结构，不在每层反复猜字典形状。
 - [x] 保持当前 OpenAI Chat、Anthropic 和 demo 的差异与 SSE 对外格式；按协议适配器分别做定向测试。
 
 **验收：**完整/流式契约由类型和测试表达，工具调用截断不执行，原三类模型路径维持既有外部行为。
@@ -287,10 +287,10 @@ flowchart TB
 
 **文件：**`nico_application/tooling.py`、`nico_app/runtime.py`、`nico_agent_core` 同包工具模块、`nico_adapters/mcp.py`、`plugins.py` 的最小适配；测试 `packages/nico-application/tests/test_tooling.py`、`packages/nico-agent-core/tests/test_core.py`、`tests/test_tool_grant_race.py`、`tests/test_extensions.py`。**依赖：**T01、T03。
 
-- [ ] 先写测试：模型声明的每个工具名可在同一快照解析；未声明工具不能执行；参数 schema 错误不触发实现；只读调用可并发而非只读调用保持顺序；MCP/插件工具同名冲突被拒绝。
-- [ ] 将中性的名称解析、参数准备/校验、执行顺序和工具结果归一集中到 Core；`ToolGrantUseCases` 继续决定用户授权，宿主负责资源/会话范围。
-- [ ] 快照由本轮工具清单、已授权名称及执行器构造一次；运行开始后不能由插件热变更或另一请求修改；旧公开导入先转发以保持兼容。
-- [ ] 在最终参数确定、授权和当前版本核对之后才调用真实工具；不确定副作用不自动重试。
+- [x] 先写测试：模型声明的每个工具名可在同一快照解析；未声明工具不能执行；参数 schema 错误不触发实现；只读调用可并发而非只读调用保持顺序；MCP/插件工具同名冲突被拒绝。
+- [x] 将中性的名称解析、参数准备/校验、执行顺序和工具结果归一集中到 Core；`ToolGrantUseCases` 继续决定用户授权，宿主负责资源/会话范围。
+- [x] 快照由本轮工具清单、已授权名称及执行器构造一次；运行开始后不能由插件热变更或另一请求修改；旧公开导入先转发以保持兼容。
+- [x] 在最终参数确定、授权和当前版本核对之后才调用真实工具；不确定副作用不自动重试。
 
 **验收：**提示/模型工具声明和执行映射来自同一快照；未授权、写工具、无效参数均不会进入适配器；原竞态测试通过。
 
@@ -483,9 +483,16 @@ git status --short --branch
 - **验证：**隔离环境中 Core 定向 22 项、根 `test_core.py` 57 项、Web API `test_api.py` 33 项、扩展 `test_extensions.py` 21 项通过；完整根回归 164 项通过。依赖图检查无环，`git diff --check` 通过；源码检索不再出现模块级运行表或对 Core 类方法的调用。
 - **参考取舍与规则：**Akashic `agent/looping/session_lane.py` 的按会话隔离思路予以调整后采用：Nico 保留 Store 版本认领，仅把进程内取消归属交给 Engine，不引入完整 session lane。Pi `packages/agent/src/agent-loop.ts` 的每次运行局部状态予以采用；nanobot `agent/runner.py` 的 runner/宿主分界保持。类级兼容取消会广播同一 ID 到本进程各 Engine；Web 已改用当前 Store 的实例入口，CLI 仍为单 Store。本项没有跨进程取消能力或 schema 变更；回退可撤回本项代码提交。
 
-### T03（2026-11-04）：模型协议边界，进行中
+### T03（2026-11-04）：模型协议边界
 
 - **做法与原因：**新增显式 `StreamingModelPort`，Core 按协议选择完整或流式调用；模型工具调用在执行前检查 ID、名称和 JSON 对象参数。OpenAI Chat 适配器仅输出中性字段，流式解析在 `length` 截断时丢弃未完成工具调用；Anthropic 工具输入检查为对象。demo 与现有 SSE 事件格式保持。
 - **红绿证据：**无效工具参数曾到达执行器并继续请求模型；厂商消息字段曾穿透 OpenAI 解析；不完整流式工具参数曾返回错误而不能保留 `length` 原因；Anthropic 非对象工具输入曾通过。这些测试先失败，边界修正后通过。complete-only 模型、流增量顺序与无效结束原因也有定向测试。
 - **验证：**隔离环境 Core 25、adapters 15、旧 Provider 16、完整根回归 164 项通过；依赖图无环，`git diff --check` 通过。未连接真实模型端点。
-- **剩余：**内部执行仍沿用旧字典调用并在 application 再解析参数。下一项 T04 将使用一次验证后的结构统一执行、schema 校验和授权快照，因此本项第三个勾选保持开放。参考 nanobot `providers/base.py` 的结束原因门控予以采用；Pi `packages/agent/src/types.ts` 的中性回复边界、Akashic `agent/provider.py` 的流片段组装只取接口思路，不复制协议实现。
+- **收口：**T04 接入后，运行中的工具参数只在 Core 响应边界解析一次，再交给冻结快照做 schema 校验；旧直调入口保留兼容。参考 nanobot `providers/base.py` 的结束原因门控予以采用；Pi `packages/agent/src/types.ts` 的中性回复边界、Akashic `agent/provider.py` 的流片段组装只取接口思路，不复制协议实现。
+
+### T04（2026-11-04）：工具能力快照和执行入口
+
+- **做法与原因：**Core 新增 `ToolBinding` / `FrozenToolSnapshot`，一次冻结模型可见的定义、名称、schema、处理器和并行标记。Core 解析模型工具参数一次；快照阻断未声明名称与无效 schema，工具批处理仍按只读并发、其他顺序。application 的 `ToolCatalogSnapshot` 继续冻结已授权外部描述符与适配器，Runtime 在模型调用前把它变成 Core 快照；真正调用前复查 Store 版本和业务资源范围。写工具不声明、不进入适配器，并保留原有 `tool_write_disabled` 结果和事件。旧直调接口保留。
+- **红绿证据：**新 Core 快照契约测试先因类型缺失失败；未声明/无效参数、同名、冻结 schema 和并发顺序随后通过。迁移时旧取消批次测试因仍替换旧私有方法而等待不结束，改为观察新的已验证执行入口并使用有效只读参数后通过。MCP 写工具回归曾得到 `tool_not_allowed`，快照保留拒绝名称后恢复既有 `tool_write_disabled`。
+- **验证：**隔离环境 Core 28、application 27、授权竞态 1、扩展 21、MCP 12、Web API 33、根 Core 57 项通过；完整根回归 164 项通过，依赖图无环，`git diff --check` 通过。Core 增加 `jsonschema` 显式依赖；wheel 安装门禁留给 T12。
+- **参考取舍与风险：**nanobot `agent/tools/registry.py` 的统一 prepare/execute 入口调整后采用；Pi `packages/agent/src/agent-loop.ts` 对截断工具整批拒绝保持；Akashic `bootstrap/tools.py` 的组合根装配方向与 Nico 的 Runtime 相符，但未引入其完整生命周期。已冻结的适配器在 retire 后如何拒绝待执行调用由 T09 验收；本项不自动重试可能有副作用的工具。

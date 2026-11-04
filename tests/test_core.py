@@ -855,7 +855,7 @@ class CoreTests(unittest.TestCase):
             async def complete(self, messages, tools):
                 self.calls += 1
                 return {"tool_calls": [
-                    {"id": "read", "function": {"name": "read_material", "arguments": "{}"}},
+                    {"id": "read", "function": {"name": "read_confirmed_claims", "arguments": "{}"}},
                     {"id": "write", "function": {"name": "write_material", "arguments": "{}"}},
                 ]}
 
@@ -865,12 +865,12 @@ class CoreTests(unittest.TestCase):
             started = asyncio.Event()
             executed = []
 
-            async def wait_tool(session, call, external=None):
-                executed.append(call["function"]["name"])
+            async def wait_tool(session, name, args, snapshot):
+                executed.append(name)
                 started.set()
                 await asyncio.Event().wait()
 
-            runtime._execute_tool = wait_tool
+            runtime._execute_validated_tool = wait_tool
             chat = self.store.create("chat")
             running = self.store.claim_run(chat["id"], "chat", "active", "问题")
             task = asyncio.create_task(runtime.run(running))
@@ -882,7 +882,7 @@ class CoreTests(unittest.TestCase):
 
         provider, executed = asyncio.run(scenario())
         self.assertEqual(provider.calls, 1)
-        self.assertEqual(executed, ["read_material"])
+        self.assertEqual(executed, ["read_confirmed_claims"])
 
     def test_tool_call_limit_rejects_oversized_batch(self):
         class ExcessProvider:

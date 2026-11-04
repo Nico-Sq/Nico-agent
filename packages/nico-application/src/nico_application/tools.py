@@ -115,6 +115,11 @@ def call(store, session: dict, request: dict) -> dict:
 def run(store, session: dict, name: str, args: dict, schema: dict) -> dict:
     """Validate the arguments and dispatch one built-in operation."""
     jsonschema.validate(args, schema)
+    return run_validated(store, session, name, args)
+
+
+def run_validated(store, session: dict, name: str, args: dict) -> dict:
+    """Dispatch arguments already validated against this run's frozen schema."""
     if name == "read_interview_goal":
         return {"goal": session["goal"]}
     if name == "read_interview_materials":

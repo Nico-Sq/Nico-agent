@@ -43,6 +43,7 @@ class AgentRunRequest:
     on_event: RunEventSink | None = None
     policy: RunPolicy = field(default_factory=RunPolicy)
     key: RunKey | None = None
+    parsed_arguments: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -93,7 +94,7 @@ class AgentCore:
     async def execute(self, prepared: PreparedRun) -> RunOutcome:
         async def execute_tool(call: dict) -> dict:
             name = call["function"]["name"]
-            args = json.loads(call["function"].get("arguments") or "{}")
+            args = parsed_arguments[call["id"]]
             result = await prepared.tools.execute(name, args)
             return {"role": "tool", "tool_call_id": call["id"],
                     "content": json.dumps(result, ensure_ascii=False)}
@@ -101,6 +102,7 @@ class AgentCore:
         async def prepare_tools() -> None:
             return None
 
+        parsed_arguments: dict[str, dict] = {}
         request = AgentRunRequest(
             model=prepared.model,
             messages=list(prepared.messages),
@@ -114,6 +116,7 @@ class AgentCore:
             on_event=prepared.on_event,
             policy=prepared.policy,
             key=prepared.key,
+            parsed_arguments=parsed_arguments,
         )
         return RunOutcome(await self.run(request), request.trace)
 
@@ -231,6 +234,8 @@ class AgentCore:
                 for call in calls
             )):
                 raise ValueError("模型工具调用格式错误")
+            if len({call["id"] for call in calls}) != len(calls):
+                raise ValueError("模型工具调用 ID 重复")
             for call in calls:
                 arguments = call["function"].get("arguments", "{}")
                 if not isinstance(arguments, str):
@@ -241,6 +246,7 @@ class AgentCore:
                     raise ValueError("模型工具调用参数格式错误") from exc
                 if not isinstance(parsed, dict):
                     raise ValueError("模型工具调用参数格式错误")
+                request.parsed_arguments[call["id"]] = parsed
             if not calls:
                 if finish_reason == "tool_calls":
                     raise ModelError("model_invalid_response", "模型服务返回了无效的工具调用结果")

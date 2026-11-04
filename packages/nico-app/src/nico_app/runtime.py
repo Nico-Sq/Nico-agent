@@ -16,9 +16,11 @@ from nico_agent_core import (
     AgentCore,
     AgentRunRequest,
     AgentRunTrace,
+    FrozenToolSnapshot,
     ModelPort,
     RunKey,
     RunSuperseded,
+    ToolBinding,
     classify_run_error,
 )
 from nico_contracts.errors import ModelError
@@ -43,7 +45,8 @@ from nico_application.context import (
 )
 from nico_adapters.mcp import MCPServers
 from nico_adapters.plugins import LocalPlugins, PluginTimeout
-from nico_application.tools import READ_ONLY_TOOLS, call as run_internal, record, schemas, tool_message
+from nico_application.tools import (READ_ONLY_TOOLS, call as run_internal, record,
+                                    run_validated, schemas, tool_message)
 from nico_storage import Store
 
 logger = logging.getLogger(__name__)
@@ -179,6 +182,33 @@ class AgentRuntime:
         tools[:] = snapshot.definitions()
         return snapshot
 
+    async def _execute_validated_tool(self, session: dict, name: str, args: dict,
+                                      snapshot: ToolCatalogSnapshot) -> dict:
+        if not self.store.run_current(session["id"], session["version"]):
+            raise RunSuperseded()
+        tool = snapshot.external_tool(name)
+        if tool is None:
+            result = await asyncio.to_thread(run_validated, self.store, session, name, args)
+        else:
+            failure = "plugin_tool_failed" if tool.get("source") == "plugin" else "mcp_tool_failed"
+            if not tool_is_read_only(tool.get("read_only")):
+                result = {"error": "tool_write_disabled"}
+            else:
+                try:
+                    adapter = snapshot.external_adapter(name)
+                    if adapter is not None:
+                        result = await adapter.call(tool, args)
+                    else:
+                        result = (await self.plugins.call(tool, args)
+                                  if tool.get("source") == "plugin"
+                                  else await self.mcp.call(tool, args))
+                except PluginTimeout:
+                    result = {"error": "plugin_timeout", "may_still_be_running": True}
+                except Exception:
+                    result = {"error": failure}
+        record(self.store, session, name, result)
+        return result
+
     async def run(self, session: dict,
                   result_handler: Callable[[dict, str], dict] | None = None,
                   on_event: RunEventSink | None = None) -> dict:
@@ -212,15 +242,34 @@ class AgentRuntime:
 
             async def prepare_tools() -> None:
                 nonlocal snapshot
-                snapshot = await self._prepare_tools(session, tools)
+                catalog = await self._prepare_tools(session, tools)
+                snapshot = FrozenToolSnapshot(tuple(
+                    ToolBinding(
+                        definition,
+                        lambda args, name=definition["function"]["name"]:
+                            self._execute_validated_tool(session, name, args, catalog),
+                        parallel=catalog.is_read_only(definition["function"]["name"]),
+                    ) for definition in tools
+                ), denied_write_names=catalog.external_names() - {
+                    definition["function"]["name"] for definition in tools
+                })
+                tools[:] = snapshot.definitions
+
+            async def execute_tool(call: dict) -> dict:
+                name = call["function"]["name"]
+                result = await snapshot.execute(name, request.parsed_arguments[call["id"]])
+                if result.get("error") == "tool_write_disabled":
+                    record(self.store, session, name, result)
+                return tool_message(call, result)
 
             request = AgentRunRequest(
                 model=self.provider,
                 messages=context,
                 tools=tools,
                 is_current=lambda: self.store.run_current(session["id"], session["version"]),
-                execute_tool=lambda call: self._execute_tool(session, call, snapshot),
-                can_execute_in_parallel=lambda call: self._concurrency_safe(call, snapshot),
+                execute_tool=execute_tool,
+                can_execute_in_parallel=lambda call: snapshot.can_execute_in_parallel(
+                    call["function"]["name"]),
                 prepare_tools=prepare_tools,
                 trace=trace,
                 on_event=on_event,

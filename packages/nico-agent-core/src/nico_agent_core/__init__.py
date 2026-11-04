@@ -13,10 +13,12 @@ from .core import (
 )
 from .ports import ModelPort, StreamingModelPort, ToolSnapshot
 from .run import PreparedRun, RunKey, RunOutcome, RunPolicy
+from .tools import FrozenToolSnapshot, ToolBinding
 
 __all__ = [
     "AgentCore", "AgentRunRequest", "AgentRunTrace", "ModelPort", "RunSuperseded",
     "classify_run_error", "MAX_MODEL_INPUT_CHARS", "MAX_MODEL_OUTPUT_CHARS",
     "MAX_RUN_SECONDS", "MAX_TOOL_CALLS",
     "RunKey", "RunPolicy", "PreparedRun", "RunOutcome", "StreamingModelPort", "ToolSnapshot",
+    "FrozenToolSnapshot", "ToolBinding",
 ]

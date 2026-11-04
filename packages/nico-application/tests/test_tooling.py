@@ -87,6 +87,12 @@ class ToolingTests(unittest.TestCase):
         self.assertEqual(error.exception.kind, "unavailable")
         self.assertEqual(grants.revoke("session", "read"), [])
 
+    def test_snapshot_rejects_duplicate_external_names(self):
+        item = {"name": "same", "description": "read", "read_only": True,
+                "parameters": {"type": "object"}}
+        with self.assertRaises(ValueError):
+            ToolCatalog().snapshot([], [item, dict(item)], ["same"], [])
+
     def test_tool_grant_use_case_keeps_missing_session_error(self):
         grants = ToolGrantUseCases(FakeStore())
         with self.assertRaisesRegex(ValueError, "需要现有chat会话 ID"):
