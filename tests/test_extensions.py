@@ -358,6 +358,46 @@ TOOLS = [{"name": %r, "description": "test", "read_only": True,
         self.assertEqual(result["message"], "模型仍可运行")
         self.assertNotIn(item["name"], provider.tools)
 
+    def test_retiring_plugin_after_snapshot_rejects_pending_call(self):
+        root = Path(self.temp.name)
+        plugin = root / "reader.py"
+        plugin.write_text(
+            "def read(arguments): raise AssertionError('retired tool ran')\n"
+            "TOOLS = [{'name':'read','description':'read','read_only':True,"
+            "'parameters':{'type':'object','properties':{},'additionalProperties':False},"
+            "'run':read}]\n",
+            encoding="utf-8",
+        )
+        config = root / "reader.json"
+        config.write_text(json.dumps([{"path": plugin.name}]), encoding="utf-8")
+        plugins = LocalPlugins(config)
+        item = plugins.discover()[0]
+
+        class Provider:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, tools):
+                self.calls += 1
+                if self.calls == 1:
+                    self.asserted_tools = [tool["function"]["name"] for tool in tools]
+                    plugins.retire()
+                    return {"tool_calls": [{"id": "one", "function": {
+                        "name": item["name"], "arguments": "{}",
+                    }}]}
+                return {"content": messages[-1]["content"]}
+
+        chat = self.store.create("chat")
+        self.store.set_tool_grants(chat["id"], [item["name"]])
+        running = self.store.claim_run(chat["id"], "chat", "active", "调用插件")
+        provider = Provider()
+        result = asyncio.run(AgentRuntime(self.store, provider, plugins=plugins).run(running))
+        self.assertIn(item["name"], provider.asserted_tools)
+        self.assertIn('"error": "plugin_retired"', result["message"])
+        tool_events = [event for event in self.store.events(chat["id"], "chat")
+                       if event["kind"] == "tool"]
+        self.assertEqual(json.loads(tool_events[-1]["detail"])["result"], "plugin_retired")
+
     def test_console_channel_ends_on_exit_and_end_of_input(self):
         channel = ConsoleChannel()
         with patch("builtins.input", side_effect=["你好", "  /exit  "]):

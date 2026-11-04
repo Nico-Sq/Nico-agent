@@ -345,9 +345,9 @@ flowchart TB
 
 **文件：**`nico_adapters/plugins.py`、`nico_adapters/registry.py`、组合根关闭流程；测试插件与工具竞态。**依赖：**T04、T05。
 
-- [ ] 先写测试：插件加载失败不留下半注册工具；已开始的工具调用在 retire 后按现有超时/完成语义结束；尚未开始的调用在 retire 后被拒绝；新运行看不到已 retire 插件；close 释放可关闭资源。
-- [ ] 明确 load→prepare→activate→retire→close 的状态和错误；运行快照保持模型声明稳定，但 retire 可以使待执行调用得到明确的 `plugin_retired` 结果。关闭时先停止新调用，再按已定义的等待/拒绝策略处理在途调用。
-- [ ] 同步插件超时仍报告 `may_still_be_running`；出现非可信插件来源时另做进程隔离方案，不把线程超时包装为强取消。
+- [x] 先写测试：插件加载失败不留下半注册工具；已开始的工具调用在 retire 后按现有超时/完成语义结束；尚未开始的调用在 retire 后被拒绝；新运行看不到已 retire 插件；close 释放可关闭资源。
+- [x] 明确 load→prepare→activate→retire→close 的状态和错误；运行快照保持模型声明稳定，但 retire 可以使待执行调用得到明确的 `plugin_retired` 结果。关闭时先停止新调用，再按已定义的等待/拒绝策略处理在途调用。
+- [x] 同步插件超时仍报告 `may_still_be_running`；出现非可信插件来源时另做进程隔离方案，不把线程超时包装为强取消。
 
 **验收：**生命周期竞态可重现并通过；插件失败不破坏核心运行或污染下一轮工具目录。
 
@@ -516,3 +516,10 @@ git status --short --branch
 - **做法与原因：**Core 包测试新增 `LogbookHost`，自有摘要提示、假流式模型、只读日志工具、可选插件样式工具与结果处理；仅导入标准库、`nico_agent_core` 和 `nico_contracts`。运行身份使用 `logbook` 命名空间，不修改引擎。
 - **验证：**本机 Core 包 36 项通过，其中第三宿主 4 项覆盖工具循环/流事件、取消与登记释放、输入预算以及可选扩展。`nico-contracts` 与 `nico-agent-core` wheel 在计划专属忽略目录构建后，安装到不继承系统包的独立 Python 3.13 虚拟环境；从源码目录之外运行该测试 4 项通过。实际导入的 Core 位于该环境的 `site-packages`，`nico_application`、`nico_domain`、`nico_storage` 均不可发现。源码检索 Core 不依赖固定 chat/interview 分支或 Store 字段。
 - **参考取舍与边界：**Pi `packages/agent/src/agent-loop.ts` 允许宿主拥有自己的上下文，nanobot `agent/runner.py` 提供通用循环，Akashic `bootstrap/tools.py` 由组合根组装；Nico 第三宿主只借鉴这些边界，不复制业务或提示。此例证明包接口可复用，不声称日志摘要是可发布产品；真实插件退休竞态由 T09 验收。
+
+### T09（2026-11-04）：插件生命周期与在途一致性
+
+- **做法与原因：**`LocalPlugins` 明确 new→loaded→prepared→active→retired→closing→closed 状态，加载/准备完整成功后才发布工具目录。调用与 retire 在同一条件锁下认领，已开始的同步工具继续按原超时/完成语义返回；快照已声明但尚未调用的工具在 retire 后得到 `plugin_retired`，Runtime 记录同名安全错误。close 原子停止新调用、等待已认领调用返回、执行可选模块清理回调并清空目录；Web 生命周期复用的实例可在 close 后重新 load/activate。
+- **红绿证据：**新增 PluginRetired 导入测试先失败；快照建立后 retire 的调用测试先得到通用插件失败，现得到 `plugin_retired`；重复 Web 启动的完整回归暴露了 close 后禁止激活的问题，恢复从干净状态重载后通过。测试还覆盖部分配置失败不发布、在途调用完成、close 等待、清理回调仅一次和目录冻结。
+- **验证：**隔离环境 adapters 18、扩展 22、Web API 34、完整根回归 168 项通过，依赖图无环，`git diff --check` 通过。现有插件超时测试仍验证 `may_still_be_running`；同步函数被取消/超时后底层线程可能继续运行，不能承诺强取消。
+- **参考取舍：**Akashic `agent/plugins/manager.py` 的代际 retire/close 语义仅借鉴生命周期边界，不复制其大型管理器；nanobot `agent/tools/registry.py` 的动态增删目录在 Nico 中收束为每轮冻结；Pi `packages/agent/src/agent-loop.ts` 的工具声明与执行一致性继续由 T04 快照提供。非可信第三方插件的进程隔离需在引入该来源时另行设计。

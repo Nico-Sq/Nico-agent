@@ -2,12 +2,14 @@
 
 import asyncio
 import importlib.util
+import inspect
 import json
 import os
 import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Condition
 from types import MappingProxyType
 from typing import Callable
 
@@ -20,6 +22,10 @@ PLUGIN_TIMEOUT_SECONDS = 10.0
 
 
 class PluginTimeout(RuntimeError):
+    pass
+
+
+class PluginRetired(ValueError):
     pass
 
 
@@ -38,6 +44,10 @@ class LocalPlugins:
         self._loaded_tools = ()
         self._prepared_tools = MappingProxyType({})
         self._active_tools = MappingProxyType({})
+        self._close_hooks = ()
+        self._calls = Condition()
+        self._inflight = 0
+        self.state = "new"
         self._loaded = False
         self._prepared = False
         self.load()
@@ -45,9 +55,14 @@ class LocalPlugins:
         self.activate()
 
     def load(self) -> None:
+        if self.state == "closing":
+            raise RuntimeError("plugins are closed")
+        if self.state == "closed":
+            self.state = "new"
         if self._loaded:
             return
         pending = []
+        close_hooks = []
         if self.path:
             # 配置文件可能带 Windows 编辑器写入的 BOM，utf-8-sig 一并处理。
             entries = json.loads(self.path.read_text(encoding="utf-8-sig"))
@@ -67,10 +82,15 @@ class LocalPlugins:
                 definitions = getattr(module, "TOOLS", None)
                 if not isinstance(definitions, list):
                     raise ValueError("插件必须提供 TOOLS 列表")
+                hook = getattr(module, "close", None)
+                if callable(hook):
+                    close_hooks.append(hook)
                 for item in definitions:
                     pending.append((source.stem, item))
         self._loaded_tools = tuple(pending)
+        self._close_hooks = tuple(close_hooks)
         self._loaded = True
+        self.state = "loaded"
 
     def prepare(self) -> None:
         if not self._loaded:
@@ -102,16 +122,24 @@ class LocalPlugins:
             snapshot[name] = _PluginTool(json.dumps(descriptor, ensure_ascii=False), item["run"])
         self._prepared_tools = MappingProxyType(snapshot)
         self._prepared = True
+        self.state = "prepared"
 
     def activate(self) -> None:
+        if self.state == "closing":
+            raise RuntimeError("plugins are closed")
         if not self._loaded:
             self.load()
         if not self._prepared:
             self.prepare()
-        self._active_tools = self._prepared_tools
+        with self._calls:
+            self._active_tools = self._prepared_tools
+            self.state = "active"
 
     def retire(self) -> None:
-        self._active_tools = MappingProxyType({})
+        with self._calls:
+            self._active_tools = MappingProxyType({})
+            if self.state not in ("closing", "closed"):
+                self.state = "retired"
 
     def discover(self) -> list[dict]:
         return [json.loads(item.definition) for item in self._active_tools.values()]
@@ -120,23 +148,55 @@ class LocalPlugins:
         return {}
 
     async def call(self, item: dict, arguments: dict) -> dict:
-        tool = self._active_tools.get(item.get("name"))
-        if tool is None:
-            raise ValueError("插件工具已移除")
-        definition = json.loads(tool.definition)
-        jsonschema.validate(arguments, definition["parameters"])
+        with self._calls:
+            tool = self._active_tools.get(item.get("name"))
+            if tool is None:
+                raise PluginRetired("插件工具已移除")
+            self._inflight += 1
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(tool.run, arguments),
-                PLUGIN_TIMEOUT_SECONDS,
-            )
-        except TimeoutError as exc:
-            raise PluginTimeout("插件调用超时，后台线程可能仍在运行") from exc
-        return {"text": str(result)[:8000]}
+            definition = json.loads(tool.definition)
+            jsonschema.validate(arguments, definition["parameters"])
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(tool.run, arguments),
+                    PLUGIN_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise PluginTimeout("插件调用超时，后台线程可能仍在运行") from exc
+            return {"text": str(result)[:8000]}
+        finally:
+            with self._calls:
+                self._inflight -= 1
+                self._calls.notify_all()
 
     async def close(self) -> None:
-        self.retire()
+        if self.state == "closed":
+            return
+        with self._calls:
+            self._active_tools = MappingProxyType({})
+            self.state = "closing"
+        await asyncio.to_thread(self._wait_for_calls)
+        failure = None
+        for hook in self._close_hooks:
+            try:
+                if inspect.iscoroutinefunction(hook):
+                    await hook()
+                else:
+                    result = await asyncio.to_thread(hook)
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception as exc:
+                if failure is None:
+                    failure = exc
         self._loaded_tools = ()
         self._prepared_tools = MappingProxyType({})
+        self._close_hooks = ()
         self._loaded = False
         self._prepared = False
+        self.state = "closed"
+        if failure is not None:
+            raise failure
+
+    def _wait_for_calls(self) -> None:
+        with self._calls:
+            self._calls.wait_for(lambda: self._inflight == 0)

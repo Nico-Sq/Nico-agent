@@ -46,7 +46,7 @@ from nico_application.context import (
     prompt_version as prompt_fingerprint,
 )
 from nico_adapters.mcp import MCPServers
-from nico_adapters.plugins import LocalPlugins, PluginTimeout
+from nico_adapters.plugins import LocalPlugins, PluginRetired, PluginTimeout
 from nico_application.tools import (READ_ONLY_TOOLS, call as run_internal, record,
                                     run_validated, schemas, tool_message)
 from nico_storage import Store
@@ -149,6 +149,8 @@ class AgentRuntime:
                 raise
             except PluginTimeout:
                 result = {"error": "plugin_timeout", "may_still_be_running": True}
+            except PluginRetired:
+                result = {"error": "plugin_retired"}
             except Exception:
                 result = {"error": failure}
             record(self.store, session, name, result)
@@ -206,6 +208,8 @@ class AgentRuntime:
                                   else await self.mcp.call(tool, args))
                 except PluginTimeout:
                     result = {"error": "plugin_timeout", "may_still_be_running": True}
+                except PluginRetired:
+                    result = {"error": "plugin_retired"}
                 except Exception:
                     result = {"error": failure}
         record(self.store, session, name, result)
