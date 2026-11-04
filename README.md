@@ -19,6 +19,10 @@ python -m career_agent
 
 仓库按依赖方向拆为九个独立发行包：`nico-contracts` 和 `nico-domain` 是底层；`nico-agent-core` 依赖 contracts；`nico-application` 依赖 contracts/domain；`nico-adapters`、`nico-storage`、`nico-cli`、`nico-web` 分别实现模型/工具、存储、命令行和 HTTP 界面；`packages/nico-app` 构建 `nico-agent` wheel，并作为唯一组合根装配其余包。`career_agent.*` 保留旧导入和 `python -m` 入口。
 
+`nico-agent-core` 接收宿主构造的 `PreparedRun`（消息、运行身份、预算、不可变工具快照和当前状态判断），返回中性的 `RunOutcome`，不导入求职业务、SQLite 或 Web。聊天与面试由 application 构造各自上下文，并在 Core 结束后校验和提交业务结果。独立的日志摘要宿主示例见 [test_third_host.py](packages/nico-agent-core/tests/test_third_host.py)，仅需 contracts 与 Core 两个 wheel。Web 生命周期持有并关闭共享的模型 HTTP 客户端；各 Provider 逐请求设置地址与认证头，直接调用 Provider 的脚本和 CLI 仍自行管理客户端。
+
+插件加载、准备、激活、退休与关闭由 adapter 管理；已开始的调用按现有超时语义结束，退休后尚未开始的调用会被拒绝。渠道目前只有 Console，消息 ID 去重和投递重试由 SQLite 账本负责；尚无第二个异步消费者或队列指标，因此未启动 MessageBus。实现记录与边界见 [底座重塑执行计划](docs/superpowers/plans/2026-11-03-agent-runtime-reshaping.md)。
+
 ## 真实模型配置
 
 真实模型模式会将本次聊天消息、面试回答及获授权读取的材料发送到配置的模型服务。请先确认该服务符合你的数据使用要求。用户报告当前默认模型 `openai/gpt-oss-20b` 已能正常对话；模型服务地址和密钥不保存在仓库中。这是连接可用的用户报告，不代表工具调用、面试反馈质量或求职效果已通过评估。
@@ -95,12 +99,19 @@ python -m career_agent.restore .\nico-agent-backup.sqlite3
 ```powershell
 python -m unittest discover -s packages/nico-contracts/tests -v
 python -m unittest discover -s packages/nico-domain/tests -v
+python -m unittest discover -s packages/nico-agent-core/tests -v
 python -m unittest discover -s packages/nico-application/tests -v
+python -m unittest discover -s packages/nico-adapters/tests -v
+python -m unittest discover -s packages/nico-storage/tests -v
+python -m unittest discover -s packages/nico-cli/tests -v
+python -m unittest discover -s packages/nico-web/tests -v
 python -m unittest discover -s tests -v
-python scripts/check_dependency_graph.py
+python scripts/check_dependency_graph.py --require-all
+python scripts/build_wheels.py --all
+python scripts/verify_wheel_install.py --all
 ```
 
-GitHub Actions 会在 Python 3.11 和 3.13 上运行同一套测试；真实模型的回答质量仍需在配置好兼容端点后用真实场景评估。
+GitHub Actions 配置为在 Python 3.11 和 3.13 上运行同一套测试与 wheel 门禁；实际 CI 结果以对应提交的 Actions 运行记录为准。固定数据的本地性能样本见 [runtime-reshaping.json](benchmarks/results/runtime-reshaping.json)，可用 `python -m benchmarks.run_runtime --output benchmarks/results/runtime-reshaping.json --repeats 20` 重测。该数据使用本机假 HTTP 端点，不能代表真实模型延迟或回答质量。
 
 ## 当前功能
 
