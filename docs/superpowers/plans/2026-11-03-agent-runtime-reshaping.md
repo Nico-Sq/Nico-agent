@@ -333,9 +333,9 @@ flowchart TB
 
 **文件：**优先在 `packages/nico-agent-core/tests/` 创建独立示例/契约测试；如确有真实使用者，再添加 `examples/` 下小型宿主；不新增产品页面。**依赖：**T06、T07。
 
-- [ ] 实现一个无 `nico_application`、`nico_domain`、`nico_storage` 导入的最小宿主：自有提示、假模型、一个只读工具和结果处理。
-- [ ] 测试完整循环、流事件、取消、预算、工具快照、插件可选接入；用包独立安装环境运行该示例。
-- [ ] 查找运行底座是否仍要求 `kind == 'chat'/'interview'`、Store 字段或固定全局对象；发现即回到所属任务修正。
+- [x] 实现一个无 `nico_application`、`nico_domain`、`nico_storage` 导入的最小宿主：自有提示、假模型、一个只读工具和结果处理。
+- [x] 测试完整循环、流事件、取消、预算、工具快照、插件可选接入；用包独立安装环境运行该示例。
+- [x] 查找运行底座是否仍要求 `kind == 'chat'/'interview'`、Store 字段或固定全局对象；发现即回到所属任务修正。
 
 **验收：**第三宿主不修改 Core 即可运行；证明的是接口可复用，不声称其业务已可投入使用。
 
@@ -510,3 +510,9 @@ git status --short --branch
 - **红绿证据：**聊天和面试入口测试分别先观察到零次 `AgentCore.execute` 调用而失败，迁移后通过。面试重试测试确认 attempt 0、1 共用同一快照。既有 Core/API/CLI 测试覆盖聊天授权、旧回复失效、失败重试以及面试首题、回答、更正、跳题、暂停恢复、报告、复练和证据原文拒绝。
 - **验证：**隔离环境根 Core 59、Web API 34、MCP 12、CLI 5、application 27、domain 11 项通过；完整根回归 167 项通过，依赖图无环，`git diff --check` 通过。源码检索 Core 无题号、feedback、evidence、报告、Store 或固定 chat/interview 分支。
 - **参考取舍与风险：**Pi `packages/agent/src/agent-loop.ts` 的宿主消息复制、nanobot `agent/runner.py` 的运行规格边界、Akashic `bootstrap/tools.py` 的组合根定位予以调整后采用；Nico 的业务提示和工具描述继续留在 application 资源。首次工具发现受业务总时限约束；面试重试仅在已用工具均为快照中的只读工具时进行，重试沿用相同快照且时限取剩余值。真实模型输出的业务质量仍需人工评价。
+
+### T08（2026-11-04）：第三宿主独立安装证明
+
+- **做法与原因：**Core 包测试新增 `LogbookHost`，自有摘要提示、假流式模型、只读日志工具、可选插件样式工具与结果处理；仅导入标准库、`nico_agent_core` 和 `nico_contracts`。运行身份使用 `logbook` 命名空间，不修改引擎。
+- **验证：**本机 Core 包 36 项通过，其中第三宿主 4 项覆盖工具循环/流事件、取消与登记释放、输入预算以及可选扩展。`nico-contracts` 与 `nico-agent-core` wheel 在计划专属忽略目录构建后，安装到不继承系统包的独立 Python 3.13 虚拟环境；从源码目录之外运行该测试 4 项通过。实际导入的 Core 位于该环境的 `site-packages`，`nico_application`、`nico_domain`、`nico_storage` 均不可发现。源码检索 Core 不依赖固定 chat/interview 分支或 Store 字段。
+- **参考取舍与边界：**Pi `packages/agent/src/agent-loop.ts` 允许宿主拥有自己的上下文，nanobot `agent/runner.py` 提供通用循环，Akashic `bootstrap/tools.py` 由组合根组装；Nico 第三宿主只借鉴这些边界，不复制业务或提示。此例证明包接口可复用，不声称日志摘要是可发布产品；真实插件退休竞态由 T09 验收。
