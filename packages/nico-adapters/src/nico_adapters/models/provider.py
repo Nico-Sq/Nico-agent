@@ -22,7 +22,8 @@ class Provider(ModelPort):
     def __init__(self, mode: str | None = None, model: str | None = None,
                  base_url: str | None = None, api_key: str | None = None,
                  max_output: int | str | None = None,
-                 temperature: float | str | None = None):
+                 temperature: float | str | None = None, http_client=None):
+        self.http_client = http_client
         self.mode = mode if mode is not None else os.getenv("MODEL_PROVIDER", "demo")
         self.model = model if model is not None else os.getenv("MODEL_NAME", "").strip()
         default_url = {
@@ -112,7 +113,8 @@ class Provider(ModelPort):
         headers = {"Content-Type": "application/json", **extra}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        data = await transport.post_json(self.base_url, endpoint, headers, payload)
+        data = await transport.post_json(self.base_url, endpoint, headers, payload,
+                                         client=self.http_client)
         try:
             return adapter.parse(data)
         except (ValueError, KeyError, IndexError, TypeError) as exc:
@@ -136,5 +138,6 @@ class Provider(ModelPort):
         headers = {"Content-Type": "application/json", **extra}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        chunks = transport.post_sse(self.base_url, endpoint, headers, payload)
+        chunks = transport.post_sse(self.base_url, endpoint, headers, payload,
+                                    client=self.http_client)
         return await openai_chat.parse_stream(chunks, on_delta)

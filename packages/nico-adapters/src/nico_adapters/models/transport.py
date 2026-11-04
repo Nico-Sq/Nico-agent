@@ -3,11 +3,22 @@
 import asyncio
 import logging
 import math
+from contextlib import asynccontextmanager
 
 from nico_contracts.errors import ModelError
 
 logger = logging.getLogger(__name__)
 MAX_RETRY_AFTER_SECONDS = 30
+
+
+@asynccontextmanager
+async def _http_client(shared_client):
+    if shared_client is not None:
+        yield shared_client
+    else:
+        import httpx
+        async with httpx.AsyncClient(timeout=60) as client:
+            yield client
 
 
 def retry_delay(response) -> float | None:
@@ -43,11 +54,12 @@ def log_upstream_error(response) -> None:
     )
 
 
-async def post_json(base_url: str, endpoint: str, headers: dict, payload: dict) -> dict:
+async def post_json(base_url: str, endpoint: str, headers: dict, payload: dict,
+                    client=None) -> dict:
     """POST a JSON payload and return the decoded body, mapping failures to ModelError."""
     import httpx
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with _http_client(client) as client:
         for attempt in range(2):
             try:
                 response = await client.post(
@@ -89,11 +101,12 @@ async def post_json(base_url: str, endpoint: str, headers: dict, payload: dict) 
     raise ModelError("model_unavailable", "模型服务暂时不可用")
 
 
-async def post_sse(base_url: str, endpoint: str, headers: dict, payload: dict):
+async def post_sse(base_url: str, endpoint: str, headers: dict, payload: dict,
+                   client=None):
     """Yield data fields from a Server-Sent Events response."""
     import httpx
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with _http_client(client) as client:
         for attempt in range(2):
             try:
                 async with client.stream(

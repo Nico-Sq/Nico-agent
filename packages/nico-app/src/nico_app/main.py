@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager, suppress
 from functools import lru_cache
 from pathlib import Path
 
+import httpx
+
 from nico_adapters.models.catalog import ModelCatalog
 from nico_adapters.models.provider import Provider
 from nico_adapters.extract import MAX_FILE_BYTES, extract_text
@@ -69,6 +71,13 @@ backend = WebBackend(
 @asynccontextmanager
 async def lifespan(_app):
     local_plugins.activate()
+    model_http_client = httpx.AsyncClient(timeout=60)
+    model_providers = {id(item): item for item in (
+        provider, runtime.provider, *model_catalog.models.values(),
+    ) if isinstance(item, Provider)}.values()
+    previous_clients = [(item, item.http_client) for item in model_providers]
+    for item, _previous in previous_clients:
+        item.http_client = model_http_client
 
     async def backup_once():
         try:
@@ -94,6 +103,9 @@ async def lifespan(_app):
         with suppress(Exception):
             await local_plugins.close()
         await backup_once()
+        for item, previous in previous_clients:
+            item.http_client = previous
+        await model_http_client.aclose()
 
 
 set_default_backend(backend)

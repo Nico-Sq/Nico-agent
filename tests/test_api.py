@@ -43,6 +43,19 @@ class InterviewApiTests(unittest.TestCase):
         self.assertEqual(config["config_error"], "请设置 MODEL_NAME")
         self.assertNotIn("api_key", config)
 
+    def test_lifespan_owns_shared_model_client(self):
+        async def scenario():
+            async with main.lifespan(main.app):
+                client = main.provider.http_client
+                self.assertIsNotNone(client)
+                self.assertIs(main.model_catalog.get("default").http_client, client)
+                self.assertFalse(client.is_closed)
+            self.assertTrue(client.is_closed)
+            self.assertIsNone(main.provider.http_client)
+            self.assertIsNone(main.model_catalog.get("default").http_client)
+
+        asyncio.run(scenario())
+
     def test_account_store_factory_reuses_store_for_same_path(self):
         path = Path(self.temp.name) / "account.sqlite3"
         main.make_account_store.cache_clear()

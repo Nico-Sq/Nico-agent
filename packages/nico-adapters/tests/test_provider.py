@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
+
 from nico_adapters.models import ADAPTERS, openai_chat
 from nico_adapters.models.catalog import ModelCatalog
 from nico_adapters.models.provider import Provider
@@ -13,6 +15,56 @@ from nico_contracts.errors import ModelError
 
 
 class ModelAdapterTests(unittest.TestCase):
+    def test_shared_client_keeps_provider_headers_isolated_and_closes_at_owner(self):
+        requests = []
+
+        def respond(request):
+            requests.append((str(request.url), request.headers.get("authorization")))
+            return httpx.Response(200, json={"choices": [{
+                "message": {"content": "ok"}, "finish_reason": "stop",
+            }]})
+
+        async def scenario():
+            client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+            first = Provider(mode="openai_compatible", model="one",
+                             base_url="https://one.example/v1", api_key="first",
+                             http_client=client)
+            second = Provider(mode="openai_compatible", model="two",
+                              base_url="https://two.example/v1", api_key="second",
+                              http_client=client)
+            await first.complete([{"role": "user", "content": "one"}], [])
+            await second.complete([{"role": "user", "content": "two"}], [])
+            self.assertFalse(client.is_closed)
+            await client.aclose()
+            return client.is_closed
+
+        self.assertTrue(asyncio.run(scenario()))
+        self.assertEqual(requests, [
+            ("https://one.example/v1/chat/completions", "Bearer first"),
+            ("https://two.example/v1/chat/completions", "Bearer second"),
+        ])
+
+    def test_shared_client_is_used_for_streaming_without_leaking_headers(self):
+        requests = []
+
+        def respond(request):
+            requests.append(request.headers.get("authorization"))
+            body = (b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
+                    b'data: [DONE]\n\n')
+            return httpx.Response(200, content=body)
+
+        async def scenario():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                provider = Provider(mode="openai_compatible", model="one",
+                                    base_url="https://one.example/v1", api_key="first",
+                                    http_client=client)
+                reply = await provider.stream([{"role": "user", "content": "one"}], [], lambda _: None)
+                self.assertFalse(client.is_closed)
+                return reply
+
+        self.assertEqual(asyncio.run(scenario())["content"], "ok")
+        self.assertEqual(requests, ["Bearer first"])
+
     def test_registry_keeps_supported_protocols(self):
         self.assertIs(ADAPTERS["openai"], ADAPTERS["openai_compatible"])
         self.assertIn("anthropic", ADAPTERS)
